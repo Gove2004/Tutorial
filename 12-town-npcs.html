@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>城镇 NPC - 泰拉瑞亚模组开发教程</title>
+    <link rel="stylesheet" href="assets/prism/prism.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="11-boss.html">← 上一章</a>
+        <a href="13-worldgen.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>城镇 NPC</h1>
+        <p class="chapter-subtitle">Town NPC 让模组不只是“能打”，还“能住、能聊、能买、能成为世界的一部分”。</p>
+
+        <div class="callout callout-info">
+            <strong>Town NPC 的意义</strong>
+            如果说 Boss 提供阶段挑战，那么城镇 NPC 提供的是陪伴感、服务入口和模组世界观。一个写得好的 Town NPC，会让玩家感觉这个模组真的活在世界里。
+        </div>
+
+        <h2>Town NPC 和普通 NPC 的差别</h2>
+        <p>从代码层面看，Town NPC 仍然是 <code>ModNPC</code>。但它的行为目标完全不同：不再是威胁玩家，而是入住城镇、提供对话、开商店、在特殊情况下帮忙战斗。它需要和 Terraria 原版的居住系统、好感度系统、商店系统衔接。</p>
+
+        <div class="definition">
+            <h4>Town NPC</h4>
+            <p>Town NPC 是一种友方 NPC，会在满足条件后入住有效房屋，拥有名字、聊天内容、商店、好感度和一定的自卫行为。</p>
+        </div>
+
+        <h2>最基础的 Town NPC 配置</h2>
+        <pre><code class="language-csharp">using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ExampleMod.Content.NPCs.Town;
+
+[AutoloadHead]
+public class StarMerchant : ModNPC
+{
+    public override void SetStaticDefaults()
+    {
+        Main.npcFrameCount[Type] = Main.npcFrameCount[NPCID.Guide];
+        NPCID.Sets.ExtraFramesCount[Type] = 9;
+        NPCID.Sets.AttackFrameCount[Type] = 4;
+        NPCID.Sets.DangerDetectRange[Type] = 700;
+        NPCID.Sets.AttackType[Type] = 1;
+        NPCID.Sets.AttackTime[Type] = 90;
+        NPCID.Sets.AttackAverageChance[Type] = 30;
+    }
+
+    public override void SetDefaults()
+    {
+        NPC.townNPC = true;
+        NPC.friendly = true;
+        NPC.width = 18;
+        NPC.height = 40;
+        NPC.aiStyle = NPCAIStyleID.Passive;
+        NPC.damage = 12;
+        NPC.defense = 15;
+        NPC.lifeMax = 250;
+        NPC.HitSound = SoundID.NPCHit1;
+        NPC.DeathSound = SoundID.NPCDeath1;
+        NPC.knockBackResist = 0.5f;
+        AnimationType = NPCID.Guide;
+    }
+}</code></pre>
+
+        <p>这里有三个关键点：<code>[AutoloadHead]</code>、<code>NPC.townNPC = true</code>、<code>NPC.friendly = true</code>。少了它们，NPC 就不会按城镇 NPC 的方式工作。</p>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>
+            很多新手会漏掉 <code>[AutoloadHead]</code> 或 <code>NPC.townNPC = true</code>，然后疑惑为什么 NPC 不入住、没有头像、行为像普通 NPC。Town NPC 的基础标记一定要先齐全。
+        </div>
+
+        <h2>入住条件：CanTownNPCSpawn</h2>
+        <p>Town NPC 不应该无条件出现。通常你会给它设置一个入住前置，比如玩家拿到某个材料、击败某个 Boss、进入某个阶段。</p>
+
+        <pre><code class="language-csharp">public override bool CanTownNPCSpawn(int numTownNPCs)
+{
+    foreach (Player player in Main.ActivePlayers)
+    {
+        foreach (Item item in player.inventory)
+        {
+            if (item.type == ModContent.ItemType&lt;Items.Materials.StarOreChunk&gt;())
+                return true;
+        }
+    }
+
+    return false;
+}</code></pre>
+
+        <p>这个逻辑表示：只要任意活跃玩家背包里拿到过某种星辉矿石，这个 NPC 就可以入住。这样的条件很适合作为“你已经接触过模组资源”的轻量门槛。</p>
+
+        <h2>名字与对话</h2>
+        <p>Town NPC 的人味，很大一部分来自名字和聊天文本。哪怕功能系统完全一样，有名字、有口头禅、有对世界事件的评论，玩家就会更容易记住它。</p>
+
+        <pre><code class="language-csharp">using Terraria.Utilities;
+using System.Collections.Generic;
+
+public override List&lt;string&gt; SetNPCNameList()
+{
+    return new List&lt;string&gt; { "艾尔文", "洛塔", "星行者", "暮砂" };
+}
+
+public override string GetChat()
+{
+    WeightedRandom&lt;string&gt; chat = new WeightedRandom&lt;string&gt;();
+    chat.Add("夜空里掉下来的碎片，可不只是装饰。");
+    chat.Add("你若能把星辉矿炼成锭，我这里就有你需要的东西。", 2.0);
+    chat.Add("别小看那些发光的石头，它们比看起来更危险。");
+    return chat;
+}</code></pre>
+
+        <p><code>WeightedRandom</code> 很适合聊天文本，因为你可以让某些关键台词更常出现。这样既不会每次都完全随机，也能避免玩家来回只看到一句话。</p>
+
+        <div class="callout callout-tip">
+            <strong>写对话的建议</strong>
+            Town NPC 的对话最好能承担一点功能：提示下一步 progression、暗示合成路线、评价玩家刚打过的 Boss、顺带塑造角色气质。别把聊天内容全写成空洞段子。
+        </div>
+
+        <h2>商店：AddShops 是核心入口</h2>
+        <p>现代 tModLoader 更推荐用 <code>AddShops()</code> + <code>NPCShop</code> 配置商店。这样结构更清晰，也更方便加条件售卖。</p>
+
+        <pre><code class="language-csharp">using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+public const string ShopName = "Shop";
+
+public override void AddShops()
+{
+    var npcShop = new NPCShop(Type, ShopName)
+        .Add(ModContent.ItemType&lt;Items.Placeables.StarOreItem&gt;())
+        .Add(ModContent.ItemType&lt;Items.Placeables.StarWorkbenchItem&gt;())
+        .Add(ModContent.ItemType&lt;Items.Potions.RagePotion&gt;(), Condition.DownedEyeOfCthulhu)
+        .Add(ItemID.FallenStar);
+
+    npcShop.Register();
+}</code></pre>
+
+        <p>你可以看到：商店物品既可以是模组物品，也可以是原版物品；还可以带条件。比如打完克眼以后，才卖 Rage Potion，这就把商店也纳入了 progression。上面示例中的 <code>StarWorkbenchItem</code>，也和前面家具章节里补过的“家具放置物品”写法形成了呼应：读者如果一路按顺序学下来，会发现这些章节并不是互相断开的孤立示例。</p>
+
+        <h2>打开商店按钮</h2>
+        <pre><code class="language-csharp">public override void SetChatButtons(ref string button, ref string button2)
+{
+    button = "商店";
+}
+
+public override void OnChatButtonClicked(bool firstButton, ref string shop)
+{
+    if (firstButton)
+    {
+        shop = ShopName;
+    }
+}</code></pre>
+
+        <p>这两段代码就是最基础的商店 UI 入口：设置对话按钮文字，以及点击后指定打开哪个商店。</p>
+
+        <h2>Happiness：让 NPC 真的“住”在世界里</h2>
+        <p>Town NPC 的好感度系统会根据生物群落偏好和邻居偏好影响价格。模组 NPC 如果完全不接这套系统，就会显得和原版生态脱节。</p>
+
+        <pre><code class="language-csharp">using Terraria.GameContent.Personalities;
+
+public override void SetStaticDefaults()
+{
+    NPC.Happiness
+        .SetBiomeAffection&lt;ForestBiome&gt;(AffectionLevel.Like)
+        .SetBiomeAffection&lt;SnowBiome&gt;(AffectionLevel.Dislike)
+        .SetNPCAffection(NPCID.Merchant, AffectionLevel.Like)
+        .SetNPCAffection(NPCID.Dryad, AffectionLevel.Dislike);
+}</code></pre>
+
+        <p>这段配置会让你的 NPC 更像真实居民，而不是一个“只会卖东西的菜单入口”。玩家也会自然把它纳入住房规划。</p>
+
+        <details>
+            <summary>点击展开：为什么 Happiness 值得认真配</summary>
+            <div class="details-content">
+                <p>因为 Town NPC 在 Terraria 的设计里，本来就不是“摆在任意位置都一样”的商店机器。你接上这套系统，玩家才会真的思考这个角色喜欢住哪里、和谁关系好，从而让模组角色融入原版生活流体验。</p>
+            </div>
+        </details>
+
+        <h2>Town NPC 也能战斗</h2>
+        <p>城镇 NPC 不是完全没有战斗能力。原版很多 NPC 在怪物来袭时都会自卫，模组 NPC 也可以通过攻击参数参与。</p>
+
+        <pre><code class="language-csharp">public override void TownNPCAttackStrength(ref int damage, ref float knockback)
+{
+    damage = 18;
+    knockback = 3f;
+}
+
+public override void TownNPCAttackCooldown(ref int cooldown, ref int randExtraCooldown)
+{
+    cooldown = 20;
+    randExtraCooldown = 30;
+}</code></pre>
+
+        <p>如果你希望这个 NPC 用远程武器、法术或投掷物战斗，还可以进一步配置攻击弹幕类型和发射方式。这样它在哥布林入侵或血月时会更有存在感。</p>
+
+        <h2>房屋系统与入住排查</h2>
+        <p>很多 Town NPC 的问题其实不是代码逻辑错了，而是它根本没有可入住的有效房屋。玩家通常只会看到“为什么它不来”，但作者要学会把问题拆成两层：<strong>能不能生成</strong>，以及<strong>生成后有没有地方住</strong>。</p>
+
+        <table>
+            <thead><tr><th>现象</th><th>优先检查</th><th>常见原因</th></tr></thead>
+            <tbody>
+                <tr><td>NPC 从不出现</td><td>CanTownNPCSpawn</td><td>入住前置条件未满足</td></tr>
+                <tr><td>NPC 条件满足但不入住</td><td>房屋是否有效</td><td>缺墙、缺门、家具不合规</td></tr>
+                <tr><td>NPC 已入住但总搬走</td><td>环境是否安全</td><td>房屋被破坏、区域持续有威胁</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>
+            写 Town NPC 时，最容易误判的是“我代码肯定没问题，所以是 tModLoader 出 bug 了”。实际情况往往是房屋无效，或者前置条件根本没触发。
+        </div>
+
+        <h2>第二个聊天按钮与特殊操作</h2>
+        <p>不是所有 Town NPC 都只需要一个“商店”按钮。很多模组 NPC 还会承担兑换、切换模式、传送、重置状态等辅助功能。这个时候第二个按钮就很好用。</p>
+
+        <pre><code class="language-csharp">public override void SetChatButtons(ref string button, ref string button2)
+{
+    button = "商店";
+    button2 = "兑换";
+}
+
+public override void OnChatButtonClicked(bool firstButton, ref string shop)
+{
+    if (firstButton)
+    {
+        shop = ShopName;
+    }
+    else
+    {
+        Main.npcChatText = "先带来 10 个星辉碎片，我再给你看真正的货。";
+    }
+}</code></pre>
+
+        <p>这类写法很适合做轻量剧情推进，或者给玩家一个“下一步应该做什么”的明确提示。Town NPC 的功能不一定都要变成菜单，有时候一句对话就足够起到引导作用。</p>
+
+        <h2>让商店跟着进度变化</h2>
+        <p>真正有生命力的商店，不是开局就把所有货摆满，而是随着玩家推进逐步扩展库存。你可以按 Boss 击败状态、事件、时间、Biome 条件来挂售卖条件。</p>
+
+        <pre><code class="language-csharp">public override void AddShops()
+{
+    var npcShop = new NPCShop(Type, ShopName)
+        .Add(ModContent.ItemType&lt;Items.Placeables.StarOreItem&gt;())
+        .Add(ModContent.ItemType&lt;Items.Potions.RagePotion&gt;(), Condition.DownedEyeOfCthulhu)
+        .Add(ModContent.ItemType&lt;Items.Weapons.StarBlade&gt;(), Condition.DownedBoss2)
+        .Add(ItemID.FallenStar, Condition.TimeNight);
+
+    npcShop.Register();
+}</code></pre>
+
+        <p>这样设计的好处是：Town NPC 不会在前期信息过载，也能自然承担“阶段提醒”的职责。玩家每次打完关键节点再来找它，都会有一种世界真的在推进的感觉。</p>
+
+        <h2>Bestiary 与世界观补完</h2>
+        <pre><code class="language-csharp">using Terraria.GameContent.Bestiary;
+
+public override void SetBestiary(BestiaryDatabase database, BestiaryEntry bestiaryEntry)
+{
+    bestiaryEntry.Info.AddRange(new IBestiaryInfoElement[] {
+        BestiaryDatabaseNPCsPopulator.CommonTags.SpawnConditions.Biomes.Surface,
+        new FlavorTextBestiaryInfoElement("一个追寻星辉矿脉而来的旅商，愿意为识货的人提供稀有商品。")
+    });
+}</code></pre>
+
+        <p>Town NPC 的 Bestiary 内容虽然不影响功能，但它会显著提升成品感，尤其当你的模组想讲一点自己的世界观时。</p>
+
+        <h2>做一个完整 Town NPC 的推荐流程</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><h4>先定角色定位</h4><p>它是卖材料、卖装备、卖工具，还是承担剧情提示？</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><h4>设置入住条件</h4><p>让它和模组 progression 挂钩，而不是开局无脑出现。</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><h4>设计商店与对话</h4><p>用商品和台词共同说明这个角色为什么存在。</p></div></div>
+            <div class="step"><span class="step-number">4</span><div class="step-content"><h4>最后补 Happiness 和 Bestiary</h4><p>让它真正融入 Terraria 的生活系统。</p></div></div>
+        </div>
+
+        <h2>把 Town NPC 放回整套模组里思考</h2>
+        <p>一个真的好用的 Town NPC，通常不应该孤零零存在。它最好和你前面做过的系统形成联动：
+        比如它卖你在世界生成里会遇到的材料、提示你去挑战某个 Boss、在击败 Boss 后解锁新商店页、甚至出售和自定义群落有关的工具。这样玩家会自然觉得它不是“额外附送的商店”，而是整套模组 progression 的一部分。</p>
+
+        <div class="callout callout-danger">
+            <strong>课程级别的判断标准</strong>
+            如果删掉这个 Town NPC，你的模组主线几乎毫无变化，那它大概率还只是一个功能挂件；如果玩家会因为它的提示、商店或兑换流程少走很多弯路，那它才真正融入了你的设计。
+        </div>
+
+        <h2>本章小结</h2>
+        <p>你现在已经掌握了 Town NPC 的核心：基础标记、入住条件、名字和聊天、商店系统、Happiness、战斗能力以及 Bestiary 补完。与 Boss 相比，Town NPC 的难点不在强度，而在融入感。</p>
+        <p>下一章我们会进入世界生成。那一章开始，你的模组不只是“向现有世界添加内容”，而是真正开始改变世界本身。</p>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="11-boss.html">← Boss 制作</a>
+            <a href="13-worldgen.html">世界生成 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boss 制作 - 泰拉瑞亚模组开发教程</title>
+    <link rel="stylesheet" href="assets/prism/prism.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="10-enemies-ai.html">← 上一章</a>
+        <a href="12-town-npcs.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>Boss 制作</h1>
+        <p class="chapter-subtitle">Boss 不是“大号敌怪”，而是一场完整战斗的节奏设计、状态管理与奖励闭环。</p>
+
+        <div class="callout callout-info">
+            <strong>本章重点</strong>
+            做 Boss 时，你不再只是在写一个会动会打人的 NPC，而是在设计一场 encounter：它什么时候压迫玩家、什么时候给喘息空间、什么时候切阶段、赢了给什么。
+        </div>
+
+        <h2>Boss 与普通敌怪最大的区别</h2>
+        <p>普通敌怪更像生态填充：它们要刷得自然、打起来有特点、掉落有价值。Boss 则是一个阶段节点。玩家会专门准备、专门召唤、专门围绕它构筑装备，因此它必须比普通敌怪更讲究节奏、视觉识别、阶段切换和掉落设计。</p>
+
+        <div class="definition">
+            <h4>Boss 设计思维</h4>
+            <p>Boss 的核心不是单纯堆高血量或堆高伤害，而是把战斗拆成可识别的阶段：接近、蓄力、释放、冷却、转阶段。玩家应该能学会它，而不是纯粹被数值压死。</p>
+        </div>
+
+        <h2>一个基础 Boss 的 SetDefaults</h2>
+        <pre><code class="language-csharp">using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ExampleMod.Content.NPCs.Bosses;
+
+public class StarWarden : ModNPC
+{
+    public override void SetStaticDefaults()
+    {
+        Main.npcFrameCount[Type] = Main.npcFrameCount[NPCID.EyeofCthulhu];
+        NPCID.Sets.ShouldBeCountedAsBoss[Type] = true;
+    }
+
+    public override void SetDefaults()
+    {
+        NPC.width = 120;
+        NPC.height = 120;
+        NPC.damage = 28;
+        NPC.defense = 10;
+        NPC.lifeMax = 4800;
+        NPC.HitSound = SoundID.NPCHit4;
+        NPC.DeathSound = SoundID.NPCDeath14;
+        NPC.value = Item.buyPrice(gold: 5);
+        NPC.knockBackResist = 0f;
+        NPC.noGravity = true;
+        NPC.noTileCollide = true;
+        NPC.boss = true;
+        NPC.npcSlots = 10f;
+        Music = MusicID.Boss1;
+    }
+}</code></pre>
+
+        <p>这里最关键的几个标志是 <code>NPC.boss = true</code>、<code>NPC.noGravity = true</code>、<code>NPC.noTileCollide = true</code>、<code>NPC.npcSlots</code> 和 <code>Music</code>。它们共同定义了这不是一个普通地面敌怪，而是一个独立 Boss 遭遇。</p>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>
+            很多新手会一上来给 Boss 超高血量和超高伤害，但不设计攻击节奏。那样做出来的通常不是 Boss，而是“海绵怪 + 秒杀怪”。真正决定体验的是阶段和窗口期，而不是单纯数值。
+        </div>
+
+        <h2>Boss AI 最适合用状态机</h2>
+        <p>普通敌怪有时还可以靠简单 aiStyle 或少量判断搞定，但 Boss 几乎一定要进入状态机思维。因为它常常需要：靠近玩家、拉开距离、蓄力射击、冲锋、召唤小怪、血量阈值切换阶段。</p>
+
+        <pre><code class="language-csharp">using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.ModLoader;
+
+public class StarWarden : ModNPC
+{
+    private ref float State =&gt; ref NPC.ai[0];
+    private ref float Timer =&gt; ref NPC.ai[1];
+
+    private const int HoverState = 0;
+    private const int ShootState = 1;
+    private const int DashState = 2;
+
+    public override void AI()
+    {
+        NPC.TargetClosest();
+        Player target = Main.player[NPC.target];
+
+        if (!target.active || target.dead)
+        {
+            NPC.velocity.Y -= 0.2f;
+            if (NPC.timeLeft &gt; 10)
+                NPC.timeLeft = 10;
+            return;
+        }
+
+        Timer++;
+
+        switch ((int)State)
+        {
+            case HoverState:
+                HoverAroundTarget(target);
+                if (Timer &gt; 90)
+                {
+                    Timer = 0;
+                    State = ShootState;
+                }
+                break;
+
+            case ShootState:
+                HoverAroundTarget(target);
+                if (Timer % 20 == 0 && Main.netMode != NetmodeID.MultiplayerClient)
+                {
+                    Vector2 velocity = NPC.DirectionTo(target.Center) * 10f;
+                    Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, velocity, ProjectileID.Starfury, 18, 1f);
+                }
+                if (Timer &gt; 80)
+                {
+                    Timer = 0;
+                    State = DashState;
+                }
+                break;
+
+            case DashState:
+                if (Timer == 1)
+                {
+                    NPC.velocity = NPC.DirectionTo(target.Center) * 16f;
+                }
+                if (Timer &gt; 25)
+                {
+                    Timer = 0;
+                    State = HoverState;
+                }
+                break;
+        }
+    }
+
+    private void HoverAroundTarget(Player target)
+    {
+        Vector2 destination = target.Center + new Vector2(0f, -180f);
+        Vector2 move = destination - NPC.Center;
+        float speed = 8f;
+        if (move.Length() &gt; speed)
+            move = move.SafeNormalize(Vector2.Zero) * speed;
+        NPC.velocity = (NPC.velocity * 19f + move) / 20f;
+    }
+}</code></pre>
+
+        <p>这段代码已经构成了一个基础 Boss 闭环：悬停、射击、冲刺。它不复杂，但已经比“全程追着玩家撞”更像一场完整战斗。</p>
+
+        <h2>阶段切换：Boss 的灵魂</h2>
+        <p>Boss 的阶段切换通常由血量触发。常见做法是在生命值低于某个阈值时改变攻击循环、速度、弹幕密度或攻击方式。</p>
+
+        <pre><code class="language-csharp">if (NPC.life &lt; NPC.lifeMax * 0.5f)
+{
+    NPC.defense = 14;
+    // 第二阶段逻辑，例如缩短冷却、增加冲锋频率
+}</code></pre>
+
+        <p>但真正好的第二阶段，不只是“更快更痛”，而是打法发生可感知变化。比如第一阶段以远程压制为主，第二阶段变成高频冲锋；或者第一阶段单体攻击，第二阶段加场地控制。</p>
+
+        <details>
+            <summary>点击展开：为什么很多 Boss 第二阶段不好玩</summary>
+            <div class="details-content">
+                <p>因为它们只是把第一阶段整体加速了。玩家不会觉得“进入了新局面”，只会觉得“刚才那套更烦了”。好的二阶段应该让玩家重新调整节奏，而不是单纯接受更高数值。</p>
+            </div>
+        </details>
+
+        <h2>Boss 血条与视觉识别</h2>
+        <p>Boss 不只需要 AI，还需要“像个 Boss”。音乐、尺寸、屏幕存在感、独特攻击节奏、血条表现、召唤动画，这些共同决定玩家能否立刻识别它是一个阶段性目标。</p>
+
+        <p>需要做自定义 Boss 血条时，可以进一步接触专门的 Boss Bar 实现；但在入门阶段，先确保这个 Boss 有明确的体型、图标、音乐和节奏，比急着魔改血条更重要。</p>
+
+        <div class="callout callout-tip">
+            <strong>经验建议</strong>
+            如果一个 Boss 在静态截图里看不出“威胁感”，那它进入实战时通常也很难有压迫力。体型、位置、发光、弹幕颜色对比，都会直接影响战斗体验。
+        </div>
+
+        <h2>Boss 召唤物品</h2>
+        <p>绝大多数 Boss 都应当有一个清晰的召唤入口。这个召唤物品本身也是 progression 的一部分，因为它决定玩家什么时候、在什么条件下接触 Boss。</p>
+
+        <pre><code class="language-csharp">using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+public class StarSigil : ModItem
+{
+    public override void SetDefaults()
+    {
+        Item.width = 26;
+        Item.height = 30;
+        Item.useStyle = ItemUseStyleID.HoldUp;
+        Item.useAnimation = 30;
+        Item.useTime = 30;
+        Item.rare = ItemRarityID.Orange;
+        Item.consumable = true;
+        Item.maxStack = 20;
+    }
+
+    public override bool? UseItem(Player player)
+    {
+        if (Main.netMode != NetmodeID.MultiplayerClient)
+        {
+            NPC.SpawnOnPlayer(player.whoAmI, ModContent.NPCType&lt;StarWarden&gt;());
+        }
+        return true;
+    }
+
+    public override bool CanUseItem(Player player)
+    {
+        return !NPC.AnyNPCs(ModContent.NPCType&lt;StarWarden&gt;()) && !Main.dayTime;
+    }
+}</code></pre>
+
+        <p>这个写法让 Boss 只能在夜晚召唤，且场上不能已经存在同一个 Boss。这样的限制不仅避免逻辑混乱，也让战斗更像一个正式事件。</p>
+
+        <h2>击败事件与世界状态</h2>
+        <p>Boss 往往不仅掉装备，还会改变世界状态，比如解锁新矿石、新 NPC、新商店物品。这个时候通常会配合 <code>ModSystem</code> 记录世界进度。</p>
+
+        <pre><code class="language-csharp">using Terraria;
+using Terraria.ModLoader;
+using Terraria.ModLoader.IO;
+
+public class ExampleDownedBossSystem : ModSystem
+{
+    public static bool downedStarWarden;
+
+    public override void OnWorldLoad()
+    {
+        downedStarWarden = false;
+    }
+
+    public override void OnWorldUnload()
+    {
+        downedStarWarden = false;
+    }
+
+    public override void SaveWorldData(TagCompound tag)
+    {
+        tag["downedStarWarden"] = downedStarWarden;
+    }
+
+    public override void LoadWorldData(TagCompound tag)
+    {
+        downedStarWarden = tag.GetBool("downedStarWarden");
+    }
+}
+
+public override void OnKill()
+{
+    NPC.SetEventFlagCleared(ref ExampleDownedBossSystem.downedStarWarden, -1);
+}</code></pre>
+
+        <p>Boss 死亡时，再去把这个标志设为 true。实际项目里更推荐像上面示例那样，在 <code>OnKill()</code> 里调用 <code>NPC.SetEventFlagCleared</code> 来设置世界标志。这样不仅能记录击败状态，还会自动处理多人同步和首杀相关的世界事件联动。后续生物群落生成、NPC 商店、配方条件都可以用它判断。</p>
+
+        <h2>Boss 掉落与 Boss Bag</h2>
+        <p>Boss 掉落应该比普通敌怪更正式。尤其如果你要支持专家或大师模式，就要考虑 Boss Bag。</p>
+
+        <pre><code class="language-csharp">using Terraria.GameContent.ItemDropRules;
+
+public override void ModifyNPCLoot(NPCLoot npcLoot)
+{
+    npcLoot.Add(ItemDropRule.BossBag(ModContent.ItemType&lt;Items.BossBags.StarWardenBag&gt;()));
+
+    LeadingConditionRule notExpertRule = new LeadingConditionRule(new Conditions.NotExpert());
+    notExpertRule.OnSuccess(ItemDropRule.Common(ModContent.ItemType&lt;Items.Weapons.StarBlade&gt;()));
+    notExpertRule.OnSuccess(ItemDropRule.Common(ModContent.ItemType&lt;Items.Accessories.EmberBadge&gt;(), 2));
+    npcLoot.Add(notExpertRule);
+}</code></pre>
+
+        <p>这种结构让普通模式和专家模式掉落逻辑更清晰。普通掉落直接出在尸体上，专家则主要放进 Bag 中。若你要把教程真正做成完整交付，还应该给 Bag 本身补一个 <code>ModItem</code>：在 <code>SetStaticDefaults</code> 里标记 <code>ItemID.Sets.BossBag[Type] = true</code>，允许右键打开，并在 <code>ModifyItemLoot</code> 里复刻或扩展专家模式掉落。</p>
+
+        <h2>多部位 Boss 怎么理解</h2>
+        <p>多部位 Boss 并不一定意味着你一开始就要做完整的巨型蠕虫或机械巨构。更简单的理解是：一个主体 + 若干附属部件，它们有自己的命中盒、绘制和行为，但围绕同一战斗协同工作。</p>
+
+        <p>入门阶段不建议直接上多部位设计，因为这会同时引入同步、索引绑定、死亡时联动清理等复杂问题。你可以先把单体 Boss 做成熟，再往多部位扩展。</p>
+
+        <div class="callout callout-danger">
+            <strong>别急着一口吃成大 Boss</strong>
+            很多新手第一次做 Boss 就想做多阶段、多部位、召唤小怪、弹幕海、场地变形。结果通常是任何一个子系统出错，整场战斗都坏掉。更稳的路线是：单体 Boss → 双阶段 → 带召唤 → 再考虑多部位。
+        </div>
+
+        <h2>本章小结</h2>
+        <p>Boss 开发的关键不在“血厚不厚”，而在节奏设计。你现在已经掌握了 Boss 的基础设置、状态机 AI、阶段切换、召唤物品、世界进度标记和掉落结构。这已经足够做出一场有完整起承转合的遭遇战。</p>
+        <p>下一章我们会转到城镇 NPC。和 Boss 相比，Town NPC 的重点不再是战斗压迫，而是生活感、对话、商店与世界陪伴感。</p>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="10-enemies-ai.html">← 敌怪与 AI</a>
+            <a href="12-town-npcs.html">城镇 NPC →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

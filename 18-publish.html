@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>发布与维护 - 泰拉瑞亚模组开发教程</title>
+    <link rel="stylesheet" href="assets/prism/prism.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="17-multiplayer.html">← 上一章</a>
+        <a href="index.html">回到目录 →</a>
+    </nav>
+
+    <main>
+        <h1>发布与维护</h1>
+        <p class="chapter-subtitle">模组开发的最后一公里，不是“能运行”，而是“别人能稳定下载、理解、更新并长期游玩”。</p>
+
+        <div class="callout callout-info">
+            <strong>最后一章的重点</strong>
+            很多模组卡在这一步：作者会写内容，但不会发布；会发布，但不会维护；能维护，却没有版本管理意识。真正成熟的模组，开发只是前半段，后半段是交付和运营。
+        </div>
+
+        <h2>发布前，先别急着点上传</h2>
+        <p>发布是一个对外动作。一旦进入 Workshop，被别人订阅、评价、复盘，玩家看到的就不再是你脑子里的设计，而是磁盘里的真实产物。所以发布前至少要确认三件事：内容是不是完整闭环、资源命名和路径是否稳定、联机或世界生成等高风险部分有没有最基本验证。</p>
+
+        <div class="definition">
+            <h4>发布不是存档</h4>
+            <p>把模组发布出去，不等于“先备份一下”。它意味着你在向别人承诺：这个版本值得别人花时间下载和游玩。</p>
+        </div>
+
+        <h2>build.txt：模组元数据的入口</h2>
+        <p><code>build.txt</code> 是 tModLoader 模组非常重要的配置文件之一。它定义了显示名、作者、版本、依赖和加载顺序等关键信息。很多玩家在 Workshop 第一眼看到的模组身份，其实就是从这里开始的。</p>
+
+        <pre><code class="language-csharp">displayName = Example Mod
+author = YourName
+version = 0.1
+homepage = https://github.com/yourname/example-mod
+weakReferences = SomeOtherMod
+sortAfter = AnotherMod</code></pre>
+
+        <p>你不一定一开始就要用满所有字段，但至少显示名、作者、版本要认真维护。随着模组变大，依赖关系和加载顺序也会越来越重要。</p>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>
+            如果你依赖其他模组的内容或 API，却没有在元数据里清楚声明，玩家在缺失依赖时往往只会看到“模组报错或不工作”，而不知道真正原因。
+        </div>
+
+        <h2>版本号：不要随便写</h2>
+        <p>版本号不仅是给你自己看的，也是给玩家和未来的你看的。最简单有效的思路，就是用语义化版本：大改动升主版本，小功能升次版本，修 bug 升补丁版本。</p>
+
+        <table>
+            <thead><tr><th>版本类型</th><th>例子</th><th>适合什么情况</th></tr></thead>
+            <tbody>
+                <tr><td>主版本</td><td>2.0.0</td><td>大重构、重大破坏性改动</td></tr>
+                <tr><td>次版本</td><td>1.3.0</td><td>新增 Boss、群落、完整系统</td></tr>
+                <tr><td>补丁</td><td>1.3.2</td><td>修复 bug、平衡调整、小优化</td></tr>
+            </tbody>
+        </table>
+
+        <p>很多作者前期喜欢随手从 0.1、0.2、0.3 往上加，这没问题。但一旦开始有玩家、反馈和历史版本，最好尽快转向清晰的版本策略。</p>
+
+        <h2>Workshop 发布前要准备什么</h2>
+        <p>除了代码本身，玩家会看到的还有封面图、描述、标签、更新说明。这些都不是“可有可无的包装”，而是玩家判断这个模组值不值得装的第一层信息。</p>
+
+        <ul>
+            <li>清晰的模组名称与简介</li>
+            <li>一张足够辨识度的图标或封面</li>
+            <li>准确的标签（内容类型、玩法方向）</li>
+            <li>最低限度的安装/兼容说明</li>
+            <li>最近一次更新内容摘要</li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>发布文案建议</strong>
+            不要把简介写成“这是我做的一个模组，欢迎体验”。玩家更关心的是：这个模组加了什么、适合什么阶段、偏什么玩法、是否支持联机、是否还在更新。
+        </div>
+
+        <h2>发布前自查清单</h2>
+        <table>
+            <thead><tr><th>检查项</th><th>最低标准</th><th>为什么重要</th></tr></thead>
+            <tbody>
+                <tr><td>模组能正常加载</td><td>无明显启动报错</td><td>这是玩家的第一关体验</td></tr>
+                <tr><td>核心内容能形成闭环</td><td>至少有一条完整 progression</td><td>避免“装了但不知道玩什么”</td></tr>
+                <tr><td>图标与描述齐全</td><td>名称、简介、封面可辨识</td><td>影响订阅转化与第一印象</td></tr>
+                <tr><td>联机/世界生成风险已检查</td><td>高风险功能至少做过基本验证</td><td>减少发布后爆炸性反馈</td></tr>
+                <tr><td>版本号与更新说明明确</td><td>能看懂这是第几版、改了什么</td><td>方便维护与回溯</td></tr>
+            </tbody>
+        </table>
+
+        <h2>一次实际发布通常怎么走</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><h4>先在本地完成最后一次整体验证</h4><p>确认模组可加载、主线闭环能跑通、关键高风险功能没有明显问题。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><h4>整理发布素材</h4><p>准备好图标、Workshop 描述、标签、更新日志，以及需要特别说明的兼容信息。</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><h4>用清晰版本号打包</h4><p>别在发布前临时乱改版本号；让包体和更新日志能对应起来。</p></div></div>
+            <div class="step"><span class="step-number">4</span><div class="step-content"><h4>发布后立即自测订阅流程</h4><p>像普通玩家一样订阅、启用、建档，确认 Workshop 侧交付没有出岔子。</p></div></div>
+        </div>
+
+        <h2>第一次公开发布，建议保守一点</h2>
+        <p>第一次对外发布时，最稳的策略不是把你脑子里所有想法一次性塞进去，而是先发一个主线闭环完整、核心体验清楚、已知问题可控的版本。模组不是一锤子买卖，Workshop 允许你继续迭代；但首发版本如果太乱，玩家往往不会等你第二次解释。</p>
+
+        <div class="callout callout-warning">
+            <strong>首发策略建议</strong>
+            与其做一个 30% 完成度但系统很多的“大模组”，不如先发一个 80% 完成度、主题清晰、打磨更扎实的“小版本”。玩家更容易给出正向反馈，你后续也更容易迭代。
+        </div>
+
+        <h2>兼容性：模组一多，问题就不只在你这里</h2>
+        <p>单模组测试正常，不代表装进玩家的大整合包里也一定稳定。发布后最常见的维护成本之一，就是兼容性问题：和别的模组资源冲突、加载顺序不对、条件判断过于理想化。</p>
+
+        <p>因此你要逐渐习惯两种依赖关系：</p>
+        <ul>
+            <li><strong>强依赖</strong>：没有它就不能正常运行。</li>
+            <li><strong>弱依赖</strong>：有它时额外联动，没有也能正常运行。</li>
+        </ul>
+
+        <p>能做成弱依赖的，尽量别做强耦合。因为玩家环境远比你本地复杂。</p>
+
+        <h2>更新时最怕什么</h2>
+        <p>最怕的不是加新内容，而是改坏老存档、改断旧配方、改崩联机同步。模组每次更新，除了新增内容，你都要想：老玩家的世界和角色会不会出问题。</p>
+
+        <details>
+            <summary>点击展开：为什么“重命名”有时候比“新增”更危险</summary>
+            <div class="details-content">
+                <p>因为资源路径、内部名称、类名映射一旦稳定下来，很多内容都可能已经被玩家的世界、物品存档和外部引用依赖。你以为只是改了个更顺眼的名字，实际上可能影响读取和兼容。</p>
+            </div>
+        </details>
+
+        <h2>更新日志（Changelog）真的有用</h2>
+        <p>玩家不一定会读完整教程，但更新日志他们很可能会看。一个好的 Changelog 能同时服务三类人：玩家知道更新了什么、你自己知道改过什么、反馈问题的人知道该从哪个版本开始追。</p>
+
+        <pre><code class="language-csharp">v1.2.0
+- 新增星辉洞穴生物群落
+- 新增 Boss：星辉守望者
+- 新增 12 种武器与 3 种饰品
+- 调整星辉矿石刷新量
+- 修复联机下 Boss 第二阶段不同步问题</code></pre>
+
+        <p>这种写法已经足够清晰。它不需要文采，但必须让人一眼看出：新增了什么、改了什么、修了什么。</p>
+
+        <h2>性能与可维护性优化</h2>
+        <p>模组规模变大后，维护不只是修 bug，还包括控制复杂度。常见的优化方向有：</p>
+        <ul>
+            <li>减少每帧 AI 重计算</li>
+            <li>控制世界生成量和粒子数量</li>
+            <li>避免频繁无必要发包</li>
+            <li>清理过度重复的内容配置</li>
+            <li>把系统拆成更清晰的职责边界</li>
+        </ul>
+
+        <p>注意，这里说的可维护性不是让你过度抽象，而是让项目规模增长后依然能定位问题、修改内容、发布新版本。</p>
+
+        <div class="callout callout-warning">
+            <strong>别为了“以后可能会用”提前重构一切</strong>
+            真正有维护价值的优化，是解决已经出现的痛点：某系统难调、某类配置重复、某逻辑联机反复出错。不是为了看起来更工程化而强行抽象。
+        </div>
+
+        <h2>发布后的维护心态</h2>
+        <p>一旦有玩家开始用，你就会收到三类反馈：真正的 bug、平衡意见、误用导致的问题。不要把所有反馈都当成“必须立即改”，但也不要觉得“在我电脑上没问题就行”。成熟的维护思路，是先分辨问题类型，再决定优先级。</p>
+
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><h4>先确认可复现性</h4><p>能不能稳定重现，涉及单机还是联机，涉及哪个阶段。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><h4>再判断影响范围</h4><p>是单个物品异常，还是会破坏整个 progression 或世界存档。</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><h4>最后决定发补丁还是攒到次版本</h4><p>高影响 bug 优先补丁，小优化和小平衡可放进下一次内容更新。</p></div></div>
+        </div>
+
+        <h2>什么时候算“适合发布”</h2>
+        <p>没有完美时机，但至少应该满足以下几点：</p>
+        <ul>
+            <li>主线内容能形成完整体验闭环</li>
+            <li>核心机制有基础测试，不会一碰就坏</li>
+            <li>版本号、描述、图标、依赖信息齐全</li>
+            <li>你自己愿意以普通玩家身份装一次再玩一遍</li>
+        </ul>
+
+        <p>最后这一点尤其值得强调。所谓“以普通玩家身份装一次”，不是在开发目录里直接启动你熟悉的本地环境，而是尽可能模拟真实用户路径：订阅、启用、进游戏、建新档、推进到你最核心的内容节点。这样你会发现很多开发者自己容易忽略的问题，比如描述写得不够清楚、首个配方入口太隐蔽、某个关键材料掉率低得离谱，或者第一次接触模组时完全没人告诉玩家现在该做什么。</p>
+
+        <div class="callout callout-danger">
+            <strong>最后一条最重要</strong>
+            如果你自己都不愿意像普通玩家那样，从订阅、启用、建档、推进再玩一遍，那这个版本通常还没准备好交给别人。
+        </div>
+
+        <h2>本章小结</h2>
+        <p>模组开发的最后一段，不是继续往里塞内容，而是把已有内容组织成一个可以被别人稳定获取、理解和游玩的作品。你现在已经知道了 build.txt 的作用、版本管理的意义、Workshop 发布前该准备什么，以及发布后怎样用更成熟的心态维护模组。</p>
+        <p>至此，这套教程从环境搭建一路走到了发布与维护。你已经拥有了一条完整的 tModLoader 模组开发学习路线：从物品、武器、弹幕、Buff，到敌怪、Boss、Town NPC、世界生成、群落、UI、音频、联机和发布。接下来真正重要的，就是开始做你自己的模组，并在实践中把这些章节连起来。</p>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="17-multiplayer.html">← 多人联机同步</a>
+            <a href="index.html">返回目录首页 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

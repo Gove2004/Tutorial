@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音效与音乐 - 泰拉瑞亚模组开发教程</title>
+    <link rel="stylesheet" href="assets/prism/prism.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="15-ui.html">← 上一章</a>
+        <a href="17-multiplayer.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>音效与音乐</h1>
+        <p class="chapter-subtitle">声音不是点缀，它直接决定武器手感、Boss 压迫感和区域记忆点。</p>
+
+        <div class="callout callout-info">
+            <strong>为什么声音重要</strong>
+            同一把武器，换一套音效，手感能完全不同；同一个 Boss，换一首音乐，气场就完全变了。声音是 Terraria 模组最容易被低估的“完成度开关”。
+        </div>
+
+        <h2>音效和音乐分别承担什么职责</h2>
+        <p>音效更偏“瞬时反馈”：挥击、命中、爆炸、施法、开关界面。音乐更偏“持续氛围”：Boss 战、特殊生物群落、剧情节点。前者塑造手感，后者塑造气氛。</p>
+
+        <div class="definition">
+            <h4>声音设计的两个层次</h4>
+            <p>把音效看成操作反馈，把音乐看成场景叙事。一个优秀的模组，两者都不能缺：音效让你觉得“打中了”，音乐让你觉得“来真的了”。</p>
+        </div>
+
+        <h2>最简单的音效：直接复用原版</h2>
+        <p>在前期原型阶段，最省事也最有效的方法是直接用原版音效。它能让你先验证机制和手感，不必一上来就为每个内容准备全新声音资源。</p>
+
+        <pre><code class="language-csharp">Item.UseSound = SoundID.Item1;
+NPC.HitSound = SoundID.NPCHit4;
+NPC.DeathSound = SoundID.NPCDeath14;</code></pre>
+
+        <p>这样的写法简单却非常实用。尤其当你还在调武器速度、Boss AI 或弹幕节奏时，原版音效已经足够提供基本反馈。</p>
+
+        <div class="callout callout-tip">
+            <strong>开发顺序建议</strong>
+            先用原版音效把系统跑通，再替换成自定义音效。这样你不会把问题混在一起：到底是机制没做好，还是只是声音不对。
+        </div>
+
+        <h2>自定义音效的基本思路</h2>
+        <p>当你开始需要独特风格，比如星辉能量武器、机械 Boss、神秘洞穴环境，你就会想加自定义音效。常见做法是把音频资源放进模组资源目录，再通过音频样式对象或相关 API 调用。</p>
+
+        <pre><code class="language-csharp">using Terraria.Audio;
+
+SoundStyle starPulseSound = new SoundStyle("ExampleMod/Assets/Sounds/StarPulse");
+SoundEngine.PlaySound(starPulseSound, player.Center);</code></pre>
+
+        <p>这里的重点不是某个类名，而是资源路径思维：你的音效文件和贴图、背景一样，都是模组资产。路径稳定、命名清晰，会让后续维护轻松很多。</p>
+
+        <h2>位置音效 vs 全局音效</h2>
+        <p>并不是所有声音都应该“贴在世界坐标上”。有些声音应该跟着实体位置传播，比如爆炸、敌怪叫声、弹幕碰撞；有些声音则更像 UI 或系统提示，适合全局播放。</p>
+
+        <table>
+            <thead><tr><th>类型</th><th>例子</th><th>设计建议</th></tr></thead>
+            <tbody>
+                <tr><td>位置音效</td><td>爆炸、武器挥砍、Boss 冲刺</td><td>强化空间感</td></tr>
+                <tr><td>全局音效</td><td>界面打开、系统提示、剧情提示</td><td>强调信息到达感</td></tr>
+            </tbody>
+        </table>
+
+        <p>如果所有声音都按全局播放，战斗会失去空间感；如果所有声音都按位置播放，某些系统提示又可能不够明确。所以要根据作用选择播放方式。</p>
+
+        <h2>为武器设计音效</h2>
+        <p>武器音效最重要的是“匹配动作”。轻快短兵器需要干脆，重武器需要更厚重，魔法武器适合带能量感，召唤武器则常常更仪式化。声音必须和攻速、伤害预期、视觉表现一致。</p>
+
+        <pre><code class="language-csharp">public override void SetDefaults()
+{
+    Item.damage = 26;
+    Item.DamageType = DamageClass.Magic;
+    Item.mana = 7;
+    Item.useTime = 18;
+    Item.useAnimation = 18;
+    Item.useStyle = ItemUseStyleID.Shoot;
+    Item.UseSound = new SoundStyle("ExampleMod/Assets/Sounds/CrystalCast");
+}</code></pre>
+
+        <p>如果这把武器射速很快，却配了一个拖沓的大音效，玩家会觉得操作反馈“黏住了”；反过来，如果是巨剑却只有清脆一下，也会失重。音效设计本质上是在辅助玩家预期。</p>
+
+        <h2>Boss 音乐：让遭遇战“升格”</h2>
+        <p>Boss 音乐是所有声音里最能直接拉升完成度的一项。玩家可能忘掉某个具体技能，但很难忘掉一首配得恰到好处的 Boss 曲子。它几乎等于在告诉玩家：现在不是普通战斗，这是一个阶段事件。</p>
+
+        <pre><code class="language-csharp">public override void SetDefaults()
+{
+    NPC.boss = true;
+    Music = MusicID.Boss2;
+}</code></pre>
+
+        <p>在没有自定义音乐资源之前，先选一个适配原版音乐也是合理的。若你已经准备好了自己的 <code>.ogg</code>，则可以把音乐资源放进模组目录，再通过音乐槽位获取 API 绑定到 Boss：</p>
+
+        <pre><code class="language-csharp">using Terraria.ModLoader;
+
+public override void SetDefaults()
+{
+    NPC.boss = true;
+    Music = MusicLoader.GetMusicSlot(Mod, "Assets/Music/StarWardenTheme");
+}</code></pre>
+
+        <p>这样做的好处是：你不必改动战斗逻辑，就能独立迭代音乐资源。通常建议先把 Boss 的攻击节奏调稳，再来决定最终曲目，不然很容易出现“音乐很燃但战斗很拖”或“战斗很快但音乐铺垫太长”的违和感。</p>
+
+        <details>
+            <summary>点击展开：怎样判断一首 Boss 曲子配不配</summary>
+            <div class="details-content">
+                <p>看三件事：节奏是否和 Boss 攻击频率一致，情绪是否和 Boss 风格一致，循环播放时是否容易疲劳。不是越燃越好，而是要和战斗节奏贴合。</p>
+            </div>
+        </details>
+
+        <h2>生物群落音乐</h2>
+        <p>自定义生物群落如果没有音乐变化，往往会少一半记忆点。音乐在群落中的作用和 Boss 不一样：它不是强调紧张，而是强化环境个性。幽蓝洞穴、荒芜遗迹、星辉平原，哪怕画面看上去都不错，音乐一换，气质差别会立刻被放大。</p>
+
+        <p>因此，群落音乐最好偏氛围而不是高张力。玩家会在这里探索、挖矿、来回穿行，过于激进的音乐会疲劳得很快。</p>
+
+        <pre><code class="language-csharp">public class StarCavernBiome : ModBiome
+{
+    public override int Music =&gt; MusicLoader.GetMusicSlot(Mod, "Assets/Music/StarCavernAmbient");
+}
+</code></pre>
+
+        <p>这类写法和 Boss 音乐思路一致，只是目标不同：Boss 曲更强调事件感，Biome 曲更强调可长时间聆听的环境氛围。做课程项目时，哪怕你暂时没有原创音乐资源，也可以先把音乐槽位接口预留好，等后面替换素材时就不需要动逻辑。</p>
+
+        <h2>环境音与细节氛围</h2>
+        <p>除了主音乐和武器音效，还有一层很容易被忽略的东西：环境音。滴水、风声、微弱能量嗡鸣、远处碎石坠落感，这些不一定要持续很明显，但它们能显著增强区域沉浸感。</p>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>
+            环境音最忌讳“过度存在”。它应该让玩家在潜意识里感觉这个地方不同，而不是每隔一秒被一个夸张循环效果打断注意力。
+        </div>
+
+        <h2>声音设计的一条实用路线</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><h4>先全用原版声音跑通</h4><p>确认内容节奏和逻辑没问题。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><h4>优先替换最关键的几个声音</h4><p>比如主武器、主 Boss、核心群落音乐。</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><h4>最后补环境层和细节层</h4><p>让整体气质完整，而不是一开始就追求全量替换。</p></div></div>
+        </div>
+
+        <h2>把声音放回整套模组里看</h2>
+        <p>真正成熟的声音设计，不是把每个系统各自配一段声，而是让它们形成层次：玩家挥动武器时有清晰反馈，进入自定义 Biome 时气氛变化明显，挑战 Boss 时立刻感到遭遇战升级，打开自定义 UI 时又不会误以为进入了战斗状态。也就是说，声音是把前面那些分散章节“粘”成统一体验的重要胶水。</p>
+
+        <div class="callout callout-danger">
+            <strong>课程级别的判断标准</strong>
+            如果把你的模组静音后，玩家仍然能玩；但一旦打开声音，整个世界突然更完整、更有辨识度、更容易读懂，那么你的声音设计就开始起作用了。它不该喧宾夺主，但应该在每个关键节点都帮玩家确认“刚才到底发生了什么”。
+        </div>
+
+        <h2>常见坑</h2>
+        <ul>
+            <li>所有武器都用一种很炸的音效，缺少层次。</li>
+            <li>Boss 音乐情绪和战斗完全不匹配。</li>
+            <li>环境音太频繁，导致玩家疲劳。</li>
+            <li>只追求“声音很大”，忽视反馈节奏和辨识度。</li>
+        </ul>
+
+        <div class="callout callout-danger">
+            <strong>一个判断标准</strong>
+            闭上眼想一想：如果玩家不看屏幕，只听声音，他能不能大概分辨自己是在普通战斗、Boss 战、特殊群落，还是打开了模组界面？如果能，说明你的声音分层做对了。
+        </div>
+
+        <h2>本章小结</h2>
+        <p>声音系统的核心不是 API 多复杂，而是理解分层：操作反馈靠音效，环境叙事靠音乐，空间感靠位置音效，完成度靠细节环境音。你现在已经知道怎样先用原版声音快速迭代，再逐步换成模组自己的声音体系。</p>
+        <p>下一章我们会进入多人联机同步。这一章非常关键，因为很多单机里“看起来没问题”的模组，一到联机就会暴露出数据不同步、实体重复生成等问题。</p>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="15-ui.html">← UI 系统</a>
+            <a href="17-multiplayer.html">多人联机同步 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

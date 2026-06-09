@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模组结构与生命周期 - 泰拉瑞亚模组开发教程</title>
+    <link rel="stylesheet" href="assets/prism/prism.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-tmodloader-intro.html">← 上一章</a>
+        <a href="03-items-basics.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>模组结构与生命周期</h1>
+        <p class="chapter-subtitle">理解项目骨架和加载顺序，是后面所有内容开发的地基。</p>
+
+        <div class="callout callout-info">
+            <strong>这一章的目标</strong>
+            你不只是知道“文件放哪”，而是要理解：为什么放这里、谁会在什么时候被加载、哪些类是内容类，哪些类更像系统类。
+        </div>
+
+        <h2>先看模组的最小骨架</h2>
+        <p>
+            当你创建一个新模组时，目录通常不会很复杂，但里面已经隐含了几种不同职责的文件。最核心的有三类：
+            入口类、元数据文件、内容类。入口类定义模组本身；元数据文件帮助构建与发布；内容类则是你真正往游戏里加东西的地方。
+        </p>
+
+        <pre><code class="language-csharp">using Terraria.ModLoader;
+
+namespace ExampleMod;
+
+public class ExampleMod : Mod
+{
+    public override void Load()
+    {
+        // 模组加载时执行
+    }
+
+    public override void Unload()
+    {
+        // 模组卸载时清理静态引用
+    }
+}
+</code></pre>
+
+        <p>
+            这个 <code>Mod</code> 子类是整个模组的入口。你可以把它看成“应用程序的主上下文”，尽管很多具体内容并不会都写在这里。
+            绝大多数时候，它更适合放全局初始化、资源注册、跨系统协调，而不是塞满各种物品逻辑。
+        </p>
+
+        <div class="definition">
+            <h4>Mod 类</h4>
+            <p>
+                每个模组通常有且至少有一个继承自 <code>Mod</code> 的类。它代表这个模组本身，持有模组级别的上下文。
+                当你需要访问模组资产、注册全局行为、读取模组元信息时，通常都绕不开它。
+            </p>
+        </div>
+
+        <h2>推荐的目录组织方式</h2>
+        <p>
+            tModLoader 并不强制你必须用某个目录结构，但“能跑”和“可维护”是两回事。一个 3 个文件的小模组随便放都行，
+            可一旦你做武器、NPC、弹幕、UI、世界生成，目录不分层很快就会乱到没法找东西。
+        </p>
+
+        <pre><code class="language-csharp">ExampleMod/
+├── ExampleMod.cs
+├── build.txt
+├── description.txt
+├── Common/
+│   ├── Players/
+│   ├── Systems/
+│   └── Utilities/
+├── Content/
+│   ├── Items/
+│   ├── Projectiles/
+│   ├── NPCs/
+│   ├── Buffs/
+│   ├── Tiles/
+│   └── Biomes/
+├── Effects/
+├── UI/
+└── Assets/
+</code></pre>
+
+        <h3>为什么很多社区项目喜欢用 Common 和 Content 分层</h3>
+        <p>
+            这是一个非常实用的习惯。<code>Content</code> 目录放“真正进入游戏内容表的对象”，比如物品、NPC、弹幕、Buff；
+            <code>Common</code> 则放辅助逻辑，比如自定义玩家数据、通用系统、工具函数、共享常量。这样你一眼就能分辨：
+            某个类到底是在“注册新内容”，还是在“支撑这些内容运行”。
+        </p>
+
+        <div class="callout callout-tip">
+            <strong>经验建议</strong>
+            如果一个类本身不会作为游戏内容直接出现，而只是为其他内容服务，那它更适合放进 <code>Common</code> 或 <code>Systems</code>，而不是硬塞进 Content。
+        </div>
+
+        <h2>Autoload 机制：为什么你写了类，它就自己进游戏了</h2>
+        <p>
+            很多初学者第一次看到 <code>ModItem</code> 时都会疑惑：我明明没写“注册物品”的代码，为什么它已经生效了？答案就在 Autoload 机制里。
+            tModLoader 会扫描程序集中的特定类型，只要它们符合加载条件，就会自动注册到内容系统中。
+        </p>
+
+        <div class="definition">
+            <h4>Autoload</h4>
+            <p>
+                Autoload 就是自动加载机制。它会帮你把符合规则的类自动注册为内容对象，因此你通常不用手写一份“把每个物品一个个 Add 进去”的清单。
+            </p>
+        </div>
+
+        <h3>哪些类型通常会被自动加载</h3>
+        <ul>
+            <li><code>ModItem</code>：物品</li>
+            <li><code>ModProjectile</code>：弹幕</li>
+            <li><code>ModNPC</code>：敌怪 / Boss / 城镇 NPC</li>
+            <li><code>ModBuff</code>：Buff 与 Debuff</li>
+            <li><code>ModTile</code>：物块与家具</li>
+            <li><code>ModSystem</code>：系统级逻辑</li>
+        </ul>
+
+        <p>
+            也正因为有 Autoload，你会发现 tModLoader 项目更像“约定优于配置”。只要你按框架约定写类、放资源、使用正确命名，很多事情它都会自动接起来。
+        </p>
+
+        <details>
+            <summary>点击展开：什么时候会想要关闭或绕开自动加载</summary>
+            <div class="details-content">
+                <p>
+                    比如你在做实验性内容、跨版本兼容、条件注册，或者某个类需要按配置决定是否启用。这时你就会更在意哪些类默认会被扫描，哪些内容需要手动控制。
+                    初学阶段不用太急着深挖，但你要知道自动加载不是“魔法”，只是框架层做了扫描和注册。
+                </p>
+            </div>
+        </details>
+
+        <h2>ModContent：从“类”走到“已注册内容”的桥</h2>
+        <p>
+            写代码时你经常会遇到一个问题：类已经定义了，但游戏内部很多地方需要的是数值 ID、类型索引或已注册的内容引用。
+            <code>ModContent</code> 就是用来解决这个问题的静态入口。
+        </p>
+
+        <pre><code class="language-csharp">int itemType = ModContent.ItemType&lt;Content.Items.DebugSword&gt;();
+int projectileType = ModContent.ProjectileType&lt;Content.Projectiles.StarBolt&gt;();
+int buffType = ModContent.BuffType&lt;Content.Buffs.RageBuff&gt;();
+</code></pre>
+
+        <p>
+            你可以把它理解为“向 tModLoader 索取已注册内容的官方方式”。它不是创建对象，而是告诉框架：
+            “请把这个类对应的运行时类型 ID 给我，我要把它填到别的配置里。”
+        </p>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>
+            这里返回的通常不是 C# 意义上的实例对象，而是内容类型索引。很多 API 需要的就是这个索引，而不是你自己 new 出来的对象。
+        </div>
+
+        <h2>加载阶段：理解生命周期比背方法名更重要</h2>
+        <p>
+            tModLoader 的一大特点，是它不是“所有东西一次性跑完”，而是分阶段加载。不同阶段适合做不同的事。
+            如果你在错误时机做初始化，最轻是拿到 null，最重是整个模组加载失败。
+        </p>
+
+        <h3>你可以先记住这几个关键阶段</h3>
+        <table>
+            <thead>
+                <tr><th>阶段</th><th>作用</th><th>适合做什么</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Load</td><td>模组资源和类型开始装载</td><td>注册系统、读取资产、初始化静态内容</td></tr>
+                <tr><td>PostSetupContent</td><td>所有内容都已基本注册完成</td><td>引用其他模组内容、做跨模组检查</td></tr>
+                <tr><td>AddRecipes / PostAddRecipes</td><td>配方系统建立阶段</td><td>添加或调整配方</td></tr>
+                <tr><td>Unload</td><td>模组卸载</td><td>清理静态引用，防止热重载残留</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            社区里常会把加载顺序讲得很细，但你前期真正需要掌握的是：<strong>不要过早依赖尚未注册完成的内容，不要忘记清理静态引用。</strong>
+            这两个原则能帮你避开很多诡异错误。
+        </p>
+
+        <pre><code class="language-csharp">public class ExampleMod : Mod
+{
+    public static object CachedReference;
+
+    public override void Load()
+    {
+        CachedReference = new object();
+    }
+
+    public override void Unload()
+    {
+        CachedReference = null;
+    }
+}
+</code></pre>
+
+        <h3>为什么 Unload 很重要</h3>
+        <p>
+            因为游戏和模组开发都经常涉及热加载、重新加载、切换世界。只要你保留了不该保留的静态引用，就可能导致旧对象挂住、数据脏掉、资源释放不完整。
+            很多“明明重载了模组却还像旧逻辑在运行”的问题，本质上都和清理不彻底有关。
+        </p>
+
+        <h2>元数据文件：别把它当成无聊配置</h2>
+        <p>
+            除了 C# 代码，模组通常还会有 <code>build.txt</code> 和 <code>description.txt</code> 这类文件。它们决定了模组显示名、作者、版本、简介、依赖等信息，
+            同时也会影响构建和发布体验。
+        </p>
+
+        <pre><code class="language-csharp">displayName = Example Mod
+author = YourName
+version = 0.1
+</code></pre>
+
+        <p>
+            刚开始你可能只填最基本的信息，但随着项目变大，这些元数据会越来越重要。比如版本号会影响玩家更新认知，依赖信息会影响加载顺序与兼容性判断。
+        </p>
+
+        <div class="callout callout-danger">
+            <strong>常见错误</strong>
+            很多人重命名模组时只改了显示名，没改内部目录、命名空间和资源路径，结果导致贴图丢失、引用错乱。内部名一旦稳定，尽量少反复改。
+        </div>
+
+        <h2>给新手的一套可维护习惯</h2>
+        <p>
+            如果你准备认真做一个模组，而不是只写几个实验文件，我建议从第二章开始就养成下面这套习惯：
+        </p>
+        <ol>
+            <li>内容类和系统类分目录放。</li>
+            <li>一个类尽量只做一种职责。</li>
+            <li>类名、贴图文件名、资源路径保持一致。</li>
+            <li>需要全局共享的逻辑放 Common，不要复制粘贴到每个内容类。</li>
+            <li>凡是用了静态缓存，就考虑 Unload 如何清理。</li>
+        </ol>
+
+        <p>
+            这些听起来像工程洁癖，但实际上它们会直接影响你三周后还能不能看懂自己写过什么。
+        </p>
+
+        <h2>本章小结</h2>
+        <p>
+            现在你应该已经知道，一个 tModLoader 模组并不是“随便堆 C# 文件”的集合，而是一个有入口类、有自动加载机制、有生命周期分层、有内容注册系统的完整工程。
+            这套结构理解透了，后面每加一个物品、每写一个 NPC，你都会更清楚自己是在把内容挂到哪一层。
+        </p>
+        <p>
+            下一章我们进入最适合作为练手对象的系统：物品。因为物品是最容易看见结果、又最能练到内容注册思维的一类对象。
+        </p>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="01-tmodloader-intro.html">← tModLoader 概述与环境搭建</a>
+            <a href="03-items-basics.html">物品基础 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

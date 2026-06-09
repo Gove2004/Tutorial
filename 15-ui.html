@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UI 系统 - 泰拉瑞亚模组开发教程</title>
+    <link rel="stylesheet" href="assets/prism/prism.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="14-biomes.html">← 上一章</a>
+        <a href="16-sound-music.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>UI 系统</h1>
+        <p class="chapter-subtitle">当模组开始拥有自己的面板、条形 HUD 和交互窗口时，它就不再只是“世界内容”，而是在改写玩家的信息入口。</p>
+
+        <div class="callout callout-info">
+            <strong>UI 的价值</strong>
+            很多模组机制并不适合只靠聊天文本或 Buff 图标表达。资源条、专属技能槽、合成面板、状态窗口，这些都需要 UI 系统来承载。
+        </div>
+
+        <h2>tModLoader UI 的基本架构</h2>
+        <p>tModLoader 的 UI 通常围绕几个核心类展开：<code>UIState</code> 负责组织一个界面树，<code>UserInterface</code> 负责管理当前显示的状态，<code>ModSystem</code> 则常用来控制何时显示、何时更新、何时插入到主界面层。</p>
+
+        <div class="definition">
+            <h4>UIState</h4>
+            <p>你可以把 <code>UIState</code> 理解成“一个完整界面页面”或“一个面板根节点”。它下面可以挂文本、图片、按钮、滚动条、物品槽等各种 UI 元素。</p>
+        </div>
+
+        <h2>一个最基础的 UIState</h2>
+        <pre><code class="language-csharp">using Terraria.GameContent.UI.Elements;
+using Terraria.UI;
+
+namespace ExampleMod.Common.UI;
+
+public class StarInfoUI : UIState
+{
+    public UIPanel Panel;
+    public UIText Label;
+
+    public override void OnInitialize()
+    {
+        Panel = new UIPanel();
+        Panel.Left.Set(400f, 0f);
+        Panel.Top.Set(200f, 0f);
+        Panel.Width.Set(260f, 0f);
+        Panel.Height.Set(120f, 0f);
+
+        Label = new UIText("星辉能量：0");
+        Label.Left.Set(16f, 0f);
+        Label.Top.Set(16f, 0f);
+
+        Panel.Append(Label);
+        Append(Panel);
+    }
+}</code></pre>
+
+        <p>这就是最基础的一块 UI：一个面板，里面放一段文字。看起来简单，但已经包含了 UI 系统最核心的几个概念：根状态、子元素、位置和尺寸。</p>
+
+        <h2>布局系统：Left / Top / Width / Height</h2>
+        <p>tModLoader UI 的布局不是网页式流布局，而是显式坐标 + 百分比混合布局。你经常会看到这样的写法：</p>
+
+        <pre><code class="language-csharp">Panel.Left.Set(400f, 0f);
+Panel.Top.Set(200f, 0f);
+Panel.Width.Set(260f, 0f);
+Panel.Height.Set(120f, 0f);</code></pre>
+
+        <p>每个 <code>Set</code> 都有两个值：像素偏移和百分比偏移。最常见的入门写法是像上面这样，用纯像素定位。等你做响应式或居中布局时，再更多利用百分比。</p>
+
+        <div class="callout callout-tip">
+            <strong>入门建议</strong>
+            刚开始做 UI，先用纯像素布局把界面跑起来。等逻辑稳定之后，再慢慢调整为更优雅的相对定位。不要一开始就把自己困在复杂布局调试里。
+        </div>
+
+        <h2>用 ModSystem 管理 UI 生命周期</h2>
+        <p>单有 <code>UIState</code> 还不够，你还需要一个地方创建它、持有它，并在界面层里更新与绘制。这个职责通常放在 <code>ModSystem</code> 中。</p>
+
+        <pre><code class="language-csharp">using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.GameContent.UI.Elements;
+using Terraria.UI;
+using Terraria.ModLoader;
+using System.Collections.Generic;
+
+namespace ExampleMod.Common.Systems;
+
+public class UISystem : ModSystem
+{
+    internal UserInterface StarInterface;
+    internal Common.UI.StarInfoUI StarUI;
+
+    public override void Load()
+    {
+        StarUI = new Common.UI.StarInfoUI();
+        StarUI.Activate();
+        StarInterface = new UserInterface();
+        StarInterface.SetState(StarUI);
+    }
+
+    public override void UpdateUI(GameTime gameTime)
+    {
+        StarInterface?.Update(gameTime);
+    }
+
+    public override void ModifyInterfaceLayers(List&lt;GameInterfaceLayer&gt; layers)
+    {
+        int inventoryIndex = layers.FindIndex(layer =&gt; layer.Name.Equals("Vanilla: Inventory"));
+        if (inventoryIndex != -1)
+        {
+            layers.Insert(inventoryIndex, new LegacyGameInterfaceLayer(
+                "ExampleMod: Star UI",
+                delegate
+                {
+                    StarInterface.Draw(Main.spriteBatch, new GameTime());
+                    return true;
+                },
+                InterfaceScaleType.UI));
+        }
+    }
+}</code></pre>
+
+        <p>这里最关键的入口是 <code>ModifyInterfaceLayers</code>。它让你把自定义 UI 插进 Terraria 原版界面的某一层附近。插在不同层位，显示效果也会不同。</p>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>
+            UI 层级位置很重要。放错层，界面可能被背包遮住、压在地图下面，或者挡住原版重要 UI。通常要根据你的界面性质决定是更靠前还是更靠后。
+        </div>
+
+        <h2>动态更新文本</h2>
+        <p>UI 如果只显示静态文字，那只是装饰。大多数情况下，它应该反映玩家当前状态，比如资源值、技能冷却、Boss 机制、区域信息。</p>
+
+        <pre><code class="language-csharp">public override void Update(GameTime gameTime)
+{
+    base.Update(gameTime);
+    Player player = Main.LocalPlayer;
+    int energy = player.GetModPlayer&lt;StarPlayer&gt;().starEnergy;
+    Label.SetText($"星辉能量：{energy}");
+}</code></pre>
+
+        <p>这样一来，界面上的文本就会随着玩家状态实时变化。这个模式非常常用，尤其适合做专属资源条或状态面板。</p>
+
+        <h2>常用 UI 元素</h2>
+        <ul>
+            <li><code>UIPanel</code>：最常见的容器面板</li>
+            <li><code>UIText</code>：文本显示</li>
+            <li><code>UIImage</code>：图片</li>
+            <li><code>UIScrollbar</code>：滚动条</li>
+            <li><code>UIList</code>：纵向列表</li>
+            <li><code>UIElement</code>：自定义通用元素基类</li>
+        </ul>
+
+        <p>很多复杂 UI，本质上也是这些基础组件的组合。你不需要一开始就会所有元素，只要先掌握容器 + 文字 + 图片 + 自定义绘制，就能做出很大一部分功能面板。</p>
+
+        <h2>按钮与交互事件</h2>
+        <p>如果你希望 UI 可点击，比如切换模式、打开分页、确认操作，就需要处理事件。</p>
+
+        <pre><code class="language-csharp">using Terraria.GameContent.UI.Elements;
+using Terraria.UI;
+
+UITextPanel&lt;string&gt; button = new UITextPanel&lt;string&gt;("切换模式");
+button.Left.Set(16f, 0f);
+button.Top.Set(56f, 0f);
+button.Width.Set(100f, 0f);
+button.Height.Set(30f, 0f);
+button.OnLeftClick += OnToggleClicked;
+Panel.Append(button);
+
+private void OnToggleClicked(UIMouseEvent evt, UIElement listeningElement)
+{
+    Main.NewText("已切换模式");
+}</code></pre>
+
+        <p>按钮其实也是 UI 元素的一种。你可以通过点击事件触发任意游戏逻辑，比如开关技能模式、请求网络同步、打开分页详情。</p>
+
+        <h2>HUD：更轻量的信息展示</h2>
+        <p>并不是所有信息都需要做成一个大面板。有些内容更适合作为 HUD，贴在血蓝条附近或屏幕角落，比如自定义资源条、特殊状态图标、Boss 机制提示。</p>
+
+        <pre><code class="language-csharp">using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using Terraria;
+using Terraria.GameContent;
+using Terraria.UI;
+
+public class StarEnergyBar : UIElement
+{
+    public override void Draw(SpriteBatch spriteBatch)
+    {
+        base.Draw(spriteBatch);
+
+        Player player = Main.LocalPlayer;
+        float current = player.GetModPlayer&lt;StarPlayer&gt;().starEnergy;
+        float max = 100f;
+        float fill = current / max;
+
+        CalculatedStyle dims = GetDimensions();
+        Rectangle back = new Rectangle((int)dims.X, (int)dims.Y, (int)dims.Width, (int)dims.Height);
+        Rectangle bar = new Rectangle(back.X + 2, back.Y + 2, (int)((back.Width - 4) * fill), back.Height - 4);
+
+        spriteBatch.Draw(TextureAssets.MagicPixel.Value, back, Color.Black * 0.75f);
+        spriteBatch.Draw(TextureAssets.MagicPixel.Value, bar, new Color(90, 170, 255));
+    }
+}</code></pre>
+
+        <p>这段示例展示了 HUD 的典型写法：自己继承 <code>UIElement</code>，在 <code>Draw</code> 里读取当前资源值，再用矩形或贴图画出填充条。为了把重点放在绘制逻辑本身，这里把最大值直接写成了 <code>100f</code>；真正项目里你通常会把最大资源值也放进 <code>ModPlayer</code>，再从那里统一读取。真正项目里你通常还会加边框、数字文本和颜色变化，但核心思路就是“在自定义元素里把状态直接可视化”。HUD 的设计原则和面板不同：面板强调内容完整，HUD 强调瞬时可读性。真正好的 HUD，玩家在战斗中扫一眼就知道关键信息，而不需要停下来读字。</p>
+
+        <details>
+            <summary>点击展开：什么时候该用面板，什么时候该用 HUD</summary>
+            <div class="details-content">
+                <p>如果信息需要仔细阅读、包含多个按钮或列表，用面板；如果信息需要在战斗中持续可见、只传达 1-2 个关键指标，用 HUD。不要把所有内容都塞进屏幕常驻条，也不要把本该一眼可懂的内容藏进复杂窗口。</p>
+            </div>
+        </details>
+
+        <h2>UI 设计最容易犯的错</h2>
+        <ul>
+            <li>信息过多，战斗时根本看不过来。</li>
+            <li>层级放错，被原版 UI 挡住或反挡原版功能。</li>
+            <li>面板逻辑和游戏逻辑强耦合，难以维护。</li>
+            <li>只追求好看，不考虑 Terraria 原生视觉风格和可读性。</li>
+        </ul>
+
+        <div class="callout callout-danger">
+            <strong>最重要的原则</strong>
+            UI 不是展示你会不会做界面，而是帮助玩家更快理解模组机制。凡是不能提升理解效率的装饰，都应该谨慎添加。
+        </div>
+
+        <h2>本章小结</h2>
+        <p>你现在已经掌握了 tModLoader UI 的基础骨架：用 <code>UIState</code> 构建界面，用 <code>UserInterface</code> 承载，用 <code>ModSystem</code> 负责更新和插层。你也知道了如何显示文本、响应点击，以及什么时候该做面板、什么时候该做 HUD。</p>
+        <p>下一章我们进入音效与音乐。那一章会让你的模组从“看起来像个内容包”变成“听起来也像个完整作品”。</p>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="14-biomes.html">← 自定义生物群落</a>
+            <a href="16-sound-music.html">音效与音乐 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

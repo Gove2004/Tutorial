@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>饰品与药水 - 泰拉瑞亚模组开发教程</title>
+    <link rel="stylesheet" href="assets/prism/prism.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-weapons.html">← 上一章</a>
+        <a href="06-tiles-blocks.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>饰品与药水</h1>
+        <p class="chapter-subtitle">这两类内容看似不华丽，却最能体现模组在“构筑体验”和“状态系统”上的设计能力。</p>
+
+        <div class="callout callout-info">
+            <strong>本章重点</strong>
+            饰品和药水都不是靠一次攻击输出取胜，而是通过持续效果改变玩家状态。这意味着你需要比做武器更重视“触发时机”和“效果边界”。
+        </div>
+
+        <h2>饰品的核心：装备后持续生效</h2>
+        <p>饰品仍然是 <code>ModItem</code>，但它和普通材料、武器最大的区别在于：它的价值不在“使用一下”，而在“装备着就持续发挥作用”。因此，饰品设计的核心通常是 <code>UpdateAccessory</code>。</p>
+
+        <pre><code class="language-csharp">using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ExampleMod.Content.Items.Accessories;
+
+public class WindCharm : ModItem
+{
+    public override void SetDefaults()
+    {
+        Item.width = 26;
+        Item.height = 30;
+        Item.accessory = true;
+        Item.value = Item.buyPrice(gold: 1);
+        Item.rare = ItemRarityID.Green;
+    }
+
+    public override void UpdateAccessory(Player player, bool hideVisual)
+    {
+        player.moveSpeed += 0.10f;
+    }
+}</code></pre>
+
+        <div class="definition">
+            <h4>UpdateAccessory</h4>
+            <p>只要饰品处于有效装备栏位，这个方法就会持续执行。它是大多数饰品效果的主要入口。</p>
+        </div>
+
+        <p>也正因为这个方法是持续执行的，所以你在这里写逻辑时要特别注意：这不是“按一次按钮生效”，而是“每次刷新玩家状态时都会参与叠加”。</p>
+
+        <h2>基础饰品设计思路</h2>
+        <p>初学阶段最适合练手的饰品有三种：数值增益型、功能型、位移型。前两种最容易上手，第三种最容易看出手感差异。</p>
+
+        <h3>增加伤害的饰品</h3>
+        <pre><code class="language-csharp">public class EmberBadge : ModItem
+{
+    public override void SetDefaults()
+    {
+        Item.width = 24;
+        Item.height = 24;
+        Item.accessory = true;
+        Item.value = Item.buyPrice(gold: 2);
+        Item.rare = ItemRarityID.Orange;
+    }
+
+    public override void UpdateAccessory(Player player, bool hideVisual)
+    {
+        player.GetDamage(DamageClass.Generic) += 0.08f;
+    }
+}</code></pre>
+
+        <p>如果你只想做全职业通用的简单增益，<code>DamageClass.Generic</code> 很好用；如果你只想强化某一职业，就把它替换成 <code>Melee</code>、<code>Magic</code> 等更具体的类型。</p>
+
+        <h3>增加机动性的饰品</h3>
+        <pre><code class="language-csharp">public class RiverRunnerBoots : ModItem
+{
+    public override void SetDefaults()
+    {
+        Item.width = 28;
+        Item.height = 22;
+        Item.accessory = true;
+        Item.value = Item.buyPrice(gold: 1);
+        Item.rare = ItemRarityID.Blue;
+    }
+
+    public override void UpdateAccessory(Player player, bool hideVisual)
+    {
+        player.moveSpeed += 0.12f;
+        player.jumpSpeedBoost += 1.5f;
+    }
+}</code></pre>
+
+        <p>这类饰品最容易让玩家感知差异，因为移动速度和跳跃高度会立刻反馈到操作手感上。你做模组时，如果想先验证一个思路是否“有感觉”，机动型饰品通常是很好的实验对象。</p>
+
+        <h2>前缀系统与饰品平衡</h2>
+        <p>饰品还有一个经常被新手忽略的点：前缀。因为很多玩家会默认拿饰品去重铸，所以你做数值设计时，不能只看“裸状态”，还要考虑前缀叠加之后是否太强。</p>
+
+        <details>
+            <summary>点击展开：为什么饰品容易数值膨胀</summary>
+            <div class="details-content">
+                <p>因为它们通常是“持续加成 + 可叠多个 + 可吃前缀”。单个看似小的 6% 或 8%，如果允许多个装备位和前缀叠加，很快就会把职业平衡推偏。</p>
+            </div>
+        </details>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>
+            饰品最怕的不是“没效果”，而是“效果太通用且没有代价”。只要一个饰品让所有职业都愿意无脑带，它很可能就已经过强了。
+        </div>
+
+        <h2>药水的本质：一次使用，持续一段状态</h2>
+        <p>药水仍然是 <code>ModItem</code>，但它们往往会和 <code>ModBuff</code> 配合。也就是说，药水的设计常常分两段：物品负责喝下去，Buff 负责后续持续效果。</p>
+
+        <pre><code class="language-csharp">public class RagePotion : ModItem
+{
+    public override void SetDefaults()
+    {
+        Item.width = 20;
+        Item.height = 28;
+        Item.useStyle = ItemUseStyleID.DrinkLiquid;
+        Item.useTime = 17;
+        Item.useAnimation = 17;
+        Item.useTurn = true;
+        Item.UseSound = SoundID.Item3;
+        Item.maxStack = 9999;
+        Item.consumable = true;
+        Item.value = Item.buyPrice(silver: 80);
+        Item.rare = ItemRarityID.Blue;
+        Item.buffType = ModContent.BuffType&lt;Content.Buffs.RageBuff&gt;();
+        Item.buffTime = 60 * 60 * 5;
+    }
+}</code></pre>
+
+        <p>这段代码里真正最关键的是最后两行：<code>buffType</code> 和 <code>buffTime</code>。它们让这瓶药从“一个消耗品”变成“一个状态入口”。</p>
+
+        <h2>Buff 是怎么接上的</h2>
+        <pre><code class="language-csharp">using Terraria;
+using Terraria.ModLoader;
+
+namespace ExampleMod.Content.Buffs;
+
+public class RageBuff : ModBuff
+{
+    public override void Update(Player player, ref int buffIndex)
+    {
+        player.GetDamage(DamageClass.Generic) += 0.10f;
+    }
+}</code></pre>
+
+        <p>写到这里你应该能看出一个很重要的模式：药水只是启动器，真正持续生效的是 Buff。这个思路在很多系统里都会复用，比如饰品常驻效果、弹幕命中附带状态、Boss 特殊 debuff。</p>
+
+        <div class="definition">
+            <h4>药水物品 vs Buff</h4>
+            <p>药水物品解决的是“玩家怎么获得和触发这个状态”；Buff 解决的是“状态存在期间会持续发生什么”。把这两层拆开，是 tModLoader 状态系统最重要的理解之一。</p>
+        </div>
+
+        <h2>治疗药水和功能药水的区别</h2>
+        <p>并不是所有药水都一定要用自定义 Buff。有些药水只是单次恢复生命或法力，比如：</p>
+
+        <pre><code class="language-csharp">Item.potion = true;
+Item.healLife = 100;
+Item.useStyle = ItemUseStyleID.DrinkLiquid;</code></pre>
+
+        <p>这类药水更像一次性资源，而功能药水更像临时构筑组件。两者都重要，但设计思路完全不同。前者关心回复数值和冷却约束，后者关心 Buff 强度与持续时间。</p>
+
+        <h2>装备视觉效果与隐藏外观</h2>
+        <p>某些饰品不只是数值加成，还会影响角色外观，比如翅膀、发光配件、尾迹效果。这个时候你就不只是在写属性逻辑，还会接触到装备槽位和绘制相关系统。</p>
+
+        <div class="callout callout-tip">
+            <strong>先别着急深入绘制</strong>
+            如果你现在只是想把系统跑通，优先先把功能写对。视觉层可以等系统稳定后再补，因为绘制问题排查成本通常比数值逻辑更高。
+        </div>
+
+        <h2>做饰品和药水时的推荐流程</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><h4>先定义用途</h4><p>它是给某职业的构筑核心，还是通用增益，还是阶段性过渡装备？</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><h4>确定触发方式</h4><p>装备持续生效，还是喝下去获得 Buff，还是二者配合？</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><h4>限制叠加强度</h4><p>考虑多件叠加、前缀强化、与原版装备的组合效果。</p></div></div>
+            <div class="step"><span class="step-number">4</span><div class="step-content"><h4>最后再想视觉反馈</h4><p>让玩家感知到效果存在，但不要喧宾夺主。</p></div></div>
+        </div>
+
+        <h2>本章小结</h2>
+        <p>现在你应该已经掌握了一个重要思路：饰品和药水都不是“瞬时攻击内容”，而是状态系统的一部分。饰品通过 <code>UpdateAccessory</code> 持续改写玩家能力，药水则通过 <code>Buff</code> 把一次使用转化成一段持续效果。</p>
+        <p>下一章我们会进入与世界交互更强的一类内容：物块与家具。那时你会发现，tModLoader 不再只是“给背包加东西”，而是真正开始改写世界本身。</p>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-weapons.html">← 武器进阶：四职业武器实现</a>
+            <a href="06-tiles-blocks.html">物块与家具 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

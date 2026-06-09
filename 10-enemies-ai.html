@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>敌怪与 AI - 泰拉瑞亚模组开发教程</title>
+    <link rel="stylesheet" href="assets/prism/prism.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-buffs-debuffs.html">← 上一章</a>
+        <a href="11-boss.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>敌怪与 AI</h1>
+        <p class="chapter-subtitle">从“给玩家加内容”转向“给世界加威胁”：敌怪设计决定了你的模组战斗节奏。</p>
+
+        <div class="callout callout-info">
+            <strong>这一章的核心转变</strong>
+            前面几章你主要在做玩家侧内容：物品、武器、状态。现在开始，你要站到对手的角度去想：敌人如何出现、如何移动、如何攻击、如何掉落奖励。
+        </div>
+
+        <h2>ModNPC 的定位</h2>
+        <p>在 tModLoader 里，敌怪、Boss、城镇 NPC 都和 <code>ModNPC</code> 有关。它负责定义一个 NPC 的尺寸、生命、防御、AI、掉落、生成条件和图鉴信息。你可以把它看成“世界中的生物模板”。</p>
+
+        <div class="definition">
+            <h4>ModNPC</h4>
+            <p><code>ModNPC</code> 用来定义一个自定义 NPC。对于普通敌怪来说，它最重要的职责是：战斗属性、行为逻辑、生成规则、掉落奖励。</p>
+        </div>
+
+        <h2>一个最小可用敌怪</h2>
+        <p>先从一个最简单的地面敌怪开始。这样你能先建立完整闭环，再逐步做更复杂的 AI。</p>
+
+        <pre><code class="language-csharp">using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ExampleMod.Content.NPCs;
+
+public class StoneCrawler : ModNPC
+{
+    public override void SetStaticDefaults()
+    {
+        Main.npcFrameCount[Type] = Main.npcFrameCount[NPCID.Zombie];
+    }
+
+    public override void SetDefaults()
+    {
+        NPC.width = 32;
+        NPC.height = 48;
+        NPC.damage = 18;
+        NPC.defense = 6;
+        NPC.lifeMax = 80;
+        NPC.HitSound = SoundID.NPCHit1;
+        NPC.DeathSound = SoundID.NPCDeath1;
+        NPC.value = 120f;
+        NPC.knockBackResist = 0.6f;
+        NPC.aiStyle = 3;
+        AIType = NPCID.Zombie;
+        AnimationType = NPCID.Zombie;
+    }
+}</code></pre>
+
+        <p>这段代码已经定义了一个完整的基础敌怪：尺寸、伤害、防御、生命、声音、金币价值、击退抗性，以及最重要的——它复用了原版 Zombie 的地面行走 AI。</p>
+
+        <div class="callout callout-tip">
+            <strong>非常推荐的入门路线</strong>
+            先从“Clone 或模仿原版敌怪”开始，再逐步分离出自己的 AI。这样你能先得到稳定行为，而不是一上来就自己手搓全部移动逻辑。
+        </div>
+
+        <h2>SetDefaults 里最关键的属性</h2>
+        <table>
+            <thead><tr><th>字段</th><th>作用</th><th>你应该怎么理解</th></tr></thead>
+            <tbody>
+                <tr><td>NPC.damage</td><td>接触伤害</td><td>不是所有 NPC 都依赖接触输出</td></tr>
+                <tr><td>NPC.defense</td><td>防御</td><td>决定承伤表现</td></tr>
+                <tr><td>NPC.lifeMax</td><td>最大生命</td><td>战斗时长的基础</td></tr>
+                <tr><td>NPC.aiStyle</td><td>原版 AI 模板</td><td>快速成型的重要手段</td></tr>
+                <tr><td>NPC.knockBackResist</td><td>击退抗性</td><td>决定是否容易被控住</td></tr>
+                <tr><td>NPC.value</td><td>击杀收益</td><td>金币掉落的基础值</td></tr>
+            </tbody>
+        </table>
+
+        <p>如果你做的是普通敌怪，前期最该先稳定的就是这几项。真正的难点往往不在“会不会生成”，而在“打起来像不像一个合理的 Terraria 敌人”。</p>
+
+        <h2>aiStyle：先借原版行为</h2>
+        <p>和 Projectile 一样，NPC 的入门捷径也是先借原版行为。很多经典敌怪类型都有成熟的行为模板：</p>
+
+        <ul>
+            <li><code>aiStyle = 3</code>：地面行走型（类似僵尸、骷髅）</li>
+            <li><code>aiStyle = 5</code>：飞行跟随型</li>
+            <li><code>aiStyle = 2</code>：部分射击或特殊移动类</li>
+            <li><code>aiStyle = 6</code>：蠕虫型身体联动</li>
+        </ul>
+
+        <pre><code class="language-csharp">public override void SetDefaults()
+{
+    NPC.CloneDefaults(NPCID.GreekSkeleton);
+    AIType = NPCID.GreekSkeleton;
+    AnimationType = NPCID.GreekSkeleton;
+}</code></pre>
+
+        <p>这类写法非常适合原型阶段。你会先得到一个行为稳定的敌怪，再在此基础上改数值、换掉落、加特殊攻击。</p>
+
+        <details>
+            <summary>点击展开：什么时候该停止依赖 aiStyle</summary>
+            <div class="details-content">
+                <p>当你开始希望敌怪有明显的阶段切换、条件判断、定时技能、目标保持或特殊机制时，就说明你该自己写 <code>AI()</code> 了。aiStyle 很适合入门和轻改，但不适合所有创意设计。</p>
+            </div>
+        </details>
+
+        <h2>AI()：敌怪行为的真正控制中心</h2>
+        <p><code>AI()</code> 每帧执行一次。和 Projectile 一样，这里不是“偶尔运行的事件”，而是敌怪活着期间最核心的行为循环。你可以在这里处理索敌、移动、计时器、冲锋、射击、切状态等一切动态行为。</p>
+
+        <pre><code class="language-csharp">public class DashBeast : ModNPC
+{
+    public ref float State =&gt; ref NPC.ai[0];
+    public ref float Timer =&gt; ref NPC.ai[1];
+
+    public override void SetDefaults()
+    {
+        NPC.width = 40;
+        NPC.height = 34;
+        NPC.damage = 26;
+        NPC.defense = 8;
+        NPC.lifeMax = 140;
+        NPC.HitSound = SoundID.NPCHit1;
+        NPC.DeathSound = SoundID.NPCDeath1;
+        NPC.knockBackResist = 0.4f;
+        NPC.noGravity = false;
+        NPC.noTileCollide = false;
+    }
+
+    public override void AI()
+    {
+        NPC.TargetClosest();
+        Player target = Main.player[NPC.target];
+        Timer++;
+
+        if (State == 0)
+        {
+            NPC.velocity.X *= 0.9f;
+            if (Timer &gt; 60)
+            {
+                Vector2 direction = NPC.DirectionTo(target.Center);
+                NPC.velocity = direction * 12f;
+                Timer = 0;
+                State = 1;
+            }
+        }
+        else if (State == 1)
+        {
+            if (Timer &gt; 25)
+            {
+                Timer = 0;
+                State = 0;
+            }
+        }
+    }
+}</code></pre>
+
+        <p>这里用到了最常见的 AI 模式之一：<strong>状态机</strong>。<code>State</code> 决定当前阶段，<code>Timer</code> 负责阶段内计时。这个模式比散乱地写一堆 <code>if</code> 更容易维护，也更适合后面做 Boss。</p>
+
+        <div class="definition">
+            <h4>状态机思维</h4>
+            <p>把敌怪的行为拆成几个阶段，比如巡逻、蓄力、冲锋、冷却。每一帧先判断当前在哪个阶段，再执行该阶段逻辑。这样复杂 AI 也能保持清晰。</p>
+        </div>
+
+        <h2>NPC.ai[] 与 NPC.localAI[]</h2>
+        <p><code>NPC.ai[]</code> 和 Projectile 的 <code>ai[]</code> 一样，都是少量状态槽位。常见用途包括：当前阶段、技能计时器、目标方向、攻击次数、下一次技能冷却。<code>localAI[]</code> 更适合本地运行时的辅助状态。</p>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>
+            不要把 <code>NPC.ai[0]</code>、<code>NPC.ai[1]</code> 到处裸写。最好像上面的例子那样包成 <code>State</code>、<code>Timer</code>、<code>AttackCooldown</code> 一类属性，否则三天后你自己都看不懂这些数字槽位分别代表什么。
+        </div>
+
+        <h2>远程射击敌怪示例</h2>
+        <p>很多中期模组敌怪都不是单纯靠接触伤害，而是会定时发射弹幕。这个时候，敌怪的 AI 就不仅是移动，还要管理攻击节奏。</p>
+
+        <pre><code class="language-csharp">using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+public class FrostShooter : ModNPC
+{
+    public ref float ShootTimer =&gt; ref NPC.ai[0];
+
+    public override void SetDefaults()
+    {
+        NPC.width = 32;
+        NPC.height = 46;
+        NPC.damage = 14;
+        NPC.defense = 6;
+        NPC.lifeMax = 90;
+        NPC.aiStyle = 3;
+        AIType = NPCID.Zombie;
+        AnimationType = NPCID.Zombie;
+    }
+
+    public override void AI()
+    {
+        base.AI();
+        NPC.TargetClosest();
+        Player target = Main.player[NPC.target];
+
+        ShootTimer++;
+        if (ShootTimer &gt;= 120 && Main.netMode != NetmodeID.MultiplayerClient)
+        {
+            Vector2 direction = NPC.DirectionTo(target.Center) * 8f;
+            Projectile.NewProjectile(
+                NPC.GetSource_FromAI(),
+                NPC.Center,
+                direction,
+                ProjectileID.IceBolt,
+                12,
+                1f
+            );
+            ShootTimer = 0;
+        }
+    }
+}</code></pre>
+
+        <p>这段代码的重点不只是发射弹幕，而是注意了 <code>Main.netMode != NetmodeID.MultiplayerClient</code>。因为在多人环境中，生成实体的逻辑通常不能在客户端重复跑，不然很容易出现重复生成。</p>
+
+        <h2>敌怪生成：SpawnChance</h2>
+        <p>一个做得很好的敌怪，如果根本不会出现在游戏里，玩家就体验不到。普通敌怪的生成通常通过 <code>SpawnChance</code> 控制。</p>
+
+        <pre><code class="language-csharp">using Terraria;
+using Terraria.ModLoader;
+
+public override float SpawnChance(NPCSpawnInfo spawnInfo)
+{
+    if (!spawnInfo.Player.ZoneOverworldHeight)
+        return 0f;
+
+    if (!Main.dayTime)
+        return 0.08f;
+
+    return 0f;
+}</code></pre>
+
+        <p>这个例子表示：只有在地表夜晚，这个敌怪才有概率生成。返回值不是“百分比”，而是参与生成权重的一个浮点值。数值越高，生成机会越大。</p>
+
+        <div class="callout callout-tip">
+            <strong>设计建议</strong>
+            不要让新敌怪到处乱刷。优秀的生成条件会告诉玩家：这类怪属于什么区域、什么时间、什么阶段。生成条件本身就是世界叙事的一部分。
+        </div>
+
+        <h2>掉落表：NPCLoot</h2>
+        <p>掉落是玩家愿不愿意反复打一个敌怪的关键。tModLoader 在新版本中推荐通过 <code>ModifyNPCLoot</code> 添加掉落规则。</p>
+
+        <pre><code class="language-csharp">using Terraria.GameContent.ItemDropRules;
+
+public override void ModifyNPCLoot(NPCLoot npcLoot)
+{
+    npcLoot.Add(ItemDropRule.Common(ModContent.ItemType&lt;Items.Materials.StarOreChunk&gt;(), 2, 1, 3));
+    npcLoot.Add(ItemDropRule.Common(ItemID.SilverCoin, 1, 3, 8));
+}</code></pre>
+
+        <p>这条规则表示：有一定概率掉落 1 到 3 个自定义矿石碎片，同时还会掉若干银币。掉落系统本身很强大，可以按条件、概率、阶段、世界状态灵活配置。</p>
+
+        <details>
+            <summary>点击展开：掉落设计最常见的失衡点</summary>
+            <div class="details-content">
+                <ul>
+                    <li>怪太弱，但掉落过强，导致玩家跳过 progression。</li>
+                    <li>怪很难打，但掉落太抠，玩家不愿重复挑战。</li>
+                    <li>关键材料只由一个刷新慢的敌怪掉，导致刷取体验极差。</li>
+                </ul>
+            </div>
+        </details>
+
+        <h2>击中玩家时附带效果</h2>
+        <p>很多敌怪的威胁不只来自接触伤害，而来自命中后附带 Debuff。这个入口通常是 <code>OnHitPlayer</code>。</p>
+
+        <pre><code class="language-csharp">using Terraria.ID;
+
+public override void OnHitPlayer(Player target, Player.HurtInfo hurtInfo)
+{
+    target.AddBuff(BuffID.Frostburn, 180);
+}</code></pre>
+
+        <p>这行代码就能让敌怪命中玩家后附带 3 秒 Frostburn。你自己的自定义 Debuff 也完全可以用同样方式挂上去。</p>
+
+        <h2>图鉴与展示信息</h2>
+        <p>如果你希望敌怪更像一个完整内容，而不是“突然冒出来的测试对象”，就应该给它补上 Bestiary 信息。哪怕只是简单描述，也能显著提升成品感。</p>
+
+        <pre><code class="language-csharp">using Terraria.GameContent.Bestiary;
+
+public override void SetBestiary(BestiaryDatabase database, BestiaryEntry bestiaryEntry)
+{
+    bestiaryEntry.Info.AddRange(new IBestiaryInfoElement[] {
+        BestiaryDatabaseNPCsPopulator.CommonTags.SpawnConditions.Biomes.Surface,
+        new FlavorTextBestiaryInfoElement("白天会潜伏，夜晚会袭击旅行者的石壳猛兽。")
+    });
+}</code></pre>
+
+        <p>Bestiary 内容并不会改变战斗表现，但它会让世界观和玩家认知更完整。对一个真的想发布给别人玩的模组来说，这种“非战斗细节”非常重要。</p>
+
+        <h2>Banner 系统</h2>
+        <p>普通敌怪通常还会和 Banner 系统关联。击杀一定数量后，玩家获得 Banner，在附近对这类怪有战斗加成。这个机制能让刷怪体验更有回报感。</p>
+
+        <p>很多情况下，tModLoader 会根据 NPC 类型自动处理一部分 Banner 行为；但如果你做的是特殊结构或套系敌怪，最好还是主动检查它是否和你的预期一致。</p>
+
+        <h2>做一个完整普通敌怪的推荐流程</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><h4>先定定位</h4><p>它属于哪个阶段、哪个区域、威胁来自接触、射击还是特殊机制？</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><h4>先借原版 AI 跑通</h4><p>快速得到一个稳定版本，确认尺寸、数值和命中感受。</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><h4>再做差异化 AI</h4><p>加冲锋、远程射击、阶段切换、召唤小怪等特殊行为。</p></div></div>
+            <div class="step"><span class="step-number">4</span><div class="step-content"><h4>最后补掉落和图鉴</h4><p>让它不只是能打，还能服务于 progression 和世界氛围。</p></div></div>
+        </div>
+
+        <h2>常见坑</h2>
+        <ul>
+            <li>AI 每帧都做重计算，敌怪一多就掉帧。</li>
+            <li>自定义射击逻辑没做多人限制，导致弹幕重复生成。</li>
+            <li>生成条件太宽，敌怪在不该出现的地方到处刷。</li>
+            <li>掉落过强或过弱，打乱玩家 progression。</li>
+            <li>状态机变量裸写在 <code>NPC.ai[]</code> 中，后期难维护。</li>
+        </ul>
+
+        <div class="callout callout-danger">
+            <strong>最容易忽视的问题</strong>
+            敌怪设计不是单看 AI 是否炫酷，而是要一起看：生成频率、压迫感、击杀时间、掉落收益、与地形的互动。如果只做了一个“会冲锋的怪”，但它刷得不对、掉得太差，玩家还是会觉得体验不好。
+        </div>
+
+        <h2>本章小结</h2>
+        <p>现在你已经掌握了普通敌怪开发的核心：<code>ModNPC</code> 定义生物本体，<code>SetDefaults()</code> 配置基础数值，<code>AI()</code> 实现行为，<code>SpawnChance()</code> 控制出现位置，<code>ModifyNPCLoot()</code> 决定击杀收益。</p>
+        <p>下一章我们会继续往上走，进入 Boss 制作。Boss 其实就是更复杂的 NPC，但它对节奏、阶段切换、视觉压迫和掉落设计的要求会高一个量级。</p>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="09-buffs-debuffs.html">← Buff 与 Debuff 系统</a>
+            <a href="11-boss.html">Boss 制作 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

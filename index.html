@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>泰拉瑞亚模组开发教程 — tModLoader 完全指南</title>
+    <link rel="stylesheet" href="assets/prism/prism.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <div class="tutorial-hero">
+        <h1>泰拉瑞亚模组开发教程</h1>
+        <p class="subtitle">基于 tModLoader 1.4.4，从第一个物品到发布上架 Steam Workshop 的完整指南</p>
+        <p class="chapter-subtitle">
+            面向有 C# 基础的开发者 · 18 章系统课程 · 含完整代码示例
+        </p>
+    </div>
+
+    <main>
+        <h2>课程简介</h2>
+        <p>
+            泰拉瑞亚（Terraria）是一款拥有庞大玩家群体的 2D 沙盒游戏，而 tModLoader 是官方支持的模组框架，
+            让你可以用 C# 编写全新的游戏内容——武器、装备、NPC、Boss、生物群落，甚至是全新的游戏机制。
+        </p>
+        <p>
+            本教程假设你已经具备 C# 基础语法知识（类、继承、属性、方法重写），将带你从零开始掌握 tModLoader 模组开发的完整流程。
+            学完本课程后，你将能够独立开发、调试和发布一个完整的泰拉瑞亚模组。
+        </p>
+
+        <div class="callout callout-info">
+            <strong>环境要求</strong>：Steam 版泰拉瑞亚 + tModLoader（均可通过 Steam 免费获取 tModLoader）、Visual Studio 2022 或 VS Code + C# 扩展。
+        </div>
+
+        <h2>学习路线</h2>
+        <p>建议按顺序学习。前 8 章是核心基础，9-14 章是中级进阶，15-18 章是高级主题。</p>
+
+        <div class="callout callout-tip">
+            <strong>推荐学习方式</strong>
+            这套教程最适合一边读一边做。建议你把前 8 章里的示例串成一个小型练手模组：先做一个材料和一把武器，再补弹幕、Buff、敌怪与 Boss。到了后半程，再把世界生成、生物群落、UI、联机和发布逐步接进去。这样你学到的不是孤立 API，而是一条真正能跑通的模组开发路线。
+        </div>
+    </main>
+
+    <div class="chapter-list">
+        <h2 style="max-width: 900px; margin: 0 auto 24px; padding: 0;">章节目录</h2>
+
+        <!-- === 基础篇 === -->
+        <a href="01-tmodloader-intro.html" class="chapter-card">
+            <span class="ch-num">1</span>
+            <span class="ch-title">tModLoader 概述与环境搭建</span>
+            <span class="tag tag-basic">基础</span>
+            <div class="ch-desc">了解 tModLoader 的工作原理，完成开发环境配置，创建并运行你的第一个模组</div>
+        </a>
+
+        <a href="02-mod-structure.html" class="chapter-card">
+            <span class="ch-num">2</span>
+            <span class="ch-title">模组结构与生命周期</span>
+            <span class="tag tag-basic">基础</span>
+            <div class="ch-desc">Mod 类、Autoload 机制、ModContent 系统、加载阶段详解与文件组织规范</div>
+        </a>
+
+        <!-- === 核心内容篇 === -->
+        <a href="03-items-basics.html" class="chapter-card">
+            <span class="ch-num">3</span>
+            <span class="ch-title">物品基础</span>
+            <span class="tag tag-basic">基础</span>
+            <div class="ch-desc">ModItem 类详解、物品属性配置、纹理制作、SetDefaults 与物品类型体系</div>
+        </a>
+
+        <a href="04-weapons.html" class="chapter-card">
+            <span class="ch-num">4</span>
+            <span class="ch-title">武器进阶：四职业武器实现</span>
+            <span class="tag tag-intermediate">中级</span>
+            <div class="ch-desc">近战、远程、魔法、召唤四职业武器的核心机制、伤害计算与攻速控制</div>
+        </a>
+
+        <a href="05-accessories-potions.html" class="chapter-card">
+            <span class="ch-num">5</span>
+            <span class="ch-title">饰品与药水</span>
+            <span class="tag tag-intermediate">中级</span>
+            <div class="ch-desc">饰品实现、UpdateAccessory 钩子、装备特效、药水与 Buff 关联</div>
+        </a>
+
+        <a href="06-tiles-blocks.html" class="chapter-card">
+            <span class="ch-num">6</span>
+            <span class="ch-title">物块与家具</span>
+            <span class="tag tag-intermediate">中级</span>
+            <div class="ch-desc">ModTile、物块放置与破坏、家具系统（工作台/箱子/床）、帧动画贴图</div>
+        </a>
+
+        <a href="07-recipes-crafting.html" class="chapter-card">
+            <span class="ch-num">7</span>
+            <span class="ch-title">合成配方系统</span>
+            <span class="tag tag-intermediate">中级</span>
+            <div class="ch-desc">AddRecipe、RecipeGroup、条件合成、自定义合成站</div>
+        </a>
+
+        <a href="08-projectiles.html" class="chapter-card">
+            <span class="ch-num">8</span>
+            <span class="ch-title">弹幕系统</span>
+            <span class="tag tag-intermediate">中级</span>
+            <div class="ch-desc">ModProjectile、AI 方法、弹幕行为编程、碰撞检测与视觉特效</div>
+        </a>
+
+        <!-- === 进阶篇 === -->
+        <a href="09-buffs-debuffs.html" class="chapter-card">
+            <span class="ch-num">9</span>
+            <span class="ch-title">Buff 与 Debuff 系统</span>
+            <span class="tag tag-intermediate">中级</span>
+            <div class="ch-desc">ModBuff、Buff 效果实现、视觉与图标、持续伤害与条件触发</div>
+        </a>
+
+        <a href="10-enemies-ai.html" class="chapter-card">
+            <span class="ch-num">10</span>
+            <span class="ch-title">敌怪与 AI</span>
+            <span class="tag tag-advanced">进阶</span>
+            <div class="ch-desc">ModNPC、基础与自定义 AI、掉落表、敌怪生成条件、Banner 系统</div>
+        </a>
+
+        <a href="11-boss.html" class="chapter-card">
+            <span class="ch-num">11</span>
+            <span class="ch-title">Boss 制作</span>
+            <span class="tag tag-advanced">进阶</span>
+            <div class="ch-desc">多部位 Boss 设计、阶段切换、Boss 血条、召唤物与击败事件</div>
+        </a>
+
+        <a href="12-town-npcs.html" class="chapter-card">
+            <span class="ch-num">12</span>
+            <span class="ch-title">城镇 NPC</span>
+            <span class="tag tag-advanced">进阶</span>
+            <div class="ch-desc">TownNPC 房屋需求、对话系统、商店、NPC Happiness 与入住条件</div>
+        </a>
+
+        <a href="13-worldgen.html" class="chapter-card">
+            <span class="ch-num">13</span>
+            <span class="ch-title">世界生成</span>
+            <span class="tag tag-advanced">进阶</span>
+            <div class="ch-desc">ModSystem、世界生成任务、结构生成、矿石分布与世界后处理</div>
+        </a>
+
+        <a href="14-biomes.html" class="chapter-card">
+            <span class="ch-num">14</span>
+            <span class="ch-title">自定义生物群落</span>
+            <span class="tag tag-advanced">进阶</span>
+            <div class="ch-desc">ModBiome、背景与音乐、优先级、群落判定与环境特效</div>
+        </a>
+
+        <!-- === 高级篇 === -->
+        <a href="15-ui.html" class="chapter-card">
+            <span class="ch-num">15</span>
+            <span class="ch-title">UI 系统</span>
+            <span class="tag tag-advanced">进阶</span>
+            <div class="ch-desc">ModSystem、UserInterface、UIState/UIPanel、自定义 HUD</div>
+        </a>
+
+        <a href="16-sound-music.html" class="chapter-card">
+            <span class="ch-num">16</span>
+            <span class="ch-title">音效与音乐</span>
+            <span class="tag tag-intermediate">中级</span>
+            <div class="ch-desc">自定义音乐加载、ModSoundStyle、音效播放与环境音</div>
+        </a>
+
+        <a href="17-multiplayer.html" class="chapter-card">
+            <span class="ch-num">17</span>
+            <span class="ch-title">多人联机同步</span>
+            <span class="tag tag-advanced">进阶</span>
+            <div class="ch-desc">HandlePacket、ModPacket、同步策略、权限边界与联机调试技巧</div>
+        </a>
+
+        <a href="18-publish.html" class="chapter-card">
+            <span class="ch-num">18</span>
+            <span class="ch-title">发布与维护</span>
+            <span class="tag tag-advanced">进阶</span>
+            <div class="ch-desc">Workshop 发布流程、版本管理、兼容性处理与 API 更新应对</div>
+        </a>
+    </div>
+
+    <footer class="chapter-footer">
+        <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.85rem;">
+            泰拉瑞亚模组开发教程 · 基于 tModLoader 1.4.4 · 祝你模组开发愉快！
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

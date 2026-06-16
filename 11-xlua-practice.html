@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XLua 入门与实践 - Lua 从入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="10-c-api-and-stack.html">← 上一章</a>
+        <a href="12-lua-ui-development.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>11 - XLua 入门与实践</h1>
+
+        <p>XLua 是腾讯开源的 Unity Lua 编程方案，解决了中国手游最核心的需求——<strong>热更新</strong>。理解 XLua 不仅是在学一个工具，更是在理解「静态编译语言（C#）如何与动态脚本语言（Lua）在生产环境中共存」这个工业级问题。</p>
+
+        <h2>XLua 是什么</h2>
+
+        <div class="definition">
+            <h4>XLua</h4>
+            <p>XLua 为 Unity 项目提供 Lua 脚本能力。它包含：C# ↔ Lua 双向调用、<strong>hotfix</strong>（运行时用 Lua 修补 C# 方法）、内置两种 VM 后端（标准 Lua 5.3 和 LuaJIT）。</p>
+        </div>
+
+        <table>
+            <thead><tr><th>特性</th><th>说明</th><th>为什么重要</th></tr></thead>
+            <tbody>
+                <tr><td>热补丁（Hotfix）</td><td>运行时用 Lua 替换 C# 方法实现</td><td>线上紧急 bug 不用重新打包提审</td></tr>
+                <tr><td>C# → Lua 调用</td><td>C# 侧直接调用 Lua 全局函数</td><td>业务逻辑放 Lua 层，灵活迭代</td></tr>
+                <tr><td>Lua → C# 调用</td><td>Lua 侧访问 C# 类、方法、属性</td><td>Lua 脚本操作 Unity 引擎</td></tr>
+                <tr><td>双 VM 后端</td><td>标准 Lua 5.3 / LuaJIT 2.1 可选</td><td>开发时用标准 VM 调试，发布用 JIT 提速</td></tr>
+                <tr><td>GC 优化</td><td>跨 VM 对象引用管理</td><td>防止 C# 和 Lua 互相持引用导致无法回收</td></tr>
+            </tbody>
+        </table>
+
+        <h2>C# 调用 Lua</h2>
+
+        <pre><code class="language-csharp">// 1. 直接执行 Lua 代码
+LuaEnv luaenv = new LuaEnv();
+luaenv.DoString("print('Hello from Lua!')");
+
+// 2. 调用 Lua 全局函数
+luaenv.DoString(@"
+    function add(a, b)
+        return a + b
+    end
+");
+
+// 通过委托调用（无 GC 分配）
+var add = luaenv.Global.Get<Func<int, int, int>>("add");
+int result = add(10, 20);  // 30
+
+// 3. 映射 Lua table 到 C# class/struct
+luaenv.DoString(@"
+    player = {
+        name = 'Gove',
+        level = 21,
+        position = { x = 100, y = 200 }
+    }
+");
+
+public class Player {
+    public string name;
+    public int level;
+}
+
+var player = luaenv.Global.Get<Player>("player");  // 值拷贝，无 GC
+Debug.Log(player.name);  // Gove
+
+// 4. 映射到接口（引用方式，修改在两边同步）
+[CSharpCallLua]
+public interface IPlayer {
+    string name { get; set; }
+    int level { get; set; }
+    void LevelUp();
+}
+
+var iPlayer = luaenv.Global.Get<IPlayer>("player");
+iPlayer.LevelUp();  // 调用 Lua 函数</code></pre>
+
+        <div class="sidebar-note">
+            <strong>性能排序（C# → Lua）</strong>：委托 &gt; 接口 &gt; class/struct 映射。委托最快（几乎无开销），class 映射有值拷贝开销。选择哪个取决于你需要引用语义还是值语义。
+        </div>
+
+        <h2>Lua 调用 C#</h2>
+
+        <pre><code class="language-lua">-- Lua 侧访问 Unity API
+-- 生成代码后（Generate Code），Lua 可以直接用 CS.命名空间.类名
+
+-- 访问静态成员
+local pos = CS.UnityEngine.Vector3(1, 2, 3)
+CS.UnityEngine.Debug.Log("Position: " .. tostring(pos))
+
+-- 创建 GameObject
+local go = CS.UnityEngine.GameObject("MyObject")
+
+-- 获取组件
+local transform = go.transform
+transform.position = CS.UnityEngine.Vector3(0, 5, 0)
+
+-- 调用自己的 C# 类（需要加 [LuaCallCSharp] 属性）
+local data = CS.MyGame.PlayerData()
+data:LoadFromFile("save.dat")
+
+-- 访问泛型（需要生成代码）
+local list = CS.System.Collections.Generic.List(CS.System.Int32)()
+list:Add(1)
+list:Add(2)
+print(list.Count)  --> 2</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>生成代码是必须的</strong>：XLua 默认用反射访问 C#，但这很慢且有 GC 分配。通过「Generate Code」步骤预生成适配代码，性能提升 10-100 倍。在 <code>XLua/Generator</code> 菜单中配置要生成的类型列表。
+        </div>
+
+        <h2>Hotfix：热补丁机制</h2>
+
+        <p>这是 XLua 最特殊的能力——运行时用 Lua 替换 C# 方法。原理：IL 注入 + Lua 函数替换。</p>
+
+        <pre><code class="language-csharp">// C# 原始代码
+[Hotfix]
+public class Calculator {
+    public int Divide(int a, int b) {
+        return a / b;  // 线上发现 b 为 0 会崩溃！
+    }
+}</code></pre>
+
+        <pre><code class="language-lua">-- hotfix 补丁（Lua 侧）
+-- 放到 xlua_hotfix_map 中，XLua 自动在启动时加载
+xlua.hotfix(CS.MyGame.Calculator, "Divide", function(self, a, b)
+    if b == 0 then
+        CS.UnityEngine.Debug.LogError("Division by zero prevented!")
+        return 0
+    end
+    return a / b
+end)
+
+-- 补丁下发流程：
+-- 1. 发现线上 bug → 写 hotfix Lua 脚本
+-- 2. 把脚本上传到 CDN
+-- 3. 客户端启动时下载 lua 文件
+-- 4. XLua 加载并应用 hotfix
+-- 5. bug 修复，无需重新过审！</code></pre>
+
+        <h2>GC 优化：跨语言引用管理</h2>
+
+        <p>C# 和 Lua 都有各自的 GC。跨语言引用会造成双方各持引用、谁也收不回的问题。</p>
+
+        <pre><code class="language-csharp">// 问题场景
+// Lua table 引用了 C# 对象
+// C# 对象通过 delegate 引用了 Lua function
+// → 双方 GC 都认为对方还活着 → 内存泄漏
+
+// 解决方案：明确引用方向 + 使用弱引用
+
+[CSharpCallLua]
+public delegate void CallbackDelegate();
+
+public class NetworkManager {
+    private LuaFunction luaCallback;  // ✗ 强引用，阻止 Lua GC
+
+    public void RegisterCallback(LuaFunction cb) {
+        luaCallback = cb;  // 如果不手动 Dispose，永远不会被回收
+    }
+
+    public void UnregisterCallback() {
+        luaCallback?.Dispose();  // ✓ 手动释放
+        luaCallback = null;
+    }
+}
+
+// 更好的方案：使用 LuaTable 的引用计数或事件系统
+// 让 Lua 侧管理所有回调，C# 侧只负责触发</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>XLua GC 铁律</strong>：每次 <code>luaenv.Global.Get&lt;LuaFunction&gt;()</code> 都创建一个新委托对象。用完必须 <code>Dispose()</code>。否则 GC 泄漏。同理，LuaTable 用完后也需 Dispose。
+        </div>
+
+        <h2>XLua 项目工程化避坑</h2>
+
+        <details>
+            <summary>坑 1：iOS 平台不能 JIT</summary>
+            <div class="details-content">
+                <p>iOS 禁止动态代码生成（JIT）。XLua 在 iOS 上只能用标准 Lua 5.3 解释器模式（性能较低）。如果项目主要面向 iOS，评估性能是否足够。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>坑 2：Lua 脚本加载时序</summary>
+            <div class="details-content">
+                <p>项目的 Lua 脚本需要在 hotfix 之前加载吗？业务脚本和 hotfix 补丁的执行顺序必须明确设计。典型顺序：启动 XLua → 加载补丁 → 加载业务脚本 → 执行业务逻辑。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>坑 3：不要用 Lua 写性能热点</summary>
+            <div class="details-content">
+                <p>Lua 调用 C# 的每个跨语言操作都有开销。Update/FixedUpdate 中每帧执行几十次 Lua→C# 调用，帧时间会明显增加。性能热点逻辑留在 C# 层，Lua 层负责配置、流程控制、UI 逻辑。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>坑 4：编辑器与真机行为差异</summary>
+            <div class="details-content">
+                <p>编辑器中 XLua 默认用反射（不用生成代码），真机用生成的代码。这意味着编辑器和真机上同一行 Lua 代码可能有不同的性能甚至行为。务必在真机上测试。</p>
+            </div>
+        </details>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>在 Unity 项目中集成 XLua，写一个 Lua 脚本在 Start 时打印「Hello from Lua」，在 Update 中把 C# 传过来的 deltaTime 打印出来。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>实战练习</h4>
+                    <p>定义一个 C# 的 <code>QuestManager</code> 类，在 Lua 侧写一个任务系统：接受任务、检查条件、完成任务、领取奖励。要求全部逻辑在 Lua，C# 侧只暴露数据变更通知。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>架构思考</h4>
+                    <p>如果项目使用 XLua，你会如何划分 C# 层和 Lua 层的职责？写出你的分层原则，并说明哪些逻辑必须留在 C#，哪些适合放 Lua。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>XLua 的核心价值：热更新。中国手游 App Store 审核的「免死金牌」</li>
+            <li>C# → Lua 用委托最快（零 GC），Lua → C# 必须生成代码避免反射</li>
+            <li>Hotfix 基于 IL 注入，运行时替换方法——不是魔法，但有 IL 修改的限制</li>
+            <li>跨语言 GC：LuaFunction/LuaTable 用完必须 Dispose，否则泄漏</li>
+            <li>性能热点留 C# 层，Lua 做配置、流程、UI 逻辑</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://github.com/Tencent/xLua" target="_blank">XLua GitHub 仓库与文档</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="10-c-api-and-stack.html">← 上一章：C API 与 Lua 栈</a>
+            <a href="12-lua-ui-development.html">下一章：Lua UI 开发实战 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

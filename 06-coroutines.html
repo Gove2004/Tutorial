@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>协程与异步编程 - Lua 从入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="05-metatables-and-oop.html">← 上一章</a>
+        <a href="07-error-handling.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>06 - 协程与异步编程</h1>
+
+        <p>Lua 的协程（coroutine）是 stackful、非对称的协作式多任务机制。它不像 Go 的 goroutine 那样自动调度，不像 JS 的 async/await 那样基于 Promise。它是一种底层而灵活的工具——你可以用它搭建任何并发模型。</p>
+
+        <h2>协程是什么</h2>
+
+        <div class="definition">
+            <h4>Lua 协程</h4>
+            <p>一个协程是一个独立的 Lua 线程——它有自己完整的调用栈、局部变量和指令指针。它与主线程（和其他协程）共享全局状态。协程之间通过 <code>yield</code>（暂停）和 <code>resume</code>（恢复）协作切换。</p>
+        </div>
+
+        <table>
+            <thead><tr><th>特性</th><th>Lua 协程</th><th>操作系统线程</th><th>Python asyncio</th></tr></thead>
+            <tbody>
+                <tr><td>调度方式</td><td>手动 yield/resume</td><td>抢占式（OS 决定）</td><td>事件循环 + await</td></tr>
+                <tr><td>并发性</td><td>协作式（调用者决定何时切）</td><td>真正并行（多核）</td><td>协作式单线程</td></tr>
+                <tr><td>创建开销</td><td>极小（Lua 级别）</td><td>大（OS 级别）</td><td>小（Python 级）</td></tr>
+                <tr><td>栈</td><td>独立 Lua 栈</td><td>独立 OS 栈</td><td>独立 Python 栈</td></tr>
+                <tr><td>适合场景</td><td>游戏逻辑、迭代器、状态机</td><td>CPU 密集、阻塞 I/O</td><td>网络 I/O、爬虫</td></tr>
+            </tbody>
+        </table>
+
+        <h2>协程 API 基础</h2>
+
+        <pre><code class="language-lua">-- 创建协程
+local co = coroutine.create(function(param)
+    print("协程启动，收到参数: " .. param)
+    local received = coroutine.yield("第一次暂停")
+    print("被唤醒，收到: " .. (received or "nil"))
+    return "协程结束"
+end)
+
+-- resume 的第一个返回值是 bool（是否成功），后面是 yield 的返回值
+local ok, yield_result = coroutine.resume(co, "hello")
+-- 输出：协程启动，收到参数: hello
+-- ok = true, yield_result = "第一次暂停"
+
+-- 再次 resume，第二个参数传给 yield 的位置
+local ok2, final_result = coroutine.resume(co, "world")
+-- 输出：被唤醒，收到: world
+-- ok2 = true, final_result = "协程结束"
+
+-- 协程状态
+print(coroutine.status(co))  --> dead
+
+-- 协程生命周期：suspended → running → normal → dead</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>resume/yield 的数据流</strong>：<code>resume</code> 的额外参数 → 作为 <code>yield</code> 的返回值。<code>yield</code> 的参数 → 作为 <code>resume</code> 的返回值。这是双向通道，也是理解协程最难的地方。
+        </div>
+
+        <h2>生产者-消费者模式</h2>
+
+        <pre><code class="language-lua">-- 生产者：生成数据，每次 yield 一个
+local function producer()
+    for i = 1, 5 do
+        coroutine.yield("item_" .. i)
+    end
+    return nil  -- 结束信号
+end
+
+-- 消费者：驱动生产者
+local function consumer(prod)
+    while true do
+        local ok, item = coroutine.resume(prod)
+        if not ok then
+            error("Producer error: " .. item)
+        end
+        if item == nil then
+            break
+        end
+        print("Consumed: " .. item)
+    end
+end
+
+local co = coroutine.create(producer)
+consumer(co)</code></pre>
+
+        <h2>协程实现游戏主循环调度</h2>
+
+        <p>这是 Lua 在游戏中最经典的用法：每个 NPC、技能、任务都是一个协程，主循环每帧 resume 一小步。</p>
+
+        <pre><code class="language-lua">-- 协程调度器
+local Scheduler = {
+    tasks = {},
+}
+
+function Scheduler:spawn(func)
+    local co = coroutine.create(func)
+    table.insert(self.tasks, {co = co, alive = true})
+    return co
+end
+
+function Scheduler:update(dt)
+    -- 每帧依次唤醒所有活着的协程一步
+    for _, task in ipairs(self.tasks) do
+        if task.alive then
+            local ok, err = coroutine.resume(task.co, dt)
+            if not ok then
+                print("Task error: " .. err)
+                task.alive = false
+            elseif coroutine.status(task.co) == "dead" then
+                task.alive = false
+            end
+        end
+    end
+    -- 清理死任务
+    self:_cleanup()
+end
+
+-- 等待 N 秒（游戏内时间）
+local function wait(seconds)
+    local elapsed = 0
+    while elapsed < seconds do
+        local dt = coroutine.yield()
+        elapsed = elapsed + dt
+    end
+end
+
+-- 使用示例：一个 NPC 巡逻逻辑
+Scheduler:spawn(function()
+    print("NPC: 开始巡逻")
+    while true do
+        print("NPC: 走到 A 点")
+        wait(2.0)                   -- 等 2 秒（分多个 frame 完成）
+        print("NPC: 走到 B 点")
+        wait(3.0)                   -- 等 3 秒
+        print("NPC: 巡逻一圈完毕")
+    end
+end)
+
+-- 模拟主循环：每帧 0.1 秒
+for frame = 1, 60 do
+    Scheduler:update(0.1)
+end</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>协程 vs Unity Coroutine</strong>：Unity 的协程用 <code>yield return new WaitForSeconds(2)</code> 等待，调度由 Unity 引擎内部完成。Lua 协程需要你自己写调度器——这既是负担也是自由度。你可以定义自己的 wait 语义（等帧、等事件、等条件）。
+        </div>
+
+        <h2>用协程实现异步 I/O（无阻塞）</h2>
+
+        <pre><code class="language-lua">-- 非阻塞异步框架（简化版）
+local Async = {
+    pending = {},  -- 等待完成的协程
+    sockets = {},   -- 待检查的 socket
+}
+
+-- 异步读取：发起读请求，挂起协程
+function Async:async_read(socket, timeout)
+    timeout = timeout or 30
+    local co = coroutine.running()  -- 获取当前协程
+    self.sockets[co] = {
+        socket = socket,
+        deadline = os.time() + timeout,
+    }
+    return coroutine.yield()  -- 挂起，等数据
+end
+
+-- 每帧检查：有数据的协程继续执行
+function Async:poll()
+    for co, info in pairs(self.sockets) do
+        local data = info.socket:receive("*l")
+        if data then
+            self.sockets[co] = nil
+            coroutine.resume(co, data)
+        elseif os.time() > info.deadline then
+            coroutine.resume(co, nil, "timeout")
+            self.sockets[co] = nil
+        end
+    end
+end
+
+-- 协程包装器
+function Async:run(func)
+    local co = coroutine.create(func)
+    coroutine.resume(co)
+end
+
+-- 使用示例：不需要 callback 地狱
+Async:run(function()
+    print("正在下载用户数据...")
+    local user_data = Async:async_read(user_socket)
+    if not user_data then
+        print("下载失败")
+        return
+    end
+    print("用户数据: " .. user_data)
+
+    print("正在下载配置...")
+    local config_data = Async:async_read(config_socket)
+    print("配置: " .. config_data)
+    -- 看起来是同步的代码，实际是异步执行的
+end)</code></pre>
+
+        <div class="sidebar-note">
+            <strong>为什么不是 callback？</strong> 上面的 async_read 让异步代码<strong>读起来像同步代码</strong>——没有嵌套回调，没有 Promise 链。协程保持了你写代码时的线性思维，而调度器在底层处理非阻塞。这是协程相较 callback 的核心优势。
+        </div>
+
+        <h2>coroutine.wrap：更简洁的语法</h2>
+
+        <pre><code class="language-lua">-- create + resume vs wrap
+local co = coroutine.create(func)
+coroutine.resume(co, arg)    -- 返回 ok, 返回值
+
+-- wrap 返回一个函数，直接调用
+local wrapped = coroutine.wrap(func)
+wrapped(arg)                  -- 直接返回 yield 的值（不返回 ok）
+
+-- wrap 的缺点：错误直接抛出，不会被 ok 捕获
+local safe = coroutine.wrap(function()
+    error("oops")
+end)
+-- safe()  -- 直接抛出错误，没有 pcall 保护！</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>wrap 的风险</strong>：coroutine.wrap 简洁但不能错误恢复——协程内部抛出的错误会穿透到调用者。生产代码建议用 <code>coroutine.create</code> + <code>coroutine.resume</code>，自己检查第一个返回值 ok。
+        </div>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>写一个 <code>range_coroutine(lo, hi)</code>，用协程逐个 yield 范围内的每一个数。然后写一个 <code>each</code> 函数驱动它。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶练习</h4>
+                    <p>实现一个 <code>wait_for_event</code> 函数——协程调用它时挂起，直到某个事件被触发才恢复。用事件系统（参见第 3 章）配合协程调度器完成。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>设计思考</h4>
+                    <p>Lua 的协程是 stackful 的（从任意嵌套深度都可以 yield）。Python 的 generator 不是。为什么 stackful 对协程调度器的设计很重要？结合上面游戏 NPC 巡逻的 <code>wait</code> 函数分析。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>Lua 协程是 stackful、非对称、协作式——独立栈、手动 yield/resume</li>
+            <li>resume 的参数 → yield 的返回值；yield 的参数 → resume 的返回值</li>
+            <li>游戏中最经典用法：每个逻辑单元是一个协程，主循环逐帧驱动</li>
+            <li>协程可以让异步 I/O 代码读起来像同步代码，避免 callback hell</li>
+            <li>生产代码用 create + resume（可错误恢复），不用 wrap（错误穿透）</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.lua.org/manual/5.4/manual.html#2.6" target="_blank">Lua 5.4 参考手册 — 协程</a></li>
+                <li><a href="https://www.lua.org/pil/9.html" target="_blank">PiL §9 — 协程</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="05-metatables-and-oop.html">← 上一章：元表与面向对象</a>
+            <a href="07-error-handling.html">下一章：错误处理与调试 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

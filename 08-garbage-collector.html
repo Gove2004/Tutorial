@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>垃圾回收器原理 - Lua 从入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="07-error-handling.html">← 上一章</a>
+        <a href="09-modules-and-packages.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>08 - 垃圾回收器原理</h1>
+
+        <p>Lua 的 GC 是自动的，但「自动」不等于「不用管」。理解 GC 的运作方式，你才能在性能敏感场景（如游戏每帧的 GC 停顿）中做出正确的内存管理决策。</p>
+
+        <h2>GC 的基本任务</h2>
+
+        <div class="definition">
+            <h4>垃圾回收</h4>
+            <p>GC 负责找出<strong>不再可达</strong>的对象（从根集——全局表_G、注册表、当前调用栈——出发，沿着引用链遍历不到的对象），并回收它们占用的内存。</p>
+        </div>
+
+        <p>根集（root set）：Lua 从这些地方开始遍历引用链：</p>
+        <ul>
+            <li>全局环境 <code>_G</code></li>
+            <li>注册表（registry）——C API 中存放共享数据的地方</li>
+            <li>当前活跃的协程栈上的所有值</li>
+            <li>元表、元方法链（防止元表被提前回收导致悬空引用）</li>
+        </ul>
+
+        <h2>Lua 5.1-5.3：增量式标记-清除</h2>
+
+        <p>经典的三色标记-清除（tri-color mark & sweep），但以<strong>增量方式</strong>执行——GC 工作分散在多个程序步骤中，每次做一小段，避免长时间 stop-the-world。</p>
+
+        <table>
+            <thead><tr><th>颜色</th><th>含义</th></tr></thead>
+            <tbody>
+                <tr><td>白色</td><td>未访问。扫描结束时仍为白色的对象 = 垃圾</td></tr>
+                <tr><td>灰色</td><td>已访问但其引用的对象尚未扫描完</td></tr>
+                <tr><td>黑色</td><td>已访问且其引用的对象也都处理完毕</td></tr>
+            </tbody>
+        </table>
+
+        <p>增量式 GC 的阶段：</p>
+        <ol>
+            <li><strong>暂停（pause）</strong>：标记所有根对象为灰色</li>
+            <li><strong>传播（propagate）</strong>：逐个处理灰色对象，将其引用也标记为灰色，自身变黑色</li>
+            <li><strong>清除（sweep）</strong>：释放白色对象，重置颜色</li>
+            <li><strong>终结（finalize）</strong>：调用已回收对象的 <code>__gc</code> 元方法</li>
+        </ol>
+
+        <p>每个阶段的工作量由 <code>collectgarbage("setstepmul")</code> 等参数控制，让 GC 在「快速回收」和「短停顿」之间取得平衡。</p>
+
+        <h2>Lua 5.4：分代 GC（Generational GC）</h2>
+
+        <p>Lua 5.4 的重磅更新——引入<strong>分代 GC</strong>，基于「大多数对象死于年轻时代」的假设。</p>
+
+        <pre><code class="language-lua">-- 查看当前 GC 模式
+print(collectgarbage("isrunning"))  --> true/false
+
+-- 分代模式下的特殊参数
+-- 老年代大小超过此值触发 major GC
+collectgarbage("setpause", 150)    -- 老年代内存阈值（%）
+
+-- 新生代大小超过此值触发 minor GC
+collectgarbage("setstepmul", 200)  -- minor GC 的速度倍数</code></pre>
+
+        <h3>分代假设</h3>
+
+        <p>分代 GC 将对象分为两类：</p>
+        <ul>
+            <li><strong>新生代（young）</strong>：刚创建的对象。大多数很快变成垃圾（如临时字符串、循环内创建的 table）</li>
+            <li><strong>老年代（old）</strong>：活过两次 minor GC 的对象被晋升。通常存活时间长</li>
+        </ul>
+
+        <p><strong>Minor GC</strong>（频繁、快速）：只扫描新生代 + 老年代到新生代的引用。不扫描老年代内部。</p>
+        <p><strong>Major GC</strong>（偶尔、全面）：扫描所有对象，类似传统的增量式标记-清除。</p>
+
+        <div class="callout callout-tip">
+            <strong>为什么游戏受益最大？</strong> 游戏每帧创建大量临时对象（向量计算、UI 文本、消息传递），这些对象在帧结束时就死掉了。分代 GC 的 minor collection 只扫年轻对象，扫得快、停顿短。传统增量 GC 每轮都要扫全部对象，游戏帧时间抖动更大。
+        </div>
+
+        <h2>collectgarbage()：手动控制 GC</h2>
+
+        <pre><code class="language-lua">-- 查看内存使用（KB）
+print(collectgarbage("count"))      -- 当前使用内存
+
+-- 手动触发一次完整的 GC 循环
+collectgarbage("collect")
+
+-- 暂停 GC（停止自动回收）
+collectgarbage("stop")
+-- ... 在关键性能区域中分配内存 ...
+collectgarbage("restart")
+
+-- 设置 GC 参数
+collectgarbage("setpause", 100)    -- GC 周期的启动阈值（%）
+collectgarbage("setstepmul", 200)  -- GC 速度相对于内存分配速度的倍数
+
+-- 查看 GC 步进统计
+local count, stepmul, pause = collectgarbage("stepmul")
+print(count, stepmul, pause)       -- 上次 GC 步进量, 步进乘数, 暂停阈值</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>不要在生产代码中随意调用 collectgarbage("stop")</strong>：停止 GC 意味着内存只增不减。如果忘记 restart，程序最终 OOM。只在确定的、短暂的性能关键段中使用。
+        </div>
+
+        <h2>__gc 终结器</h2>
+
+        <pre><code class="language-lua">-- __gc 允许在对象被回收时执行清理
+-- Lua 5.4 中 table 和 userdata 都支持 __gc
+
+local function Resource(filename)
+    local obj = {
+        file = io.open(filename, "w"),
+        filename = filename,
+    }
+    setmetatable(obj, {
+        __gc = function(self)
+            print("GC: closing " .. self.filename)
+            self.file:close()
+        end
+    })
+    return obj
+end
+
+do
+    local res = Resource("temp.txt")
+    res.file:write("some data")
+    -- res 离开作用域，成为垃圾
+end
+collectgarbage()  -- GC 运行时会调用 __gc，自动关闭文件
+
+-- ⚠ 注意：__gc 的调用时机和顺序不保证
+-- 多个对象的 __gc 可能以任意顺序执行</code></pre>
+
+        <div class="sidebar-note">
+            <strong>to-be-closed 变量（Lua 5.4）</strong>：比 __gc 更确定性的资源管理——用 <code>local f &lt;close&gt; = io.open(...)</code> 声明，变量离开作用域时<strong>确定性</strong>调用 <code>__close</code> 方法。类似 Python 的 <code>with</code> 语句。不需要等 GC。
+        </div>
+
+        <h2>内存泄漏排查清单</h2>
+
+        <h3>弱引用表未正确使用</h3>
+        <pre><code class="language-lua">-- 错误：普通表做缓存，key 永远不被回收
+local cache = {}
+function load_resource(path)
+    if cache[path] then return cache[path] end
+    local data = {read_file(path)}  -- 大对象
+    cache[path] = data
+    return data
+end
+-- 每个被加载过的 path 对应的 data 永不被释放
+
+-- 正确：用弱键表
+local cache = setmetatable({}, {__mode = "k"})
+function load_resource(path_obj)  -- 传入 table 对象而不是字符串
+    if cache[path_obj] then return cache[path_obj] end
+    local data = {read_file(path_obj.path)}
+    cache[path_obj] = data
+    return data
+end</code></pre>
+
+        <h3>全局变量泄露</h3>
+        <pre><code class="language-lua">-- 错误：忘了 local
+function init()
+    data = {1, 2, 3}  -- 全局！永远不被回收
+end
+
+-- 检测：检查 _G 中不该存在的键
+for k, v in pairs(_G) do
+    if type(v) == "table" and not _known_globals[k] then
+        print("Possible leak: " .. k)
+    end
+end</code></pre>
+
+        <h3>闭包持有大对象引用</h3>
+        <pre><code class="language-lua">-- 错误：闭包捕获了大对象
+local function create_handler()
+    local big_data = generate_huge_table()  -- 100MB
+    return function(event)
+        return process(event)  -- 不需要 big_data，但 upvalue 持有引用了！
+    end
+end
+
+-- 正确：释放不需要的 upvalue
+local function create_handler()
+    local big_data = generate_huge_table()
+    local result = process_all(big_data)
+    big_data = nil  -- 显式释放，让 GC 可以回收
+    return function(event)
+        return result[event] or "unknown"
+    end
+end</code></pre>
+
+        <h3>协程引用未释放</h3>
+        <pre><code class="language-lua">-- 协程 status 为 "suspended" 时，其栈上的所有局部变量都被保留
+local co = coroutine.create(function()
+    local huge = generate_huge()  -- 被协程栈持有
+    coroutine.yield()             -- paused，huge 不被回收
+end)
+coroutine.resume(co)
+-- co 还活着，huge 还在内存中
+
+-- 不再需要协程时，要么 resume 让它跑完，要么置 nil
+co = nil  -- 释放协程引用，GC 可以回收整个协程包括其栈</code></pre>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>创建 100 万个临时 table，测量 <code>collectgarbage("count")</code> 前后的内存变化。然后手动 <code>collectgarbage()</code> 看看回收了多少。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶实验</h4>
+                    <p>实现一个对象池，预创建 100 个 table 放入池中。对比手动分配（每次新建 table）和从池中取用的性能差异。用 <code>os.clock()</code> 测量 100 万次取用/归还。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>思考题</h4>
+                    <p>Lua 5.4 的分代 GC 对游戏性能意味着什么？考虑以下场景：一个移动技能在每帧创建 200 个临时 table 用于伤害计算。minor GC 和 major GC 各扮演什么角色？</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>GC 从根集（_G、注册表、协程栈）出发，标记-清除不可达对象</li>
+            <li>Lua 5.1-5.3 是三色增量式标记-清除；5.4 引入分代 GC（minor + major）</li>
+            <li>分代 GC 对游戏类「大量创建 → 用完即弃」模式是最优方案</li>
+            <li>__gc 提供终结器，但调用时机不保证；5.4 的 to-be-closed 更可靠</li>
+            <li>内存泄漏三根源：全局变量、忘了 nil 的引用、协程持有大对象</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.lua.org/manual/5.4/manual.html#2.5" target="_blank">Lua 5.4 参考手册 — 垃圾回收</a></li>
+                <li><a href="https://www.lua.org/gems/sample.pdf" target="_blank">Lua Programming Gems §7 — GC 优化技术</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="07-error-handling.html">← 上一章：错误处理与调试</a>
+            <a href="09-modules-and-packages.html">下一章：模块系统与包管理 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

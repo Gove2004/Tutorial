@@ -3,186 +3,169 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>泰拉瑞亚模组开发教程 — tModLoader 完全指南</title>
-    <link rel="stylesheet" href="assets/prism/prism.css">
+    <title>Lua 从入门到精通 - 完整教程</title>
     <link rel="stylesheet" href="assets/style.css">
     <link rel="stylesheet" href="assets/theme-tech.css">
 </head>
 <body>
-    <div class="tutorial-hero">
-        <h1>泰拉瑞亚模组开发教程</h1>
-        <p class="subtitle">基于 tModLoader 1.4.4，从第一个物品到发布上架 Steam Workshop 的完整指南</p>
-        <p class="chapter-subtitle">
-            面向有 C# 基础的开发者 · 18 章系统课程 · 含完整代码示例
-        </p>
-    </div>
-
     <main>
-        <h2>课程简介</h2>
-        <p>
-            泰拉瑞亚（Terraria）是一款拥有庞大玩家群体的 2D 沙盒游戏，而 tModLoader 是官方支持的模组框架，
-            让你可以用 C# 编写全新的游戏内容——武器、装备、NPC、Boss、生物群落，甚至是全新的游戏机制。
-        </p>
-        <p>
-            本教程假设你已经具备 C# 基础语法知识（类、继承、属性、方法重写），将带你从零开始掌握 tModLoader 模组开发的完整流程。
-            学完本课程后，你将能够独立开发、调试和发布一个完整的泰拉瑞亚模组。
-        </p>
+        <h1>Lua 从入门到精通</h1>
+        <p class="intro">深入掌握 Lua 编程语言——从核心语法到底层机制（元表、GC、虚拟机），再到生产级应用（XLua、游戏UI），覆盖语言设计哲学与实战最佳实践。</p>
+
+        <div class="version-info">
+            <p><strong>版本：</strong>v1.0 | <strong>更新日期：</strong>2026-06-17</p>
+            <p><strong>适用版本：</strong>Lua 5.4 / LuaJIT 2.1 / XLua 2.x</p>
+        </div>
 
         <div class="callout callout-info">
-            <strong>环境要求</strong>：Steam 版泰拉瑞亚 + tModLoader（均可通过 Steam 免费获取 tModLoader）、Visual Studio 2022 或 VS Code + C# 扩展。
+            <strong>关于本教程</strong>：
+            <ul>
+                <li><strong>前置知识</strong>：已掌握至少一门编程语言（如 C/C++、Python 或 Java），不要求 Lua 基础</li>
+                <li><strong>学习深度</strong>：系统掌握 —— 从语法到虚拟机，从原理到生产应用</li>
+                <li><strong>主题风格</strong>：技术蓝 theme-tech（编程语言教程，代码密度高，深色代码块优化）</li>
+                <li><strong>教学特点</strong>：每章包含真实代码示例、错误/好写法对比、调试技巧和练习任务</li>
+            </ul>
         </div>
 
-        <h2>学习路线</h2>
-        <p>建议按顺序学习。前 8 章是核心基础，9-14 章是中级进阶，15-18 章是高级主题。</p>
+        <h2>课程目录</h2>
 
-        <div class="callout callout-tip">
-            <strong>推荐学习方式</strong>
-            这套教程最适合一边读一边做。建议你把前 8 章里的示例串成一个小型练手模组：先做一个材料和一把武器，再补弹幕、Buff、敌怪与 Boss。到了后半程，再把世界生成、生物群落、UI、联机和发布逐步接进去。这样你学到的不是孤立 API，而是一条真正能跑通的模组开发路线。
+        <div class="chapter-list">
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-lua-overview.html">01 - Lua 概述与设计哲学</a></h3>
+                <p>Lua 的起源与历史定位，核心设计取舍（小巧、可嵌入、高性能），与 Python/JS 的对比，以及为什么 Lua 在游戏行业统治了二十年</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-syntax-and-types.html">02 - 基础语法与类型系统</a></h3>
+                <p>变量、8 种数据类型（nil 的特殊性）、运算符、控制流、多重赋值、变长参数 —— 一次性建立扎实的语法地基</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-functions-and-closures.html">03 - 函数、闭包与尾调用</a></h3>
+                <p>一等函数、闭包的运作原理与实战应用、proper tail call 机制、函数式编程模式在 Lua 中的优雅表达</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">核心</span>
+                <h3><a href="04-table-deep-dive.html">04 - Table 深度解析</a></h3>
+                <p>Table 是 Lua 唯一的容器——数组部分 vs 哈希部分、rehash 触发条件、弱引用表、迭代器协议、table.pack/unpack 实战</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">核心</span>
+                <h3><a href="05-metatables-and-oop.html">05 - 元表与面向对象</a></h3>
+                <p>元表是所有魔法之源：__index/__newindex 实现继承、__call/__add 颠覆对象行为、用十几行代码手写一个完整 OOP 框架</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">进阶</span>
+                <h3><a href="06-coroutines.html">06 - 协程与异步编程</a></h3>
+                <p>非抢占式多任务：生产者-消费者、游戏主循环中的协程调度、与 Unity 协程的对比、Lua 协程的本质是 stackful coroutine</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">核心</span>
+                <h3><a href="07-error-handling.html">07 - 错误处理与调试</a></h3>
+                <p>pcall/xpcall 保护调用、错误信息设计、debug 库的内部透视、traceback 解读、断言与防御性编程在 Lua 中的实践</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">进阶</span>
+                <h3><a href="08-garbage-collector.html">08 - 垃圾回收器原理</a></h3>
+                <p>三色标记清除 → 分代 GC（Lua 5.4）、__gc 终结器、弱引用表的 GC 角色、stop-the-world 时间控制、内存泄漏排查清单</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="09-modules-and-packages.html">09 - 模块系统与包管理</a></h3>
+                <p>require 的路径搜索机制、模块隔离原理、环境（_ENV）与沙盒、LuaRocks 生态、跨文件代码组织的工程化方案</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">进阶</span>
+                <h3><a href="10-c-api-and-stack.html">10 - C API 与 Lua 栈</a></h3>
+                <p>Lua 虚拟机栈模型、从 C 调用 Lua / 从 Lua 调用 C、userdata 与 lightuserdata、手写一个 C 扩展模块、LuaJIT FFI 的降维打击</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">应用</span>
+                <h3><a href="11-xlua-practice.html">11 - XLua 入门与实践</a></h3>
+                <p>Unity 中的 Lua 热更新架构、hotfix 补丁注入原理、C# 与 Lua 双向调用性能优化、XLua 项目工程化避坑指南</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">应用</span>
+                <h3><a href="12-lua-ui-development.html">12 - Lua UI 开发实战</a></h3>
+                <p>Lua 驱动 UI 的常见模式：MVC 设计、事件分发、UI 生命周期管理、与 Unity UGUI 的绑定、属性变更通知</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">收束</span>
+                <h3><a href="13-project-and-best-practices.html">13 - 实战项目与最佳实践</a></h3>
+                <p>从零构建一个 Lua 背包系统（数据结构 + 业务逻辑 + UI 绑定），整合前 12 章知识。附编码规范、性能检查清单与面试八股避坑</p>
+            </div>
+
         </div>
+
+        <h2>学习路径</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>语法基础（01-03章）</h4>
+                    <p>建立 Lua 语言心智模型。如果已有动态语言经验，可快速过一遍，重点放在闭包和尾调用上。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>核心机制（04-06章）</h4>
+                    <p>Table、元表、协程是 Lua 最独特的部分，也是面试和实际开发的绝对核心。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>底层机制（07-08章）</h4>
+                    <p>错误处理和 GC 决定生产稳定性。理解 GC 原理能帮你在性能敏感场景做出正确选择。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>工程化（09-10章）</h4>
+                    <p>模块化组织 + C API 打通 Lua 和宿主语言的边界。如果只用 Lua 写脚本，09 章足够；做引擎扩展必须啃下 10 章。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">5</span>
+                <div class="step-content">
+                    <h4>生产应用（11-12章）</h4>
+                    <p>XLua 和 UI 开发是游戏行业落地场景。纯学术兴趣可跳过；做游戏行业必读。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">6</span>
+                <div class="step-content">
+                    <h4>内化验证（13章）</h4>
+                    <p>动手写一个完整系统，看自己对 table、元表、协程、C API 的理解是否连成一片。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>学习资源</h2>
+        <ul>
+            <li><a href="https://www.lua.org/manual/5.4/" target="_blank">Lua 5.4 官方参考手册</a> —— 权威但简练，适合查阅而非入门</li>
+            <li><a href="https://www.lua.org/pil/" target="_blank">Programming in Lua (PiL)</a> —— Lua 作者 Roberto 亲笔，第一版免费在线阅读</li>
+            <li><a href="https://luajit.org/" target="_blank">LuaJIT 官方网站</a> —— JIT 编译器文档与性能调优指南</li>
+            <li><a href="https://github.com/Tencent/xLua" target="_blank">XLua GitHub 仓库</a> —— 腾讯开源的 Unity Lua 编程方案</li>
+            <li><a href="https://www.lua.org/gems/" target="_blank">Lua Programming Gems</a> —— 社区经验合集，覆盖性能、C API、协程等深度主题</li>
+        </ul>
     </main>
-
-    <div class="chapter-list">
-        <h2 style="max-width: 900px; margin: 0 auto 24px; padding: 0;">章节目录</h2>
-
-        <!-- === 基础篇 === -->
-        <a href="01-tmodloader-intro.html" class="chapter-card">
-            <span class="ch-num">1</span>
-            <span class="ch-title">tModLoader 概述与环境搭建</span>
-            <span class="tag tag-basic">基础</span>
-            <div class="ch-desc">了解 tModLoader 的工作原理，完成开发环境配置，创建并运行你的第一个模组</div>
-        </a>
-
-        <a href="02-mod-structure.html" class="chapter-card">
-            <span class="ch-num">2</span>
-            <span class="ch-title">模组结构与生命周期</span>
-            <span class="tag tag-basic">基础</span>
-            <div class="ch-desc">Mod 类、Autoload 机制、ModContent 系统、加载阶段详解与文件组织规范</div>
-        </a>
-
-        <!-- === 核心内容篇 === -->
-        <a href="03-items-basics.html" class="chapter-card">
-            <span class="ch-num">3</span>
-            <span class="ch-title">物品基础</span>
-            <span class="tag tag-basic">基础</span>
-            <div class="ch-desc">ModItem 类详解、物品属性配置、纹理制作、SetDefaults 与物品类型体系</div>
-        </a>
-
-        <a href="04-weapons.html" class="chapter-card">
-            <span class="ch-num">4</span>
-            <span class="ch-title">武器进阶：四职业武器实现</span>
-            <span class="tag tag-intermediate">中级</span>
-            <div class="ch-desc">近战、远程、魔法、召唤四职业武器的核心机制、伤害计算与攻速控制</div>
-        </a>
-
-        <a href="05-accessories-potions.html" class="chapter-card">
-            <span class="ch-num">5</span>
-            <span class="ch-title">饰品与药水</span>
-            <span class="tag tag-intermediate">中级</span>
-            <div class="ch-desc">饰品实现、UpdateAccessory 钩子、装备特效、药水与 Buff 关联</div>
-        </a>
-
-        <a href="06-tiles-blocks.html" class="chapter-card">
-            <span class="ch-num">6</span>
-            <span class="ch-title">物块与家具</span>
-            <span class="tag tag-intermediate">中级</span>
-            <div class="ch-desc">ModTile、物块放置与破坏、家具系统（工作台/箱子/床）、帧动画贴图</div>
-        </a>
-
-        <a href="07-recipes-crafting.html" class="chapter-card">
-            <span class="ch-num">7</span>
-            <span class="ch-title">合成配方系统</span>
-            <span class="tag tag-intermediate">中级</span>
-            <div class="ch-desc">AddRecipe、RecipeGroup、条件合成、自定义合成站</div>
-        </a>
-
-        <a href="08-projectiles.html" class="chapter-card">
-            <span class="ch-num">8</span>
-            <span class="ch-title">弹幕系统</span>
-            <span class="tag tag-intermediate">中级</span>
-            <div class="ch-desc">ModProjectile、AI 方法、弹幕行为编程、碰撞检测与视觉特效</div>
-        </a>
-
-        <!-- === 进阶篇 === -->
-        <a href="09-buffs-debuffs.html" class="chapter-card">
-            <span class="ch-num">9</span>
-            <span class="ch-title">Buff 与 Debuff 系统</span>
-            <span class="tag tag-intermediate">中级</span>
-            <div class="ch-desc">ModBuff、Buff 效果实现、视觉与图标、持续伤害与条件触发</div>
-        </a>
-
-        <a href="10-enemies-ai.html" class="chapter-card">
-            <span class="ch-num">10</span>
-            <span class="ch-title">敌怪与 AI</span>
-            <span class="tag tag-advanced">进阶</span>
-            <div class="ch-desc">ModNPC、基础与自定义 AI、掉落表、敌怪生成条件、Banner 系统</div>
-        </a>
-
-        <a href="11-boss.html" class="chapter-card">
-            <span class="ch-num">11</span>
-            <span class="ch-title">Boss 制作</span>
-            <span class="tag tag-advanced">进阶</span>
-            <div class="ch-desc">多部位 Boss 设计、阶段切换、Boss 血条、召唤物与击败事件</div>
-        </a>
-
-        <a href="12-town-npcs.html" class="chapter-card">
-            <span class="ch-num">12</span>
-            <span class="ch-title">城镇 NPC</span>
-            <span class="tag tag-advanced">进阶</span>
-            <div class="ch-desc">TownNPC 房屋需求、对话系统、商店、NPC Happiness 与入住条件</div>
-        </a>
-
-        <a href="13-worldgen.html" class="chapter-card">
-            <span class="ch-num">13</span>
-            <span class="ch-title">世界生成</span>
-            <span class="tag tag-advanced">进阶</span>
-            <div class="ch-desc">ModSystem、世界生成任务、结构生成、矿石分布与世界后处理</div>
-        </a>
-
-        <a href="14-biomes.html" class="chapter-card">
-            <span class="ch-num">14</span>
-            <span class="ch-title">自定义生物群落</span>
-            <span class="tag tag-advanced">进阶</span>
-            <div class="ch-desc">ModBiome、背景与音乐、优先级、群落判定与环境特效</div>
-        </a>
-
-        <!-- === 高级篇 === -->
-        <a href="15-ui.html" class="chapter-card">
-            <span class="ch-num">15</span>
-            <span class="ch-title">UI 系统</span>
-            <span class="tag tag-advanced">进阶</span>
-            <div class="ch-desc">ModSystem、UserInterface、UIState/UIPanel、自定义 HUD</div>
-        </a>
-
-        <a href="16-sound-music.html" class="chapter-card">
-            <span class="ch-num">16</span>
-            <span class="ch-title">音效与音乐</span>
-            <span class="tag tag-intermediate">中级</span>
-            <div class="ch-desc">自定义音乐加载、ModSoundStyle、音效播放与环境音</div>
-        </a>
-
-        <a href="17-multiplayer.html" class="chapter-card">
-            <span class="ch-num">17</span>
-            <span class="ch-title">多人联机同步</span>
-            <span class="tag tag-advanced">进阶</span>
-            <div class="ch-desc">HandlePacket、ModPacket、同步策略、权限边界与联机调试技巧</div>
-        </a>
-
-        <a href="18-publish.html" class="chapter-card">
-            <span class="ch-num">18</span>
-            <span class="ch-title">发布与维护</span>
-            <span class="tag tag-advanced">进阶</span>
-            <div class="ch-desc">Workshop 发布流程、版本管理、兼容性处理与 API 更新应对</div>
-        </a>
-    </div>
-
-    <footer class="chapter-footer">
-        <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.85rem;">
-            泰拉瑞亚模组开发教程 · 基于 tModLoader 1.4.4 · 祝你模组开发愉快！
-        </div>
-    </footer>
-
-    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js"></script>
-    <script src="assets/script.js"></script>
 </body>
 </html>

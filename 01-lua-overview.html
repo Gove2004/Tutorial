@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lua 概述与设计哲学 - Lua 从入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <span></span>
+        <a href="02-syntax-and-types.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>01 - Lua 概述与设计哲学</h1>
+
+        <p>Lua 是一门被严重低估的语言。它在游戏行业默默统治了二十年，却很少出现在技术媒体的头条。理解 Lua 的设计哲学，是理解它为什么「长得奇怪」的关键——它的每一个设计取舍，都源于一个极其明确的目标。</p>
+
+        <h2>Lua 是什么</h2>
+
+        <div class="definition">
+            <h4>定义</h4>
+            <p>Lua 是一门<strong>轻量级、可嵌入、多范式</strong>的脚本语言，由巴西 PUC-Rio 大学的 Roberto Ierusalimschy、Waldemar Celes 和 Luiz Henrique de Figueiredo 于 1993 年创建。名字取自葡萄牙语「月亮」。</p>
+        </div>
+
+        <p>Lua 的核心定位不是「通用编程语言」，而是<strong>嵌入式脚本语言</strong>——它被设计来寄生在宿主程序（通常是 C/C++）内部，为宿主提供动态脚本能力。这个定位决定了它的一切。</p>
+
+        <table>
+            <thead><tr><th>特性</th><th>Lua 的做法</th><th>原因</th></tr></thead>
+            <tbody>
+                <tr><td>体积</td><td>完整源码 ~2.4 万行 C，编译后 ~300KB</td><td>必须能塞进嵌入式设备和游戏引擎</td></tr>
+                <tr><td>依赖</td><td>纯 ANSI C，零外部依赖</td><td>必须在 ARM、MIPS、x86 等任意平台编译通过</td></tr>
+                <tr><td>性能</td><td>LuaJIT 可达 C 语言 1/3 速度</td><td>游戏每帧调用数千次脚本，性能是硬需求</td></tr>
+                <tr><td>可嵌入性</td><td>完整的 C API，双向调用自如</td><td>宿主程序决定何时运行哪段 Lua 代码</td></tr>
+                <tr><td>语言复杂度</td><td>仅 8 种类型，21 个关键字</td><td>非程序员（策划、美术）也能上手写脚本</td></tr>
+            </tbody>
+        </table>
+
+        <h2>设计哲学：少即是多</h2>
+
+        <p>Lua 的设计哲学可以用一句话概括：<strong>用最小的概念集合提供最大的表达能力</strong>。它不追求「每种需求都有语言内置支持」，而是追求「用很少的机制组合出任何模式」。</p>
+
+        <h3>机制替代特性</h3>
+
+        <p>Lua 几乎没有「内置特性」。它有的是一组精心设计的<strong>机制</strong>，这些机制可以组合出任意特性：</p>
+
+        <table>
+            <thead><tr><th>你熟悉的特性</th><th>Lua 的实现方式</th><th>涉及的机制</th></tr></thead>
+            <tbody>
+                <tr><td>面向对象</td><td>没有 class 关键字</td><td>table + 元表 __index 链 = 继承</td></tr>
+                <tr><td>命名空间/模块</td><td>没有 namespace 关键字</td><td>table 就是命名空间，文件即模块</td></tr>
+                <tr><td>泛型 / 模板</td><td>没有类型参数</td><td>动态类型，天然泛型</td></tr>
+                <tr><td>switch-case</td><td>没有 switch 语句</td><td>table 直接当跳转表用</td></tr>
+                <tr><td>数组、字典、集合</td><td>只有一种容器</td><td>table 同时承担三种角色</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>设计取舍</strong>：Lua 故意不提供 class、namespace、switch 等「显而易见的特性」。不是做不到——是用 table + 元表能更统一地解决。每增加一个语言内置特性，就增加解释器复杂度、学习成本和与其他特性的交互面。Lua 的选择是：好机制 > 多特性。
+        </div>
+
+        <h3>Table 是宇宙中心</h3>
+
+        <p>在 Python 里，你有 list、dict、set、object、namedtuple——各司其职。在 Lua 里，<strong>table 承担了以上所有角色</strong>。这不是缺陷，这是 Lua 最强大的设计决策。</p>
+
+        <p>一个 table 同时是数组（整数键）和哈希表（任意键），两者存在于同一个对象中，Lua 自动在内部做最优化。元表（metatable）则为 table 赋予运算符重载、继承、只读代理等能力。掌握 table 就是掌握了 Lua 的一半。</p>
+
+        <h2>Lua 的诞生与演化</h2>
+
+        <table>
+            <thead><tr><th>版本</th><th>年份</th><th>关键变化</th></tr></thead>
+            <tbody>
+                <tr><td>Lua 1.0</td><td>1993</td><td>诞生于巴西石油公司 Petrobras 的数据录入需求。前身是 SOL（Simple Object Language），因公司不想维护自研语言，作者将其开源为 Lua</td></tr>
+                <tr><td>Lua 3.0</td><td>1997</td><td>引入 fallback（元表的前身），table 开始具备可编程语义</td></tr>
+                <tr><td>Lua 4.0</td><td>2000</td><td>引入 for 语句、C API 重大重构</td></tr>
+                <tr><td>Lua 5.0</td><td>2003</td><td>引入协程（coroutine）、元表取代 fallback、词法作用域。</td></tr>
+                <tr><td>Lua 5.1</td><td>2006</td><td>引入模块系统、增量式 GC。至今仍是使用最广的版本（LuaJIT 基于 5.1）</td></tr>
+                <tr><td>Lua 5.2</td><td>2011</td><td>引入 _ENV 环境、ephemeron 弱表、goto、位运算库</td></tr>
+                <tr><td>Lua 5.3</td><td>2015</td><td>引入整数子类型、位运算符、utf8 库</td></tr>
+                <tr><td>Lua 5.4</td><td>2020</td><td><strong>引入分代 GC</strong>、const/warn 新特性、to-be-closed 变量</td></tr>
+            </tbody>
+        </table>
+
+        <div class="sidebar-note">
+            <strong>版本选择建议</strong>：新项目首选 Lua 5.4（分代 GC 对游戏性能提升明显）。如果需要 JIT 编译的极致性能，选 LuaJIT 2.1（基于 5.1，但有 JIT 优化和 FFI）。XLua 内置的 vm 基于 Lua 5.3/LuaJIT 双后端。
+        </div>
+
+        <h2>Lua vs 其他语言</h2>
+
+        <p>对比能帮你用已有的知识框架快速定位 Lua 的位置：</p>
+
+        <table>
+            <thead><tr><th>维度</th><th>Lua</th><th>Python</th><th>JavaScript</th></tr></thead>
+            <tbody>
+                <tr><td>设计目标</td><td>嵌入宿主、被调用</td><td>通用脚本、胶水语言</td><td>浏览器脚本 → 通用</td></tr>
+                <tr><td>代码组织</td><td>table 万能容器</td><td>list + dict + class + module</td><td>Array + Object + class + module</td></tr>
+                <tr><td>OOP</td><td>无内置 class，table + 元表 DIY</td><td>class-based（从别扭到成熟）</td><td>prototype → class 语法糖</td></tr>
+                <tr><td>数组从哪开始</td><td><strong>1</strong>（习惯上）</td><td>0</td><td>0</td></tr>
+                <tr><td>协程模型</td><td>stackful, 非对称</td><td>async/await（3.5+）</td><td>async/await</td></tr>
+                <tr><td>默认可变性</td><td>全部可变</td><td>全部可变</td><td>const/let 区分</td></tr>
+                <tr><td>速度</td><td>LuaJIT 极快，标准 Lua 中等</td><td>慢</td><td>V8 JIT 很快</td></tr>
+                <tr><td>生态</td><td>小（LuaRocks）</td><td>巨大（PyPI）</td><td>巨大（npm）</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>常见陷阱</strong>：从 Python/JS 转到 Lua 最容易踩的坑——数组索引默认从 1 开始。这不是 bug，这是设计决策（Lua 的 table 没有「数组」这个概念，整数键的 1 是最自然的第一个位置）。标准库函数（table.insert, table.remove, ipairs）都以此为约定。
+        </div>
+
+        <h2>为什么游戏行业选择了 Lua</h2>
+
+        <p>这不是偶然。游戏引擎是 C++ 写的——编译慢、改一行等十分钟。策划调一个数值要改代码？不现实。需要一个脚本层：</p>
+
+        <ul>
+            <li><strong>热更新</strong>：游戏上线后有 bug？改 Lua 脚本推一个补丁就行，不用重新过审重新下载</li>
+            <li><strong>策划友好</strong>：Lua 语法足够简单，策划可以自己写任务脚本、配置逻辑</li>
+            <li><strong>性能可控</strong>：Lua 调用 C 函数的开销极低（微秒级），游戏每帧跑几千次 Lua 调用没问题</li>
+            <li><strong>沙盒天然</strong>：Lua 运行在宿主控制的虚拟机内，脚本崩了不会把引擎带崩</li>
+        </ul>
+
+        <table>
+            <thead><tr><th>游戏</th><th>Lua 使用场景</th></tr></thead>
+            <tbody>
+                <tr><td>World of Warcraft</td><td>全套 UI 系统用 Lua 编写，玩家可自己写插件</td></tr>
+                <tr><td>Angry Birds</td><td>关卡逻辑全部用 Lua 描述</td></tr>
+                <tr><td>Civilization V</td><td>AI 行为树、地图生成、游戏规则用 Lua 驱动</td></tr>
+                <tr><td>Roblox</td><td>整个平台以 Lua (Luau) 为编程语言</td></tr>
+                <tr><td>中国手游</td><td>XLua/Tolua/sLua → 热更新是刚需</td></tr>
+            </tbody>
+        </table>
+
+        <h2>Lua 的局限性</h2>
+
+        <p>好的技术人要知道工具的天花板在哪里。Lua 不是万能的：</p>
+
+        <ul>
+            <li><strong>生态小</strong>：LuaRocks 只有几千个包，和 PyPI 的几十万没法比。不要指望有什么 npm install moment 式的便利</li>
+            <li><strong>标准库精简</strong>：没有正则、没有 datetime、没有 HTTP 客户端。一切靠嵌入宿主的函数库</li>
+            <li><strong>没有静态类型</strong>：重构大项目会痛。Luau（Roblox 的 Lua 方言）加了渐进式类型检查，但标准 Lua 没有</li>
+            <li><strong>不适合独立应用</strong>：Lua 生来是「被嵌入」的，单独用它写一个后端服务和用 Python 写一样难受</li>
+            <li><strong>并发模型受限</strong>：Lua 的协程是非抢占式的，不适合 CPU 密集型并行计算</li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>正确心态</strong>：把 Lua 当作你系统中的「动态脚本层」。它不是来替代 C++/C# 的，是来<strong>补充</strong>它们的。静态语言管架构和性能，Lua 管灵活性、热更新和策划友好。这个定位想通了，Lua 用起来就顺了。
+        </div>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>研究题</h4>
+                    <p>查阅 <a href="https://www.lua.org/about.html" target="_blank">lua.org/about.html</a>，找出 Lua 名字的三个含义（提示：不只是月亮）。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>对比分析</h4>
+                    <p>Lua 的 table 同时做数组和字典，Python 把它们分开（list/dict）。从语言设计角度看，统一在一个结构中的好处和代价分别是什么？写出你的分析。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>预习题</h4>
+                    <p>安装 Lua 5.4（<a href="https://www.lua.org/download.html" target="_blank">lua.org/download.html</a>），在交互式解释器中输入 <code class="language-lua">= 1 + "2"</code>，观察结果。思考：这个行为和 Python/JS 有何不同？</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>Lua 是为嵌入而生的脚本语言——小巧、快速、零依赖、可嵌入</li>
+            <li>核心理念：用极少的机制（table + 元表 + 协程）支撑丰富的编程范式</li>
+            <li>table 是唯一的容器类型，同时承担数组、字典、对象、命名空间等所有角色</li>
+            <li>Lua 统治游戏行业不是情怀——是热更新、性能、可嵌入性三点打中了行业命门</li>
+            <li>了解 Lua 的限制（小生态、弱标准库、无静态类型）与了解其优势同样重要</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.lua.org/doc/hopl.pdf" target="_blank">The Evolution of Lua (HOPL III)</a> —— Lua 作者写的语言演化史，了解每个版本设计决策背后的故事</li>
+                <li><a href="https://www.lua.org/pil/" target="_blank">Programming in Lua, Chapter 1</a> —— 经典入门书第一章</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <span></span>
+            <a href="02-syntax-and-types.html">下一章：基础语法与类型系统 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>错误处理与调试 - Lua 从入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-coroutines.html">← 上一章</a>
+        <a href="08-garbage-collector.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>07 - 错误处理与调试</h1>
+
+        <p>Lua 的错误处理机制不同于 try-catch 风格的语言。它用 <code>pcall</code>/<code>xpcall</code>（保护调用）和 <code>error</code>（抛出错误）构建了一套简洁但完整的错误处理体系。debug 库则提供了运行时自省能力——让你站在虚拟机内部看自己的代码。</p>
+
+        <h2>error：抛出错误</h2>
+
+        <pre><code class="language-lua">-- 基本的 error
+local function divide(a, b)
+    if b == 0 then
+        error("division by zero")    -- 抛出错误，包含调用栈
+    end
+    return a / b
+end
+
+-- error 的第二个参数：level，控制错误报告的位置
+local function validate_age(age)
+    if age < 0 then
+        error("invalid age", 2)      -- level=2：错误报告在调用 validate_age 的地方
+    end
+    return true
+end
+
+-- 使用 assert
+local function connect(host)
+    assert(host, "host is required")  -- 等价于 if not host then error(...)
+    -- 连接逻辑...
+end</code></pre>
+
+        <h2>pcall：保护调用</h2>
+
+        <pre><code class="language-lua">-- pcall 捕获错误，返回 ok 和 结果/错误消息
+local ok, result = pcall(divide, 10, 0)
+if ok then
+    print("Result: " .. result)
+else
+    print("Error: " .. result)   --> Error: division by zero
+end
+
+-- pcall 可以包装任意函数
+local function safe_divide(a, b)
+    return a / b
+end
+
+local ok, result = pcall(function()
+    return divide(10, safe_divide(5, 0))   -- 嵌套错误
+end)
+print(ok, result)   --> false  ...division by zero...</code></pre>
+
+        <h2>xpcall：保护调用 + 自定义错误处理</h2>
+
+        <p><code>xpcall</code> 比 <code>pcall</code> 多一个参数：错误处理函数。在错误发生<strong>时</strong>（栈还在）就可以调用它来记录完整的上下文。</p>
+
+        <pre><code class="language-lua">-- xpcall 的第二个参数是错误处理函数（接收错误消息）
+-- 它在错误点被调用，此时调用栈还没被展开！
+
+local function on_error(err)
+    print("=== ERROR ===")
+    print(err)
+    print(debug.traceback("Full traceback:", 2))
+    print("==============")
+    -- 可以记录日志、发送告警、尝试恢复
+end
+
+local ok, result = xpcall(function()
+    divide(10, 0)
+end, on_error)
+
+print(ok, result)  --> false  nil</code></pre>
+
+        <h2>debug 库：运行时自省</h2>
+
+        <p>debug 库让你在运行时访问调用栈、局部变量、函数信息——这是 Lua 强大的内省能力。</p>
+
+        <pre><code class="language-lua">-- debug.traceback：获取完整调用栈
+local function a()
+    b()
+end
+local function b()
+    c()
+end
+local function c()
+    print(debug.traceback("Current stack:"))
+end
+a()
+-- 输出：
+-- Current stack:
+-- stack traceback:
+--     [string]: 在函数 c 中
+--     [string]: 在函数 b 中
+--     [string]: 在函数 a 中
+--     [string]: 在主线程中
+
+-- debug.getinfo：获取函数信息
+local function greet(name)
+    print("Hello, " .. name)
+end
+local info = debug.getinfo(greet)
+print(info.name)           --> greet（函数名，如果有的话）
+print(info.short_src)      --> [string "..."] 或文件名
+print(info.linedefined)     --> 函数定义的行号
+print(info.nups)           --> upvalue 数量
+print(info.isvararg)      --> 是否接受变长参数
+
+-- 通过栈级别获取信息
+local function dump_stack()
+    for level = 1, 10 do
+        local info = debug.getinfo(level, "nSl")
+        if not info then break end
+        print(string.format("  [%d] %s:%d in %s",
+            level, info.short_src, info.currentline, info.name or "?"))
+    end
+end
+
+-- debug.getlocal / debug.setlocal：读写局部变量
+local function inspect_locals()
+    local x, y = 10, 20
+    print("Local values:")
+    for i = 1, 10 do
+        local name, value = debug.getlocal(1, i)   -- 当前函数的局部变量
+        if not name then break end
+        print(string.format("  %s = %s", name, tostring(value)))
+    end
+end
+inspect_locals()</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>debug 库的性能警告</strong>：debug 函数很慢（每次调用都需要遍历内部结构）。只在开发/调试阶段使用，不要在生产热路径中调用。
+        </div>
+
+        <h2>防御性编程在 Lua 中的最佳实践</h2>
+
+        <h3>输入验证</h3>
+        <pre><code class="language-lua">local function set_player_name(obj, name)
+    assert(type(obj) == "table", "obj must be a table")
+    assert(type(name) == "string" and #name > 0, "name must be non-empty string")
+    obj.name = name
+end</code></pre>
+
+        <h3>安全执行不确定的代码</h3>
+        <pre><code class="language-lua">-- 加载用户提供的代码片段
+local function safe_load_and_run(code)
+    local fn, err = load(code, "user_input", "t")  -- 先编译
+    if not fn then
+        return nil, "Syntax error: " .. err
+    end
+    local ok, result = pcall(fn)
+    if not ok then
+        return nil, "Runtime error: " .. result
+    end
+    return result
+end
+
+safe_load_and_run("return 1 + 1")           --> 2
+safe_load_and_run("return 1 + ")            --> nil, "Syntax error: ..."
+safe_load_and_run("return 1 / 0")           --> nil, "Runtime error: ..."
+
+-- 沙盒执行：限制环境
+local function sandbox_run(code)
+    local env = {
+        print = print,  -- 白名单：只暴露安全函数
+        math = math,
+        string = string,
+        table = table,
+    }
+    local fn, err = load(code, "sandbox", "t", env)
+    if not fn then return nil, err end
+    return pcall(fn)
+end
+
+sandbox_run("os.execute('rm -rf /')")  -- os 不在白名单，报错</code></pre>
+
+        <h3>重试机制（仿第 3 章 debounce）</h3>
+        <pre><code class="language-lua">local function retry(func, max_attempts, delay)
+    delay = delay or 0.5
+    for attempt = 1, max_attempts do
+        local ok, result = pcall(func)
+        if ok then
+            return result
+        end
+        print(string.format("Attempt %d/%d failed. Retrying in %.1fs...",
+            attempt, max_attempts, delay))
+        -- 简单 sleep（Lua 无内置 sleep，需宿主提供或 busy-wait）
+        local deadline = os.clock() + delay
+        while os.clock() < deadline do end
+    end
+    error(string.format("Failed after %d attempts", max_attempts))
+end
+
+local function unreliable_api()
+    if math.random() < 0.7 then
+        error("Network timeout")
+    end
+    return "Success!"
+end
+
+local result = retry(unreliable_api, 5, 0.2)
+print(result)</code></pre>
+
+        <h2>debug 库的陷阱：debug.sethook</h2>
+
+        <pre><code class="language-lua">-- hook 可以监控每行代码、每次函数调用
+-- 用于性能分析、调用追踪
+local calls = {}
+
+debug.sethook(function(event)
+    local info = debug.getinfo(2, "nS")
+    if event == "call" then
+        local key = (info.name or "?") .. "@" .. (info.short_src or "?")
+        calls[key] = (calls[key] or 0) + 1
+    end
+end, "c")  -- "c" = call events only
+
+-- 执行一些代码...
+for i = 1, 100 do
+    math.sin(i)
+end
+
+debug.sethook()  -- 移除 hook
+
+for name, count in pairs(calls) do
+    print(string.format("%s: %d calls", name, count))
+end</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>sethook 严重拖慢程序</strong>：每个事件（每行代码、每次函数调用）都触发你的 hook 函数。即使 hook 函数很轻，频率本身也决定了整体性能下降 10-100 倍。只在 profiling 和特定调试场景使用。
+        </div>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>用 <code>xpcall</code> 写一个 <code>safe_require</code> 函数——加载模块时如果出错，记录完整的 traceback 到日志文件，然后返回 nil。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶挑战</h4>
+                    <p>实现一个 <code>stack_trace()</code> 函数，打印当前调用栈中每个函数的名称、源文件和行号。你能区分出匿名函数吗？（提示：debug.getinfo 的 name 字段对匿名函数返回什么？）</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>安全研究</h4>
+                    <p>分析上面的 sandbox 实现是否真的安全。提示：思考 <code>getfenv</code>、<code>setfenv</code>（5.1）、<code>debug</code> 库的访问、字符串元表等逃逸途径。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>error(msg, level) 抛出错误，level 控制报告位置（1=自身，2=调用者）</li>
+            <li>pcall 返回 ok + 结果/错误消息；xpcall 多一个错误处理函数，栈还在时就能介入</li>
+            <li>debug 库提供调用栈、局部变量、函数信息、hook 等内省能力——强大但昂贵</li>
+            <li>load 配合 pcall + 沙盒环境可以实现安全的用户代码执行</li>
+            <li>生产代码：assert 验证输入，pcall/xpcall 包裹外部调用，sethook 只在 profiling 时启用</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.lua.org/manual/5.4/manual.html#6.10" target="_blank">Lua 5.4 参考手册 — debug 库</a></li>
+                <li><a href="https://www.lua.org/pil/8.4.html" target="_blank">PiL §8.4 — 错误处理和异常</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="06-coroutines.html">← 上一章：协程与异步编程</a>
+            <a href="08-garbage-collector.html">下一章：垃圾回收器原理 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

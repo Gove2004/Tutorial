@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Table 深度解析 - Lua 从入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-functions-and-closures.html">← 上一章</a>
+        <a href="05-metatables-and-oop.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>04 - Table 深度解析</h1>
+
+        <p>Table 是 Lua 唯一的容器类型。它同时是数组、字典、对象、命名空间、模块——一切结构化数据的承载者。理解 table 的内部机制，是写出高性能 Lua 代码的关键。</p>
+
+        <h2>Table 的双重身份</h2>
+
+        <p>一个 table 同时包含<strong>数组部分</strong>（整数键，连续存储）和<strong>哈希部分</strong>（其他键，哈希表存储）。Lua 自动在两者之间分配和调整。</p>
+
+        <pre><code class="language-lua">local t = {
+    -- 数组部分（整数键，从 1 开始连续）
+    "apple", "banana", "cherry",
+
+    -- 哈希部分（非整数键或非连续整数键）
+    name = "fruits",
+    [0] = "zero-index",     -- 0 不参与数组部分！
+    [100] = "sparse",        -- 不连续，进入哈希部分
+}
+
+print(t[1])       --> apple
+print(t[2])       --> banana
+print(t[0])       --> zero-index
+print(t[100])     --> sparse
+print(t.name)     --> fruits
+print(t["name"])  --> fruits（等价写法）</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>核心认知</strong>：Lua 的 table 没有「真正的数组」概念。整数键为 1,2,3 且从 1 开始连续的区间被优化为数组存储，但 0、负数、不连续的正整数键全部进入哈希部分。不要用 <code>t[0]</code> 作为数组第一个元素——标准库函数（table.insert, table.remove, ipairs）都以 1 为起始。
+        </div>
+
+        <h2>数组部分 vs 哈希部分：rehash 机制</h2>
+
+        <p>当你对 table 做增删操作时，Lua 可能触发 rehash——重新分配数组和哈希的空间。理解 rehash 的触发条件可以避免意外的性能抖动。</p>
+
+        <pre><code class="language-lua">-- 看看内部数组大小
+local t = {10, 20, 30}
+print(#t)  --> 3（数组部分有 3 个元素）
+
+-- 在末尾插入，数组部分扩容
+-- 数组容量按 2 的幂增长：1→2→4→8→16...
+t[4] = 40       -- 可能触发 rehash（如果容量不够）
+t[5] = 50       -- 同上
+
+-- 哈希部分插入不触发数组 rehash
+t["name"] = "data"   -- 只影响哈希部分
+
+-- 删除数组中间的元素可能造成「空洞」
+t[2] = nil
+print(#t)       --> 5（# 的行为变得不确定！）</code></pre>
+
+        <div class="callout callout-danger">
+            <strong># 运算符的陷阱</strong>：当 table 的数组部分有空洞（中间有 nil），<code>#</code> 的结果是<strong>未定义</strong>的——它可能是空洞前的长度、空洞后的长度、或其他任意值。Lua 规范不保证其行为。永远不要在有空隙的 table 上依赖 <code>#</code>。
+        </div>
+
+        <h2>table.insert vs table.remove vs 直接赋值</h2>
+
+        <pre><code class="language-lua">local t = {"a", "b", "c"}
+
+-- table.insert 在末尾追加（O(1)）
+table.insert(t, "d")    -- {"a", "b", "c", "d"}
+
+-- table.insert 在指定位置插入（O(n)，后续元素后移）
+table.insert(t, 2, "x") -- {"a", "x", "b", "c", "d"}
+
+-- table.remove 删除指定位置（O(n)，后续元素前移）
+table.remove(t, 3)      -- 删除 "b"
+
+-- table.remove 不传位置则删除最后一个（O(1)）
+table.remove(t)          -- 删除 "d"
+
+-- 直接赋值更快，但不会移动元素（留有 nil 空洞）
+t[3] = nil               -- {"a", "x", nil, "c"}  ← 有空洞！</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>性能建议</strong>：如果顺序不重要，用 <code>t[i] = nil</code> 或直接设 <code>t[#t+1] = value</code>（追加）比 table.insert 更快。只有需要保持紧密数组（无空洞）时才用 table.insert/remove。
+        </div>
+
+        <h2>迭代器：ipairs vs pairs</h2>
+
+        <table>
+            <thead><tr><th></th><th>ipairs</th><th>pairs</th></tr></thead>
+            <tbody>
+                <tr><td>迭代范围</td><td>只迭代数组部分（整数键 1,2,3...）</td><td>迭代所有键值对</td></tr>
+                <tr><td>遇到 nil 时</td><td><strong>停止迭代</strong></td><td>继续（跳过 nil 值）</td></tr>
+                <tr><td>顺序保证</td><td>按整数键从小到大</td><td><strong>无保证</strong></td></tr>
+                <tr><td>性能</td><td>直接数组遍历，O(n)</td><td>哈希遍历，稍慢</td></tr>
+            </tbody>
+        </table>
+
+        <pre><code class="language-lua">local t = {"a", "b", nil, "d", name = "test"}
+
+-- ipairs：遇到 nil 就停止
+for i, v in ipairs(t) do
+    print(i, v)     -- 1 a, 2 b（遇到 nil 停止，"d" 被跳过）
+end
+
+-- pairs：遍历所有
+for k, v in pairs(t) do
+    print(k, v)     -- 1 a, 2 b, 4 d, name test（顺序任意）
+end
+
+-- 自定义迭代以遍历包括 nil 的所有索引
+local function all_pairs_by_index(t)
+    local i = 1
+    return function()
+        while i <= #t do
+            local v = t[i]
+            i = i + 1
+            return i - 1, v   -- 即使 v 为 nil 也返回
+        end
+    end
+end</code></pre>
+
+        <h2>弱引用表（Weak Table）</h2>
+
+        <p>弱引用表是 GC 系统的关键组件：它的键或值不会阻止对象被回收。</p>
+
+        <pre><code class="language-lua">-- 弱键表：键不被保护
+local cache = setmetatable({}, {__mode = "k"})
+
+-- 弱值表：值不被保护
+local listeners = setmetatable({}, {__mode = "v"})
+
+-- 弱键值表：键和值都不被保护
+local ephemeron = setmetatable({}, {__mode = "kv"})  -- 5.2+
+
+do
+    local obj = {data = "heavy"}
+    cache[obj] = "cached_result"   -- 弱键，obj 可能被回收
+end
+-- obj 出了作用域，如果 GC 回收了它，cache 中对应条目自动清除
+
+collectgarbage()  -- 建议 GC
+for k, v in pairs(cache) do
+    print(k, v)    -- 可能为空（取决于 GC 是否回收了 obj）
+end</code></pre>
+
+        <div class="sidebar-note">
+            <strong>实战场景</strong>：弱值表常用于观察者模式——对象销毁后不再需要从监听列表手动移除。弱键表常用于缓存和记忆化——当键（输入数据）被回收，缓存项自动消失。
+        </div>
+
+        <h2>table.pack、table.unpack 和 table.move</h2>
+
+        <pre><code class="language-lua">-- table.pack：打包多值，保留 nil 和计数值
+local function values(...)
+    local t = table.pack(...)   -- t.n 记录参数个数
+    for i = 1, t.n do
+        print(i, t[i])
+    end
+end
+values(1, nil, 3)   -- 1 1, 2 nil, 3 3（不会丢失 nil）
+
+-- table.unpack：解包为多值
+local t = {10, 20, 30}
+print(table.unpack(t))         --> 10  20  30
+print(table.unpack(t, 1, 2))  --> 10  20
+
+-- table.move：移动元素（高效，批量操作）
+local src = {1, 2, 3, 4, 5}
+local dst = {}
+-- 把 src[2..4] 移到 dst[5..7]
+table.move(src, 2, 4, 5, dst)
+-- dst = {nil, nil, nil, nil, 2, 3, 4}
+
+-- table.move 也可以在同一 table 内移动（如插入元素）
+local t = {1, 2, 3, 4, 5}
+table.move(t, 3, 5, 4)  -- 把 3..5 右移一位，给位置 3 腾空间
+t[3] = 99              -- t = {1, 2, 99, 3, 4, 5}</code></pre>
+
+        <h2>性能优化：预分配 table 大小</h2>
+
+        <pre><code class="language-lua">-- 不好：不断触发 rehash
+local t = {}
+for i = 1, 1000000 do
+    t[i] = i      -- 每次容量满了就 rehash
+end
+
+-- 好：预分配避免 rehash
+local t = table.create(1000000)  -- 5.4+ 预分配（非常快）
+for i = 1, 1000000 do
+    t[i] = i      -- 直接写入，无 rehash
+end
+
+-- 5.3 及之前的替代方案：手动 fill
+local t = {}
+for i = 1, 1000000 do
+    t[i] = i
+end
+-- 或使用 t[#t+1] = i 代替 table.insert</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>table.create 在游戏中的价值</strong>：如果每帧都要创建一个临时 table 来传递数据，用 <code>table.create(n)</code> 预分配。一帧可能省 1μs，但 60fps × 1000 次创建 = 60ms 节省 = 从 20fps 变 60fps 的差距。
+        </div>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>创建一个有 5 个元素的 table，用 <code>table.remove</code> 删除中间一个，用 <code>ipairs</code> 遍历，再用 <code>#</code> 取长度。观察 # 的行为是否合理。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶练习</h4>
+                    <p>实现一个 <code>dedupe(list)</code> 函数，去除数组中的重复元素，保持原顺序。提示：利用 table 的哈希部分做去重标记。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>性能实验</h4>
+                    <p>对比三种追加方式在插入 100 万条数据时的耗时：<code>table.insert(t, v)</code> vs <code>t[#t+1] = v</code> vs <code>table.create(1000000)</code> + 直接赋值。用 <code>os.clock()</code> 计时。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>table 同时是数组和哈希表。有空洞时 <code>#</code> 的行为未定义</li>
+            <li>ipairs 遇 nil 停止，pairs 遍历所有但无序</li>
+            <li>直接赋值比 table.insert 快，但会留空洞</li>
+            <li>弱引用表用 <code>__mode</code> 元字段控制，用于缓存和观察者模式</li>
+            <li>table.create（5.4）预分配可大幅减少 rehash 开销</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.lua.org/manual/5.4/manual.html#3.4.7" target="_blank">Lua 5.4 参考手册 — 表构造器</a></li>
+                <li><a href="https://www.lua.org/pil/11.html" target="_blank">PiL §11 — 数据结构</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="03-functions-and-closures.html">← 上一章：函数、闭包与尾调用</a>
+            <a href="05-metatables-and-oop.html">下一章：元表与面向对象 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C API 与 Lua 栈 - Lua 从入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-modules-and-packages.html">← 上一章</a>
+        <a href="11-xlua-practice.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>10 - C API 与 Lua 栈</h1>
+
+        <p>Lua 是为嵌入而生的语言。C API 是 Lua 与宿主语言之间的桥梁——它让 C/C++ 代码可以调用 Lua 函数、操作 Lua 变量、把 C 对象暴露给 Lua。本章讲解虚拟机栈模型、双向调用和 C 模块编写。</p>
+
+        <h2>Lua 虚拟机栈</h2>
+
+        <div class="definition">
+            <h4>Lua 栈</h4>
+            <p>Lua 和 C 之间的所有数据交换都通过一个<strong>虚拟栈</strong>完成。栈中的每个槽可以存放任意 Lua 类型的值。C 代码通过索引访问栈——正索引从底到顶（1=栈底），负索引从顶到底（-1=栈顶）。</p>
+        </div>
+
+        <pre><code class="language-c">// 栈模型示意
+// 栈底 [1] ← 正索引
+//      [2]
+//      [3]
+// 栈顶 [-1] ← 负索引
+//
+// 向 Lua 传数据：C 把值 push 到栈上
+// 从 Lua 取数据：C 从栈上 pop 值
+
+// 典型调用流程：
+// 1. lua_getglobal(L, "func_name")   -- 把函数 push 到栈
+// 2. lua_pushnumber(L, 42)           -- push 参数
+// 3. lua_pushstring(L, "hello")     -- push 参数
+// 4. lua_pcall(L, 2, 1, 0)          -- 调用：2 参数，1 返回值
+// 5. double result = lua_tonumber(L, -1)  -- 取栈顶返回值
+// 6. lua_pop(L, 1)                    -- 清理栈</code></pre>
+
+        <h2>从 C 调用 Lua 函数</h2>
+
+        <pre><code class="language-c">#include &lt;lua.h>
+#include &lt;lauxlib.h>
+#include &lt;lualib.h>
+
+int main() {
+    // 创建 Lua 虚拟机
+    lua_State *L = luaL_newstate();
+    luaL_openlibs(L);  // 加载标准库
+
+    // 执行一段 Lua 脚本
+    luaL_dostring(L, "function add(a, b) return a + b end");
+
+    // 调用 Lua 函数 add(10, 20)
+    lua_getglobal(L, "add");   // push 函数
+    lua_pushnumber(L, 10);     // push 参数 1
+    lua_pushnumber(L, 20);     // push 参数 2
+
+    // pcall: 2 个参数，1 个返回值，0 表示无错误处理函数
+    if (lua_pcall(L, 2, 1, 0) != LUA_OK) {
+        fprintf(stderr, "Error: %s\n", lua_tostring(L, -1));
+        lua_close(L);
+        return 1;
+    }
+
+    // 取返回值
+    double result = lua_tonumber(L, -1);
+    printf("Result: %.0f\n", result);  // Result: 30
+
+    lua_pop(L, 1);  // 弹出返回值
+    lua_close(L);
+    return 0;
+}</code></pre>
+
+        <h2>从 Lua 调用 C 函数</h2>
+
+        <pre><code class="language-c">// C 函数签名：int func(lua_State *L)
+// 参数从栈上取（lua_gettop 获取参数数量）
+// 返回值 push 到栈上，return 返回值的数量
+
+static int c_add(lua_State *L) {
+    double a = luaL_checknumber(L, 1);  // 第 1 个参数
+    double b = luaL_checknumber(L, 2);  // 第 2 个参数
+    lua_pushnumber(L, a + b);           // push 结果
+    return 1;                            // 1 个返回值
+}
+
+static int c_get_table(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);   // 第 1 参数必须是 table
+    lua_pushvalue(L, 1);                // 复制 table 引用
+    lua_pushstring(L, "name");          // key = "name"
+    lua_gettable(L, -2);                // 相当于 t["name"]
+    return 1;
+}
+
+// 注册 C 函数到 Lua
+int luaopen_mylib(lua_State *L) {
+    static const luaL_Reg funcs[] = {
+        {"add", c_add},
+        {"get_table", c_get_table},
+        {NULL, NULL}
+    };
+    luaL_newlib(L, funcs);  // 创建新 table，注册所有函数
+    return 1;
+}</code></pre>
+
+        <h2>userdata：C 对象在 Lua 中的代理</h2>
+
+        <pre><code class="language-c">// full userdata：Lua 管理内存的 C 数据块
+// 可以绑元表（__gc 自动清理，__index 提供方法）
+
+typedef struct {
+    double x, y;
+} Vector2;
+
+// 创建 Vector2
+static int vec2_new(lua_State *L) {
+    double x = luaL_checknumber(L, 1);
+    double y = luaL_checknumber(L, 2);
+
+    // 分配 userdata 内存（Lua GC 管理）
+    Vector2 *v = (Vector2 *)lua_newuserdata(L, sizeof(Vector2));
+    v->x = x;
+    v->y = y;
+
+    // 设置元表（让 Lua 知道这个 userdata 有哪些方法）
+    luaL_setmetatable(L, "Vector2");
+    return 1;
+}
+
+// 方法：vec2:add(other)
+static int vec2_add(lua_State *L) {
+    Vector2 *a = (Vector2 *)luaL_checkudata(L, 1, "Vector2");
+    Vector2 *b = (Vector2 *)luaL_checkudata(L, 2, "Vector2");
+
+    Vector2 *result = (Vector2 *)lua_newuserdata(L, sizeof(Vector2));
+    result->x = a->x + b->x;
+    result->y = a->y + b->y;
+    luaL_setmetatable(L, "Vector2");
+    return 1;
+}
+
+// light userdata：一个指针值（C 层管理内存，Lua 只存指针）
+// 无元表、无 GC——更轻量，适合封装已有 C 对象
+static int wrap_object(lua_State *L) {
+    MyObject *obj = get_some_c_object();
+    lua_pushlightuserdata(L, obj);
+    return 1;
+}
+
+// 对比 full vs light userdata:
+// full: Lua GC 管理、可绑元表、__gc 自动清理
+// light: 更快（无 GC 开销）、无元表、用户手动管理生命周期</code></pre>
+
+        <h2>LuaJIT FFI：降维打击</h2>
+
+        <p>LuaJIT 的 FFI 库让 Lua 可以直接声明 C 类型和调用 C 函数——不需要写 C 扩展代码。</p>
+
+        <pre><code class="language-lua">-- LuaJIT FFI：在 Lua 代码中直接调用 C
+local ffi = require("ffi")
+
+-- 声明 C 函数和数据结构
+ffi.cdef[[
+    typedef struct { double x, y; } Vector2;
+    double sin(double x);
+    void *malloc(size_t size);
+    void free(void *ptr);
+]]
+
+-- 直接调用 C 标准库函数
+print(ffi.C.sin(3.14159 / 2))  --> ~1.0
+
+-- 分配和管理 C 内存
+local ptr = ffi.C.malloc(1024)
+-- ... 使用 ptr ...
+ffi.C.free(ptr)
+
+-- 使用 C 结构体（栈上分配，像原生 Lua table 一样方便）
+local v = ffi.new("Vector2", {x = 1.0, y = 2.0})
+print(v.x, v.y)  --> 1.0  2.0
+
+-- 调用 DLL/SO 中导出的 C 函数
+local mylib = ffi.load("mylib")
+local result = mylib.compute_something(42)
+
+-- FFI 优势：
+-- - 零胶水代码（不用写 lua_pushnumber/luaL_checkudata 那一套）
+-- - 栈上分配（比 userdata 更快）
+-- - 可以和现成的 C 库直接交互</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>C API vs LuaJIT FFI</strong>：如果你的项目用 LuaJIT（如 XLua 的 JIT 模式），优先用 FFI——它比写 C 扩展简单太多。如果你需要兼容标准 Lua 5.4，C API 是唯一选择。
+        </div>
+
+        <h2>注册表（Registry）：跨 C 调用共享数据</h2>
+
+        <pre><code class="language-c">// 注册表是一个普通 table（不在 _G 中），C 代码用它存储跨调用的状态
+static int store_value(lua_State *L) {
+    int val = luaL_checkinteger(L, 1);
+
+    lua_pushstring(L, "my_value");     // key
+    lua_pushinteger(L, val);           // value
+    lua_settable(L, LUA_REGISTRYINDEX); // registry["my_value"] = val
+    return 0;
+}
+
+static int retrieve_value(lua_State *L) {
+    lua_pushstring(L, "my_value");
+    lua_gettable(L, LUA_REGISTRYINDEX);
+    return 1;
+}
+
+// 注册表不同于 _G：
+// - _G 可以被 Lua 代码修改
+// - 注册表对 Lua 代码不可见（除非通过 debug.getregistry）
+// - 常用于 C 模块间的数据共享</code></pre>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>写一个 C 函数 <code>sum_table</code>，接收一个 Lua table，返回所有数字值的总和。在 C 侧用 lua_next 遍历。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶练习</h4>
+                    <p>用 full userdata 封装一个 C 文件句柄（FILE*），在 Lua 侧只暴露 read/write/close 方法，用 __gc 保证文件关闭。测试错误路径（忘记 close 时 GC 是否正确关上）。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>对比研究</h4>
+                    <p>用 LuaJIT FFI 实现同样的文件句柄封装。对比两种方案的代码量、性能、以及各自容易出错的地方。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>C ↔ Lua 的所有数据交换通过虚拟栈完成</li>
+            <li>C 调用 Lua：push 函数 + push 参数 → lua_pcall → pop 返回值</li>
+            <li>Lua 调用 C：C 函数从栈取参数，push 返回值，return 返回值数量</li>
+            <li>full userdata（Lua GC 管理 + 元表）vs light userdata（纯指针）</li>
+            <li>LuaJIT FFI 可以跳过 C 扩展代码，直接在 Lua 中声明和调用 C</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.lua.org/manual/5.4/manual.html#4" target="_blank">Lua 5.4 参考手册 — C API 完整参考</a></li>
+                <li><a href="https://luajit.org/ext_ffi.html" target="_blank">LuaJIT FFI 文档</a></li>
+                <li><a href="https://www.lua.org/pil/24.html" target="_blank">PiL §24 — C API 概述</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="09-modules-and-packages.html">← 上一章：模块系统与包管理</a>
+            <a href="11-xlua-practice.html">下一章：XLua 入门与实践 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

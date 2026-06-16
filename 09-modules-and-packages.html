@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模块系统与包管理 - Lua 从入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-garbage-collector.html">← 上一章</a>
+        <a href="10-c-api-and-stack.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>09 - 模块系统与包管理</h1>
+
+        <p>Lua 的模块系统极其简洁：一个文件 = 一个模块 = 一个返回 table 的函数。没有 package.json，没有 import/export 关键字。理解 <code>require</code> 的路径搜索和缓存机制，你就能驾驭任意规模的 Lua 项目。</p>
+
+        <h2>require 的核心行为</h2>
+
+        <div class="definition">
+            <h4>require(modname)</h4>
+            <p>在 <code>package.path</code> 中搜索模块文件，加载并执行，缓存结果到 <code>package.loaded[modname]</code>。同一进程内多次 require 同一模块<strong>不会重复执行</strong>。</p>
+        </div>
+
+        <pre><code class="language-lua">-- 第一次 require：搜索 → 加载 → 执行 → 缓存
+local mymod = require("mymod")
+
+-- 第二次 require：直接从 package.loaded 返回缓存
+local mymod2 = require("mymod")  -- mymod2 == mymod，同一引用
+
+-- require 的伪代码逻辑
+function my_require(name)
+    if package.loaded[name] then
+        return package.loaded[name]  -- 缓存命中
+    end
+    local loader, err = search_and_load(name)
+    if not loader then
+        error(err)
+    end
+    local result = loader(name)
+    if result ~= nil then
+        package.loaded[name] = result
+    else
+        package.loaded[name] = true  -- 模块没返回值，标记已加载
+    end
+    return package.loaded[name]
+end</code></pre>
+
+        <h2>模块文件的标准写法</h2>
+
+        <table class="comparison">
+            <thead><tr><th>推荐写法（现代，Lua 5.2+）</th><th>旧式写法（module 函数，已废弃）</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td class="good">
+<pre><code class="language-lua">-- mymod.lua
+local M = {}
+
+local function private_helper()
+    -- 内部函数，不暴露
+end
+
+function M.public_func(x)
+    return x * 2
+end
+
+M.VERSION = "1.0.0"
+
+return M  -- 返回 table</code></pre>
+                    </td>
+                    <td class="bad">
+<pre><code class="language-lua">-- 旧式（Lua 5.1 的 module 函数）
+module("mymod", package.seeall)
+function public_func(x)
+    return x * 2
+end
+-- 不推荐：污染全局命名空间</code></pre>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>为什么 module() 被废弃？</strong> <code>module("foo", package.seeall)</code> 把模块的全局环境改成了 _G——模块内部可以访问任何全局变量，失去了封装性。现代写法用 local table + return 保证隔离。
+        </div>
+
+        <h2>package.path：require 的查找路径</h2>
+
+        <pre><code class="language-lua">-- 查看当前的搜索路径
+print(package.path)
+-- 典型输出（Linux）:
+-- ./?.lua;/usr/local/share/lua/5.4/?.lua;/usr/local/share/lua/5.4/?/init.lua
+
+-- ? 代表模块名。require("mymod") 会依次尝试:
+-- ./mymod.lua
+-- /usr/local/share/lua/5.4/mymod.lua
+-- /usr/local/share/lua/5.4/mymod/init.lua
+
+-- 动态添加搜索路径
+package.path = package.path .. ";./libs/?.lua"
+
+-- 或者只添加特定路径
+package.path = "./src/?.lua;" .. package.path  -- 优先搜索 src 目录
+
+-- 对于 C 模块（.so/.dll），对应的是 package.cpath
+print(package.cpath)
+-- 典型: ./?.so;/usr/local/lib/lua/5.4/?.so
+</code></pre>
+
+        <h2>package.loaded：模块缓存</h2>
+
+        <pre><code class="language-lua">-- 查看已加载的模块
+for name, module in pairs(package.loaded) do
+    print(name, type(module))
+end
+
+-- 强制重新加载模块（绕过缓存）
+package.loaded["mymod"] = nil
+require("mymod")  -- 重新加载
+
+-- 热重载（hot reload）的基本原理
+local function hot_reload(modname)
+    package.loaded[modname] = nil  -- 清除缓存
+    return require(modname)
+end</code></pre>
+
+        <h2>_ENV 与沙盒</h2>
+
+        <p>Lua 5.2+ 引入 <code>_ENV</code> 变量——每个函数可以有自己独立的全局环境。</p>
+
+        <pre><code class="language-lua">-- _ENV 是每个 chunk（文件/函数）的局部变量，默认值是 _G
+-- 修改 _ENV 可以改变这个 chunk 看到的「全局变量」
+
+-- 创建沙盒环境
+local sandbox_env = {
+    print = print,
+    math = math,
+    string = string,
+    table = table,
+    pairs = pairs,
+    ipairs = ipairs,
+    type = type,
+    error = error,
+    tostring = tostring,
+}
+
+-- 在沙盒中执行代码
+local function sandbox_execute(code)
+    local fn, err = load(code, "sandbox", "t", sandbox_env)
+    if not fn then return nil, err end
+    return pcall(fn)
+end
+
+sandbox_execute([[
+    print(math.sqrt(16))          -- 4，math 在白名单中
+    -- os.exit()                  -- 报错：os 不在沙盒环境中
+    -- file = io.open("secret")   -- 同样不可访问
+]])
+
+-- 安全沙盒必须做的事情：
+-- 1. 移除 debug 库（防止反沙盒）
+-- 2. 移除 loadfile/dofile/require（防止加载外部代码）
+-- 3. 限制 string.dump（防止 dump 字节码）
+-- 4. 考虑 string.rep 的 DoS 攻击（无限重复字符串）</code></pre>
+
+        <h2>LuaRocks 包管理</h2>
+
+        <pre><code class="language-lua">-- 安装 LuaRocks 后，搜索和安装包
+-- luarocks search lua-cjson
+-- luarocks install lua-cjson
+
+-- 在 Lua 代码中使用 LuaRocks 安装的包
+local cjson = require("cjson")
+local data = cjson.encode({name = "Gove", age = 21})
+
+-- LuaRocks 安装路径自动加入 package.path/cpath，无需手动配置
+
+-- 项目依赖管理（rockspec 文件）
+-- 创建 myproject-1.0-1.rockspec:
+--
+-- package = "myproject"
+-- version = "1.0-1"
+-- dependencies = {
+--     "lua >= 5.3",
+--     "lua-cjson >= 2.1",
+--     "luasocket >= 3.0"
+-- }
+--
+-- luarocks install myproject-1.0-1.rockspec  # 自动安装所有依赖</code></pre>
+
+        <h2>工程化：多模块项目目录结构</h2>
+
+        <pre><code class="language-lua">-- 推荐的项目布局
+-- project/
+-- ├── main.lua           -- 入口
+-- ├── src/
+-- │   ├── init.lua       -- 项目命名空间
+-- │   ├── core/
+-- │   │   ├── engine.lua
+-- │   │   └── config.lua
+-- │   └── utils/
+-- │       ├── math.lua
+-- │       └── string.lua
+-- └── libs/              -- 第三方（手动管理或 LuaRocks）
+--     └── ...
+
+-- src/init.lua
+local project = {}
+project.core = require("src.core.engine")
+project.utils = require("src.utils.math")
+return project
+
+-- 设置路径（在 main.lua 开头）
+package.path = "./src/?.lua;./src/?/init.lua;" .. package.path
+
+-- 现在可以这样用
+local project = require("src.init")
+project.core.start()</code></pre>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>创建两个模块 <code>math_utils.lua</code> 和 <code>string_utils.lua</code>，在一个主文件中 require 它们，验证 require 的缓存行为。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶练习</h4>
+                    <p>实现一个热重载系统：监控文件修改时间，自动清除 <code>package.loaded</code> 并重新 require。注意处理模块间的引用更新问题。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>安全研究</h4>
+                    <p>分析上面的沙盒实现有什么安全漏洞。提示：思考 <code>string.rep</code> 的 DoS、<code>getmetatable</code> 访问字符串元表、以及 debug 库通过其他手段获取（例如从函数的 upvalue 中拿到）。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>require 搜索 → 加载 → 缓存到 package.loaded。同进程同模块只执行一次</li>
+            <li>现代模块写法：local M = {}; ...; return M。废弃 module() 函数</li>
+            <li>package.path（Lua 模块）和 package.cpath（C 模块）控制搜索路径</li>
+            <li>_ENV 实现沙盒——限制代码可见的「全局变量」，是安全执行用户代码的基础</li>
+            <li>LuaRocks 是 Lua 的包管理器，类似于 pip/npm/cargo</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.lua.org/manual/5.4/manual.html#6.3" target="_blank">Lua 5.4 参考手册 — 模块与包</a></li>
+                <li><a href="https://luarocks.org/" target="_blank">LuaRocks 官方网站</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="08-garbage-collector.html">← 上一章：垃圾回收器原理</a>
+            <a href="10-c-api-and-stack.html">下一章：C API 与 Lua 栈 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

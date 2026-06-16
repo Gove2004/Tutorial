@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>基础语法与类型系统 - Lua 从入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-lua-overview.html">← 上一章</a>
+        <a href="03-functions-and-closures.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>02 - 基础语法与类型系统</h1>
+
+        <p>Lua 的类型系统极其精简——只有 8 种类型。但精简不等于简单：<code>nil</code> 的多重语义、<code>number</code> 的整数/浮点双表示、<code>table</code> 的万能性、以及动态类型带来的灵活性，都值得深入理解。</p>
+
+        <h2>变量与赋值</h2>
+
+        <p>Lua 的变量默认为<strong>全局变量</strong>——这是它与大多数语言最大的不同。局部变量必须显式地用 <code>local</code> 声明。</p>
+
+        <pre><code class="language-lua">-- 全局变量（默认）
+score = 100
+player_name = "Gove"
+
+-- 局部变量（推荐）
+local level = 5
+local health, mana = 100, 50</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>性能陷阱</strong>：全局变量访问比局部变量<strong>慢一个数量级</strong>。全局变量储存在 _G 表中，每次访问都是一次哈希查找；局部变量在寄存器中，几乎零开销。在生产代码中，永远用 <code>local</code>。
+        </div>
+
+        <h3>多重赋值</h3>
+
+        <p>Lua 支持多变量同时赋值，右侧先求值，再从左到右赋给左侧：</p>
+
+        <pre><code class="language-lua">-- 经典交换，无需临时变量
+local a, b = 10, 20
+a, b = b, a          -- a=20, b=10
+
+-- 多返回值接收
+local x, y = 1, 2, 3  -- x=1, y=2, 3 被丢弃
+local p, q = 5        -- p=5, q=nil（不足时补 nil）</code></pre>
+
+        <h2>Lua 的 8 种类型</h2>
+
+        <p>使用 <code>type()</code> 函数可以查看任何值的类型。返回值是一个字符串。</p>
+
+        <table>
+            <thead><tr><th>类型</th><th>type() 返回值</th><th>说明</th></tr></thead>
+            <tbody>
+                <tr><td>nil</td><td><code>"nil"</code></td><td>空值、未声明、不存在——唯一的「假」值之一</td></tr>
+                <tr><td>boolean</td><td><code>"boolean"</code></td><td>true/false。注意：0 和空字符串都是 true！</td></tr>
+                <tr><td>number</td><td><code>"number"</code></td><td>整数（64位有符号）和浮点（64位双精度）的<strong>双表示</strong></td></tr>
+                <tr><td>string</td><td><code>"string"</code></td><td>不可变字节序列，支持单引号、双引号、长括号三种写法</td></tr>
+                <tr><td>table</td><td><code>"table"</code></td><td>唯一的容器类型，同时承担数组、字典、对象</td></tr>
+                <tr><td>function</td><td><code>"function"</code></td><td>一等公民，可赋值、传参、返回、闭包捕获</td></tr>
+                <tr><td>userdata</td><td><code>"userdata"</code></td><td>C 层对象在 Lua 中的代理，分 full userdata 和 light userdata</td></tr>
+                <tr><td>thread</td><td><code>"thread"</code></td><td>协程对象</td></tr>
+            </tbody>
+        </table>
+
+        <pre><code class="language-lua">print(type(nil))         --> nil
+print(type(true))        --> boolean
+print(type(42))          --> number
+print(type(3.14))        --> number
+print(type("hello"))     --> string
+print(type({}))          --> table
+print(type(print))       --> function
+</code></pre>
+
+        <h2>nil：不只是空</h2>
+
+        <p><code>nil</code> 在 Lua 中有<strong>多重语义</strong>：</p>
+
+        <ul>
+            <li><strong>空值</strong>：表示「没有值」</li>
+            <li><strong>未定义</strong>：访问未赋值的变量 → nil</li>
+            <li><strong>删除</strong>：将 table 字段设为 nil = 删除该字段</li>
+            <li><strong>不存在</strong>：访问 table 中不存在的 key → nil</li>
+            <li><strong>条件假</strong>：nil 和 false 是仅有的两个「假」值</li>
+        </ul>
+
+        <pre><code class="language-lua">local t = {name = "Gove", age = 21}
+t.age = nil            -- 删除 age 字段
+print(t.age)           --> nil
+print(#t)              -- 不适用，详见后续章节
+
+-- nil 的假值行为
+if nil then print("yes") else print("no") end   --> no
+</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>与 C/C++/Python 的关键差异</strong>：Lua 中 <strong>0 和空字符串 "" 都是 truthy</strong>。只有 nil 和 false 为假。即 <code>if 0 then</code> 为 true！这在从 C 转 Lua 时是最容易写错的 bug。
+        </div>
+
+        <h2>number：双表示的数值类型</h2>
+
+        <p>Lua 5.3+ 的 number 类型内部有两种表示：<strong>integer</strong>（64位有符号）和 <strong>float</strong>（64位双精度），但对外统一显示为 "number"。Lua 在运算时自动在两者间转换。</p>
+
+        <pre><code class="language-lua">local i = 42             -- 整数表示
+local f = 3.14           -- 浮点表示
+
+-- 整数和浮点可以互相转换
+print(math.type(42))     --> integer
+print(math.type(42.0))   --> float（显式写了小数点）
+
+-- 算术运算符自动处理类型
+print(42 + 3.14)         --> 45.14（整数被提升为浮点）
+print(10 // 3)           --> 3（整除，返回整数）
+print(10.0 // 3)         --> 3.0（操作数有浮点则返回浮点）
+
+-- 位运算符仅对整数有效
+print(1 << 3)            --> 8
+-- print(1.5 << 3)      -- 运行时错误！位运算需要整数</code></pre>
+
+        <div class="sidebar-note">
+            <strong>历史注记</strong>：Lua 5.2 及之前所有数字都是浮点（双精度）。5.3 引入整数子类型是一个重大变化，解决了游戏开发中位运算和精确计数的需求。LuaJIT 2.x 也是整数+浮点双表示（基于 5.1 但自己实现了）。
+        </div>
+
+        <h2>string：不可变的字节序列</h2>
+
+        <p>Lua 的字符串是<strong>不可变的</strong>——每次拼接都产生新字符串。它不是「字符」序列而是「字节」序列，天然支持任意二进制数据。</p>
+
+        <pre><code class="language-lua">-- 三种字面量写法
+local s1 = '单引号'
+local s2 = "双引号"
+local s3 = [[
+长括号：包含 "引号" 和
+换行都原样保留
+无需转义
+]]
+
+-- 长括号可以有等号层数，防止内容本身含 ]]
+local sql = [==[
+SELECT * FROM users WHERE name = "O'Brien";
+-- 内容含 ]] 也不怕
+]==]
+
+-- 字符串拼接用 ..
+local name = "Lua"
+print("Hello, " .. name .. "!")  --> Hello, Lua!
+
+-- 长度用 #
+print(#"hello")                   --> 5
+
+-- 字符串是不可变的
+local s = "hello"
+s:upper()          -- 返回 "HELLO"，s 不变
+print(s)           --> hello</code></pre>
+
+        <table class="comparison">
+            <thead><tr><th>推荐写法</th><th>不推荐写法</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td class="good">
+<pre><code class="language-lua">-- 长括号，可读性好
+local json = [[
+{
+  "name": "Gove",
+  "age": 21
+}
+]]</code></pre>
+                    </td>
+                    <td class="bad">
+<pre><code class="language-lua">-- 引号 + 转义，混乱
+local json = "{\n  \"name\": \"Gove\",\n  \"age\": 21\n}"</code></pre>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>运算符</h2>
+
+        <p>Lua 的运算符设计极简，没有 ++ 和 --，没有三元运算符，没有复合赋值。这看起来简陋，其实是 Lua「少即是多」哲学的延续。</p>
+
+        <table>
+            <thead><tr><th>类别</th><th>运算符</th><th>示例</th></tr></thead>
+            <tbody>
+                <tr><td>算术</td><td>+ - * / // ^ %</td><td><code>2^10 → 1024.0</code></td></tr>
+                <tr><td>关系</td><td>== ~= < > <= >=</td><td>不等号是 <code>~=</code> 而非 <code>!=</code></td></tr>
+                <tr><td>逻辑</td><td>and or not</td><td><code>x = a and b or c</code></td></tr>
+                <tr><td>拼接</td><td>..</td><td><code>"a" .. "b" → "ab"</code></td></tr>
+                <tr><td>长度</td><td>#</td><td><code>#"hello" → 5</code></td></tr>
+                <tr><td>位运算 (5.3+)</td><td>& | ~ << >> //</td><td><code>0xFF & 0x0F → 15</code></td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>逻辑运算符的短路值</strong>：<code>a and b</code> 若 a 为假则返回 a，否则返回 b。<code>a or b</code> 若 a 为真则返回 a，否则返回 b。这不是返回 boolean！这是 Lua 实现「默认值」和「三元运算」的机制。
+        </div>
+
+        <pre><code class="language-lua">-- 用 or 实现默认值
+local name = input or "anonymous"
+
+-- 用 and/or 模拟三元运算符：条件 and 真值 or 假值
+local status = (score > 60) and "pass" or "fail"
+
+-- ⚠ 注意：真值不能是 nil/false，否则逻辑被打破
+local x = false or "default"   --> "default"（期望 false 却被吞了）
+</code></pre>
+
+        <h2>控制流</h2>
+
+        <h3>if-then-elseif-else</h3>
+
+        <pre><code class="language-lua">local score = 85
+
+if score >= 90 then
+    print("优秀")
+elseif score >= 80 then    -- 注意：是 elseif 不是 else if！
+    print("良好")
+elseif score >= 60 then
+    print("及格")
+else
+    print("不及格")
+end</code></pre>
+
+        <h3>while 循环</h3>
+
+        <pre><code class="language-lua">local i = 1
+while i <= 5 do
+    print(i)
+    i = i + 1       -- Lua 没有 i++
+end</code></pre>
+
+        <h3>repeat-until（先执行后判断）</h3>
+
+        <pre><code class="language-lua">local i = 1
+repeat
+    print(i)
+    i = i + 1
+until i > 5              -- 条件为真时退出（和 while 相反）
+</code></pre>
+
+        <div class="sidebar-note">
+            <strong>repeat-until 的独特性</strong>：循环体内的局部变量在 until 条件中也可见——和 while 不同。这是 Lua 特意设计的，很适合「读-处理-判断」模式。
+        </div>
+
+        <h3>for 循环：数值 for</h3>
+
+        <pre><code class="language-lua">-- for 初始值, 终止值, 步长（可选，默认 1）
+for i = 1, 5 do
+    print(i)            -- 1, 2, 3, 4, 5
+end
+
+for i = 10, 1, -2 do
+    print(i)            -- 10, 8, 6, 4, 2
+end
+
+-- 关键行为：三个表达式只在循环开始时求值一次！
+-- 循环内修改控制变量是无效的
+local limit = 5
+for i = 1, limit do
+    limit = 10          -- 不影响循环次数，仍是 5 次
+    print(i)
+end</code></pre>
+
+        <h3>for 循环：泛型 for（迭代器）</h3>
+
+        <pre><code class="language-lua">-- ipairs：按序迭代数组部分
+local arr = {"a", "b", "c"}
+for i, v in ipairs(arr) do
+    print(i, v)          -- 1 a, 2 b, 3 c
+end
+
+-- pairs：迭代所有键值对
+local t = {name = "Gove", age = 21}
+for k, v in pairs(t) do
+    print(k, v)          -- name Gove, age 21（顺序不保证）
+end
+
+-- 迭代字符串中的单词
+for word in string.gmatch("hello world lua", "%S+") do
+    print(word)          -- hello, world, lua
+end</code></pre>
+
+        <h2>变长参数</h2>
+
+        <p>函数可以接收不定数量的参数，用 <code>...</code> 表示：</p>
+
+        <pre><code class="language-lua">local function sum(...)
+    local total = 0
+    for _, v in ipairs({...}) do   -- 将变长参数打包成 table
+        total = total + v
+    end
+    return total
+end
+
+print(sum(1, 2, 3, 4, 5))          --> 15
+
+-- 传参给另一个函数
+local function log_and_call(f, ...)
+    print("calling function")
+    return f(...)                   -- 透传参数
+end
+
+-- 固定参数 + 变长参数
+local function greet(greeting, ...)
+    local names = {...}
+    for _, name in ipairs(names) do
+        print(greeting .. ", " .. name)
+    end
+end
+
+greet("Hello", "Gove", "Alice", "Bob")
+-- Hello, Gove
+-- Hello, Alice
+-- Hello, Bob</code></pre>
+
+        <div class="callout callout-info">
+            <strong>table.pack 更好</strong>：<code>{...}</code> 打包时不会保留 nil 参数（无法区分「传了 nil」和「没传」）。<code>table.pack(...)</code>（5.2+）返回的 table 有 <code>.n</code> 字段记录实际参数个数，更安全。
+        </div>
+
+        <h2>local vs global 的性能真相</h2>
+
+        <p>这不是「建议用 local」——这是 Lua 性能的第一课。看看为什么：</p>
+
+        <pre><code class="language-lua">-- 全局变量访问：_G["x"] → 哈希查找
+x = 100
+for i = 1, 10000000 do
+    x = x + 1              -- 每次循环做两次哈希查找
+end
+
+-- 局部变量访问：寄存器
+local y = 100
+for i = 1, 10000000 do
+    y = y + 1              -- 直接寄存器操作
+end
+-- 局部版本的循环快 5-10 倍</code></pre>
+
+        <p>局部变量除了快，还限制作用域，防止全局命名空间污染。在一个文件中 <code>x = 1</code>，所有被 require 的文件都能看到它——这是灾难的源头。</p>
+
+        <div class="callout callout-tip">
+            <strong>黄金法则</strong>：所有变量都声明为 <code>local</code>。如果你需要全局共享，显式写入 <code>_G.my_var = value</code> 或返回一个 table 给 require 的调用者。隐式全局是 bug 的温床。
+        </div>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>写出 Lua 中仅有的两个「假」值。然后测试 <code>if "" then</code> 和 <code>if 0 then</code> 的结果，确认你的理解。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>编码实践</h4>
+                    <p>用 <code>and/or</code> 实现一个 <code>clamp(x, min, max)</code> 函数——将数值限制在区间内。不要用 if 语句。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>对比分析</h4>
+                    <p>Lua 的 <code>for i = 1, n</code> 在循环开始时就确定了循环次数，中途修改变量 n 不会影响循环。Python 的 <code>for i in range(n)</code> 同理，但 C 的 <code>for(i=0;i<n;i++)</code> 每次都重新求值。这三种设计各有什么优缺点？</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>Lua 只有 8 种类型，type() 函数返回类型名</li>
+            <li>nil 是多面手——空值、未定义、删除、假值。0 和 "" 都是真值，这与 C/Python 完全不同</li>
+            <li>number 内部是整数和浮点双表示（5.3+），算术运算自动转换</li>
+            <li>字符串不可变，拼接用 ..，长括号 [[ ]] 最易读</li>
+            <li>逻辑运算符 and/or 返回短路值（非 boolean），可用于默认值和三元替代</li>
+            <li>永远用 local 声明变量——既为性能也为正确性</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.lua.org/manual/5.4/manual.html#3" target="_blank">Lua 5.4 参考手册 §3 — 语言定义</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="01-lua-overview.html">← 上一章：Lua 概述与设计哲学</a>
+            <a href="03-functions-and-closures.html">下一章：函数、闭包与尾调用 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

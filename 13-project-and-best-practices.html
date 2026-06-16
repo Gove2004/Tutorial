@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实战项目与最佳实践 - Lua 从入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="12-lua-ui-development.html">← 上一章</a>
+        <span></span>
+    </nav>
+
+    <main>
+        <h1>13 - 实战项目与最佳实践</h1>
+
+        <p>这是收束章。我们将整合前 12 章的知识——table、元表、闭包、协程、GC、C API、模块化——从零构建一个完整的 Lua 背包系统。同时总结编码规范、性能检查清单、面试高频陷阱。</p>
+
+        <h2>实战项目：Lua 背包系统</h2>
+
+        <p>目标：构建一个游戏背包系统，包含物品存储、堆叠、排序、使用、位置交换。纯 Lua 实现（不依赖 XLua/Unity），可以直接在命令行运行。</p>
+
+        <h3>项目结构</h3>
+
+        <pre><code class="language-lua">-- inventory/
+-- ├── main.lua          -- 入口 + 测试用例
+-- ├── slot.lua           -- 背包格子
+-- ├── item.lua           -- 物品定义
+-- ├── backpack.lua       -- 背包核心逻辑
+-- └── event.lua          -- 事件总线
+
+-- item.lua
+local Item = {}
+Item.__index = Item
+
+function Item.new(data)
+    local item = setmetatable({}, Item)
+    item.id = data.id
+    item.name = data.name or "Unknown"
+    item.type = data.type or "misc"
+    item.max_stack = data.max_stack or 99
+    item.description = data.description or ""
+    item.usable = data.usable or false
+    item.use_effect = data.use_effect  -- 使用时的效果函数
+    return item
+end
+
+function Item:can_stack_with(other)
+    return self.id == other.id and self.max_stack > 1
+end
+
+function Item:use(target)
+    if self.usable and self.use_effect then
+        return self.use_effect(target)
+    end
+    return false, "Cannot use this item"
+end
+
+-- slot.lua
+local Slot = {}
+Slot.__index = Slot
+
+function Slot.new(index)
+    return setmetatable({
+        index = index,
+        item = nil,
+        count = 0,
+    }, Slot)
+end
+
+function Slot:is_empty()
+    return self.item == nil or self.count <= 0
+end
+
+function Slot:can_accept(item, count)
+    if self:is_empty() then
+        return true
+    end
+    return self.item:can_stack_with(item)
+        and (self.count + count) <= self.item.max_stack
+end
+
+function Slot:add(item, count)
+    count = count or 1
+    if self:is_empty() then
+        self.item = item
+        self.count = count
+    else
+        self.count = self.count + count
+    end
+end
+
+function Slot:remove(count)
+    count = count or self.count
+    self.count = self.count - count
+    if self.count <= 0 then
+        self.item = nil
+        self.count = 0
+    end
+    return count
+end
+
+function Slot:clear()
+    self.item = nil
+    self.count = 0
+end
+
+-- event.lua
+local EventBus = {}
+
+local handlers = {}
+
+function EventBus.on(event, callback)
+    handlers[event] = handlers[event] or {}
+    table.insert(handlers[event], callback)
+end
+
+function EventBus.emit(event, ...)
+    for _, cb in ipairs(handlers[event] or {}) do
+        cb(...)
+    end
+end
+
+function EventBus.off(event, callback)
+    local list = handlers[event]
+    if not list then return end
+    for i = #list, 1, -1 do
+        if list[i] == callback then
+            table.remove(list, i)
+        end
+    end
+end
+
+-- backpack.lua
+local Backpack = {}
+Backpack.__index = Backpack
+
+function Backpack.new(capacity)
+    local bp = setmetatable({
+        capacity = capacity or 30,
+        slots = {},
+        _item_index = {},  -- itemId → slot 索引表，快速查找
+    }, Backpack)
+
+    -- 预创建所有 slot
+    for i = 1, bp.capacity do
+        bp.slots[i] = Slot.new(i)
+    end
+
+    return bp
+end
+
+-- 添加物品（核心方法）
+function Backpack:add_item(item, count)
+    count = count or 1
+    local remaining = count
+
+    -- 先尝试堆叠到已有的同类 slot
+    if item.max_stack > 1 then
+        for _, slot in ipairs(self.slots) do
+            if not slot:is_empty() and slot.item.id == item.id then
+                local space = item.max_stack - slot.count
+                local to_add = math.min(space, remaining)
+                if to_add > 0 then
+                    slot:add(item, to_add)
+                    remaining = remaining - to_add
+                end
+                if remaining <= 0 then break end
+            end
+        end
+    end
+
+    -- 剩余放到空 slot
+    while remaining > 0 do
+        local slot = self:find_empty_slot()
+        if not slot then
+            EventBus.emit("BACKPACK_FULL", self)
+            return false, count - remaining
+        end
+        local to_add = math.min(item.max_stack, remaining)
+        slot:add(item, to_add)
+        remaining = remaining - to_add
+    end
+
+    EventBus.emit("BACKPACK_CHANGED", self)
+    return true, count
+end
+
+-- 交换两个 slot（拖拽排序）
+function Backpack:swap_slots(idx_a, idx_b)
+    local slot_a = self.slots[idx_a]
+    local slot_b = self.slots[idx_b]
+    if not slot_a or not slot_b then return false end
+
+    -- 如果可以堆叠，则合并
+    if not slot_a:is_empty() and not slot_b:is_empty()
+        and slot_a.item.id == slot_b.item.id
+        and slot_a.item.max_stack > 1 then
+        local total = slot_a.count + slot_b.count
+        local maxstack = slot_a.item.max_stack
+        slot_a.count = math.min(total, maxstack)
+        slot_b.count = total - slot_a.count
+        if slot_b.count <= 0 then slot_b:clear() end
+    else
+        -- 直接交换
+        slot_a.item, slot_b.item = slot_b.item, slot_a.item
+        slot_a.count, slot_b.count = slot_b.count, slot_a.count
+    end
+
+    EventBus.emit("BACKPACK_CHANGED", self)
+    return true
+end
+
+-- 快速查找物品
+function Backpack:has_item(item_id, min_count)
+    min_count = min_count or 1
+    local total = 0
+    for _, slot in ipairs(self.slots) do
+        if not slot:is_empty() and slot.item.id == item_id then
+            total = total + slot.count
+            if total >= min_count then return true end
+        end
+    end
+    return false
+end
+
+-- 移除物品
+function Backpack:remove_item(item_id, count)
+    count = count or 1
+    local removed = 0
+    -- 从前往后遍历，优先移除数量最少的 slot
+    for _, slot in ipairs(self.slots) do
+        if not slot:is_empty() and slot.item.id == item_id then
+            local to_remove = math.min(slot.count, count - removed)
+            slot:remove(to_remove)
+            removed = removed + to_remove
+            if removed >= count then break end
+        end
+    end
+    EventBus.emit("BACKPACK_CHANGED", self)
+    return removed
+end
+
+-- 按类型排序
+function Backpack:sort_by_type()
+    table.sort(self.slots, function(a, b)
+        if a:is_empty() and b:is_empty() then return false end
+        if a:is_empty() then return false end
+        if b:is_empty() then return true end
+        return a.item.type < b.item.type
+    end)
+    -- 更新 index
+    for i, slot in ipairs(self.slots) do
+        slot.index = i
+    end
+    EventBus.emit("BACKPACK_SORTED", self)
+end
+
+function Backpack:find_empty_slot()
+    for _, slot in ipairs(self.slots) do
+        if slot:is_empty() then return slot end
+    end
+    return nil
+end
+
+function Backpack:get_used_count()
+    local count = 0
+    for _, slot in ipairs(self.slots) do
+        if not slot:is_empty() then count = count + 1 end
+    end
+    return count
+end
+
+function Backpack:to_table()
+    -- 序列化为简单 table（存档用）
+    local t = {capacity = self.capacity, items = {}}
+    for _, slot in ipairs(self.slots) do
+        if not slot:is_empty() then
+            table.insert(t.items, {
+                id = slot.item.id,
+                count = slot.count,
+                index = slot.index,
+            })
+        end
+    end
+    return t
+end
+
+function Backpack:from_table(data)
+    -- 从序列化数据恢复（读档用）
+    self.capacity = data.capacity
+    self.slots = {}
+    for i = 1, self.capacity do
+        self.slots[i] = Slot.new(i)
+    end
+    for _, item_data in ipairs(data.items) do
+        -- 这里需要 Item 注册表来根据 id 创建 Item
+        -- 简化处理：省略，实际项目需要 item_registry
+    end
+end
+
+-- main.lua（测试用例）
+local function test_backpack()
+    local bp = Backpack.new(20)
+
+    -- 创建物品
+    local health_potion = Item.new({
+        id = "health_potion",
+        name = "生命药水",
+        type = "consumable",
+        max_stack = 99,
+        usable = true,
+        use_effect = function(target)
+            target.hp = math.min(target.hp + 50, target.maxHp)
+            return true
+        end,
+    })
+
+    local sword = Item.new({
+        id = "iron_sword",
+        name = "铁剑",
+        type = "weapon",
+        max_stack = 1,
+    })
+
+    local shield = Item.new({
+        id = "wooden_shield",
+        name = "木盾",
+        type = "armor",
+        max_stack = 1,
+    })
+
+    -- 测试 1：添加物品
+    bp:add_item(health_potion, 5)
+    bp:add_item(sword, 1)
+    bp:add_item(shield, 1)
+    assert(bp:get_used_count() == 3)
+
+    -- 测试 2：堆叠
+    bp:add_item(health_potion, 3)
+    -- 第一个有药水的 slot 应该变成 8
+    local potion_slot = nil
+    for _, slot in ipairs(bp.slots) do
+        if not slot:is_empty() and slot.item.id == "health_potion" then
+            potion_slot = slot
+            break
+        end
+    end
+    assert(potion_slot.count == 8)
+
+    -- 测试 3：查找
+    assert(bp:has_item("health_potion", 5))
+    assert(not bp:has_item("gold_bar"))
+
+    -- 测试 4：移除
+    bp:remove_item("health_potion", 3)
+    -- potion_slot 现在应该是 5
+    assert(potion_slot.count == 5)
+
+    -- 测试 5：交换
+    local sword_idx = nil
+    for i, slot in ipairs(bp.slots) do
+        if not slot:is_empty() and slot.item.id == "iron_sword" then
+            sword_idx = i
+            break
+        end
+    end
+    local shield_idx = nil
+    for i, slot in ipairs(bp.slots) do
+        if not slot:is_empty() and slot.item.id == "wooden_shield" then
+            shield_idx = i
+            break
+        end
+    end
+    bp:swap_slots(sword_idx, shield_idx)
+    assert(bp.slots[sword_idx].item.id == "wooden_shield")
+    assert(bp.slots[shield_idx].item.id == "iron_sword")
+
+    print("All tests passed!")
+end
+
+test_backpack()</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>这个项目的知识覆盖</strong>：Item 用了元表 OOP（第 5 章），Backpack 用了 table 深度操作（第 4 章），EventBus 用了闭包（第 3 章），Slot 用预创建避免了运行时 GC 抖动（第 8 章），main.lua 用 require 加载各模块（第 9 章）。
+        </div>
+
+        <h2>Lua 编码规范</h2>
+
+        <table>
+            <thead><tr><th>规则</th><th>说明</th><th>示例</th></tr></thead>
+            <tbody>
+                <tr><td>所有变量 local</td><td>除非确定需要全局，永远加 local</td><td><code>local x = 1</code></td></tr>
+                <tr><td>模块返回 table</td><td>不污染 _G，不调用 module()</td><td><code>return M</code></td></tr>
+                <tr><td>函数名用下划线</td><td>Lua 社区约定俗成</td><td><code>player_data.load()</code></td></tr>
+                <tr><td>OOP 用冒号</td><td>实例方法用 :，类方法用 .</td><td><code>obj:method()</code></td></tr>
+                <tr><td>避免深层嵌套</td><td>超过 3 层 if/for 嵌套考虑抽取函数</td><td>—</td></tr>
+                <tr><td>字符串拼接注意 GC</td><td>循环中大量拼接用 table.concat</td><td><code>table.concat(parts)</code></td></tr>
+                <tr><td>数组用 # 前确保无空洞</td><td>有 nil 空洞时 # 行为未定义</td><td><code>table.insert/remove</code></td></tr>
+                <tr><td>pairs 遍历时不增删键</td><td>修改遍历中的 table 是未定义行为</td><td>先收集再操作</td></tr>
+            </tbody>
+        </table>
+
+        <h3>字符串拼接性能</h3>
+
+        <table class="comparison">
+            <thead><tr><th>不推荐（O(n²)）</th><th>推荐（O(n)）</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td class="bad">
+<pre><code class="language-lua">local result = ""
+for i = 1, 10000 do
+    result = result .. "a"
+    -- 每次 .. 都创建新字符串！
+end</code></pre>
+                    </td>
+                    <td class="good">
+<pre><code class="language-lua">local parts = {}
+for i = 1, 10000 do
+    parts[i] = "a"
+end
+local result = table.concat(parts)
+-- 一次性拼接，O(n)</code></pre>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>性能检查清单</h2>
+
+        <div class="callout callout-warning">
+            <strong>上线前必查</strong>：以下每一项如果没做到，都可能成为线上事故。
+        </div>
+
+        <ol>
+            <li><strong>所有变量都是 local 吗？</strong>——遍历整个项目，全局变量 <code>grep</code> 一遍。漏一个全局就是一颗炸弹</li>
+            <li><strong>循环中在做字符串拼接吗？</strong>——用 <code>table.concat</code> 替换</li>
+            <li><strong>table 有空洞吗？</strong>——如果有，<code>#</code> 的行为不可预测</li>
+            <li><strong>大量的临时 table 在循环/Update 中创建吗？</strong>——用对象池或 table.create 预分配</li>
+            <li><strong>C# ↔ Lua 的跨语言调用在热路径上吗？</strong>——XLua 项目中，每帧的跨语言调用总开销应 < 1ms</li>
+            <li><strong>LuaFunction/LuaTable Dispose 了吗？</strong>——XLua 项目中忘记 Dispose = GC 泄漏</li>
+            <li><strong>闭包持有大对象 upvalue 吗？</strong>——不需要的 upvalue 置 nil</li>
+            <li><strong>协程对象释放了吗？</strong>——suspended 状态的协程持有其栈上所有对象</li>
+            <li><strong>事件回调在不再需要时注销了吗？</strong>——UI 销毁时事件残留 = 内存泄漏</li>
+            <li><strong>弱引用表对缓存/监听模式用了吗？</strong>——防止缓存让对象永不被回收</li>
+        </ol>
+
+        <h2>面试高频陷阱</h2>
+
+        <details>
+            <summary>陷阱 1：Lua 中 0 是 true 还是 false？</summary>
+            <div class="details-content">
+                <p><strong>true</strong>。Lua 只有 nil 和 false 为假。0、空字符串、空 table 全部为真。面试官最爱拿这个考 C/C++ 转 Lua 的人。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>陷阱 2：Lua 数组从 0 还是 1 开始？为什么？</summary>
+            <div class="details-content">
+                <p><strong>从 1 开始</strong>。原因是 Lua 的 table 不是真正的数组——1 是最自然的第一个正整数键。标准库函数（table.insert、table.remove、ipairs、# 对数组部分的语义）都以此为约定。但 <code>t[0]</code> 可以用（进哈希部分）。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>陷阱 3：ipairs 和 pairs 有什么区别？什么时候用哪个？</summary>
+            <div class="details-content">
+                <p><strong>ipairs</strong> 按整数键从小到大迭代数组部分，遇到 nil 就停止。<strong>pairs</strong> 迭代所有键值对，顺序不保证。遍历已知的数组用 ipairs，遍历字典/混合 table 用 pairs。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>陷阱 4：local a, b = f() 和 local a = f() 接收多返回值的区别？</summary>
+            <div class="details-content">
+                <p><code>local a, b = f()</code> 收 f() 返回的第一个和第二个值。<code>local a = f()</code> 只收第一个值，其余丢弃。多返回值只有当函数调用在表达式<strong>末尾</strong>时才全部保留。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>陷阱 5：Lua 的 GC 是什么类型？5.4 有什么改进？</summary>
+            <div class="details-content">
+                <p>5.1-5.3：增量式三色标记-清除。5.4：引入<strong>分代 GC</strong>（generational），minor GC 只扫新生代 + 跨代引用，major GC 全扫。分代 GC 对「大量临时对象用完即弃」的场景（如游戏每帧）性能提升明显。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>陷阱 6：# 运算符在什么情况下结果是不可预测的？</summary>
+            <div class="details-content">
+                <p>当 table 的数组部分有空洞（中间有 nil）时，# 的行为未定义。可能返回空洞前的长度、空洞后的长度、或任何值。只有紧密数组（无空洞）才能依赖 #。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>陷阱 7：Lua 如何实现 OOP？没有 class 关键字怎么办？</summary>
+            <div class="details-content">
+                <p>用 table + 元表。table 存储实例数据和方法，<code>__index</code> 元方法指向原型/类 table 实现继承。创建实例时 <code>setmetatable({}, Class)</code>。<code>obj:method()</code> 冒号语法糖自动传 self。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>陷阱 8：为什么 XLua 需要「生成代码」？不生成会怎样？</summary>
+            <div class="details-content">
+                <p>XLua 默认用反射访问 C#，有大量 GC 分配和性能开销。生成代码预构建适配层，直接绑定委托，性能提升 10-100 倍。不生成代码时编辑器能跑但真机可能卡死。</p>
+            </div>
+        </details>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>扩展背包系统</h4>
+                    <p>为背包系统添加：物品使用（usable 标记的物品，传 target 参数执行效果）、装备栏（从背包拖到装备栏时调用 swap 逻辑）、存档/读档（to_table/from_table 序列化）。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>性能基准测试</h4>
+                    <p>用 <code>os.clock()</code> 测量背包系统在 10000 次 add_item 操作下的耗时。分别测量：有对象池 vs 无对象池、local 变量 vs 全局变量、table.insert vs 直接赋值。输出对比表格。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>面试准备</h4>
+                    <p>用自己的话解释上面 8 个面试高频陷阱。不要背答案——理解原理后用你自己的例子重新表达。如果能讲清「为什么是这样设计」而非「是什么」，面试就稳了。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>背包系统整合了元表 OOP、闭包事件、table 操作、对象池预分配等全部核心知识</li>
+            <li>编码规范的核心是 local 优先、模块隔离、用对 ipairs/pairs</li>
+            <li>性能清单的 10 条是上线前的最后一道防线</li>
+            <li>面试陷阱的核心是「理解设计决策」而非「背住答案」</li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>课程完成</strong>：如果你读完了这 13 章并完成了大部分练习，你已经具备了在生产环境中使用 Lua 的能力。接下来最好的进阶方式是<strong>做一个真实项目</strong>——使用 XLua 在 Unity 中写一个完整的游戏系统，或者用 Lua 写一个命令行工具。记住：Lua 是工具，真正重要的是你用工具解决问题的能力。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="12-lua-ui-development.html">← 上一章：Lua UI 开发实战</a>
+            <a href="index.html">返回目录</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-lua.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

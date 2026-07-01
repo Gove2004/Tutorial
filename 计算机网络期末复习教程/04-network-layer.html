@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第4章 网络层 - 计算机网络期末复习</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+<main>
+    <nav class="chapter-nav">
+        <a href="03-data-link-layer.html">&laquo; 上一章：数据链路层</a>
+        <a href="index.html">目录</a>
+        <a href="05-transport-layer.html">下一章：传输层 &raquo;</a>
+    </nav>
+
+    <h1>第4章 网络层</h1>
+    <p class="intro">网络层是TCP/IP体系结构中<strong>最核心、最重要</strong>的一层。它负责将分组从源主机<span style="white-space:nowrap;">送</span>达目的主机，提供<strong>端到端</strong>的通信服务。本章是期末考试中<strong>分值最高、内容最多</strong>的一章——IP地址、子网划分、CIDR和路由协议是必考内容。</p>
+
+    <!-- ==================== 4.1 ==================== -->
+    <h2>4.1 网络层功能</h2>
+
+    <h3>为什么需要网络层？</h3>
+    <p>数据链路层只负责<strong>相邻节点</strong>之间的通信——比如从你的电脑到家里的路由器。但互联网上的两台计算机可能相隔千里，中间经过几十台路由器。谁来负责把数据从源主机一站一站<span style="white-space:nowrap;">送</span>到目的主机？这就是网络层的任务。</p>
+
+    <p>打个比方：数据链路层像是你从家走到地铁站（相邻节点），网络层则是规划从你家到北京天安门的完整路线——先坐哪路公交、换乘哪条地铁线、出站后走哪个出口。网络层负责<strong>端到端</strong>的全局路径规划。</p>
+
+    <div class="definition">
+        <h4>网络层的核心功能</h4>
+        <ul>
+            <li><strong>路由选择（Routing）</strong>：确定分组从源到目的所经过的最佳路径。由路由算法决定，基于网络拓扑和状态信息。</li>
+            <li><strong>分组转发（Forwarding）</strong>：路由器根据路由表将分组从输入端口转发到适当的输出端口。转发是路由选择的执行阶段。</li>
+            <li><strong>拥塞控制</strong>：当网络负载超过容量时，采取相应措施缓解或避免拥塞。</li>
+            <li><strong>网络互联</strong>：将不同类型的网络连接起来，实现跨网络通信。</li>
+        </ul>
+    </div>
+
+    <h3>虚电路服务 vs 数据报服务</h3>
+    <p>网络层可以向传输层提供两种服务方式。Internet的网络层（IP协议）采用的是<strong>数据报服务</strong>——每个分组独立寻路，不预先建立连接。</p>
+
+    <table>
+        <caption>虚电路服务 vs 数据报服务</caption>
+        <thead>
+            <tr><th>对比项</th><th>虚电路服务</th><th>数据报服务</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>基本思路</td><td>先建立连接（虚电路），后续分组沿同一路径</td><td>每个分组独立路由，不预先建立连接</td></tr>
+            <tr><td>地址使用</td><td>每个分组使用短的虚电路号</td><td>每个分组携带完整的目的IP地址</td></tr>
+            <tr><td>路由选择</td><td>仅在建立连接时做一次</td><td>每个分组独立进行</td></tr>
+            <tr><td>分组顺序</td><td>保证按发送顺序到达</td><td>不保证顺序，可能乱序</td></tr>
+            <tr><td>可靠性</td><td>网络本身保证可靠传输</td><td>网络层不保证，由TCP保证</td></tr>
+            <tr><td>差错处理</td><td>由网络节点负责</td><td>由端系统负责</td></tr>
+            <tr><td>典型网络</td><td>ATM、Frame Relay</td><td>Internet（IP网络）</td></tr>
+            <tr><td>优点</td><td>有序到达、QoS有保证</td><td>无连接、灵活、鲁棒性强</td></tr>
+            <tr><td>缺点</td><td>网络节点复杂、单点故障</td><td>顺序无保证、每个分组开销较大</td></tr>
+        </tbody>
+    </table>
+
+    <div class="callout callout-info">
+        <strong>为什么Internet选择数据报服务？</strong> 设计初衷是为了在战争或灾难下维持通信——数据报服务无连接的特性使得单个节点故障不影响整体通信，分组可以绕开故障节点独立寻路。此外，将复杂性放在端系统而非网络核心中，符合"端到端原则"。<br><br>
+        <strong>一句话：</strong>Internet的设计哲学是"聪明的终端，傻的网络"——网络层只做尽力<span style="white-space:nowrap;">送</span>达，可靠传输交给端系统去实现。
+    </div>
+
+    <!-- ==================== 4.2 ==================== -->
+    <h2>4.2 分类IP地址（必记！）</h2>
+
+    <h3>为什么需要IP地址？</h3>
+    <p>MAC地址是设备出厂时固化的标识，没有层级结构——就像人的身份证号，无法从中看出你住哪个城市。而IP地址是<strong>有层次结构</strong>的：它由<strong>网络号</strong>（你在哪个网络）和<strong>主机号</strong>（你在该网络中的哪台设备）组成。路由器只需根据网络号转发分组，不需要知道每台主机的具体位置，这大大减小了路由表的规模。</p>
+
+    <div class="definition">
+        <h4>IP地址结构</h4>
+        <p>IP地址是32位的二进制数（IPv4），通常用<strong>点分十进制</strong>表示，如 <code>192.168.1.1</code>。</p>
+        <p style="margin-top:0.5em;">IP地址 &asymp; { &lt;网络号&gt; , &lt;主机号&gt; }</p>
+        <p>这种两级结构是路由的基础——先找到网络，再找到主机。</p>
+    </div>
+
+    <h3>五类IP地址</h3>
+    <p>最初的IP地址按<strong>分类编址</strong>方式分为A、B、C、D、E五类，通过首字节的高位比特来区分：</p>
+
+    <table>
+        <caption>五类IP地址详细对照表（必须熟记！）</caption>
+        <thead>
+            <tr><th>类别</th><th>首字节<br>范围</th><th>前缀位</th><th>网络号<br>位数</th><th>主机号<br>位数</th><th>最大网络数</th><th>最大主机数</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>A类</strong></td><td>1~126</td><td>0</td><td>8位（7位有效）</td><td>24位</td><td>126（2⁷-2）</td><td>16,777,214（2²⁴-2）</td></tr>
+            <tr><td><strong>B类</strong></td><td>128~191</td><td>10</td><td>16位（14位有效）</td><td>16位</td><td>16,384（2¹⁴）</td><td>65,534（2¹⁶-2）</td></tr>
+            <tr><td><strong>C类</strong></td><td>192~223</td><td>110</td><td>24位（21位有效）</td><td>8位</td><td>2,097,152（2²¹）</td><td>254（2⁸-2）</td></tr>
+            <tr><td>D类</td><td>224~239</td><td>1110</td><td colspan="4">多播地址（无网络号和主机号之分）</td></tr>
+            <tr><td>E类</td><td>240~255</td><td>1111</td><td colspan="4">保留地址（用于实验和研究）</td></tr>
+        </tbody>
+    </table>
+
+    <div class="sidebar-note">
+        <strong>记忆技巧：</strong>看第一个字节就能判断类别：<br>
+        A类：0~127（实际1~126，127保留）→ 0xxxxxxx<br>
+        B类：128~191 → 10xxxxxx<br>
+        C类：192~223 → 110xxxxx<br>
+        <strong>注意：</strong>127.0.0.1是<strong>环回地址</strong>，不属于任何类，用于本地测试。
+    </div>
+
+    <h3>特殊IP地址</h3>
+    <table>
+        <caption>不能分配给主机的特殊IP地址</caption>
+        <thead>
+            <tr><th>地址</th><th>名称</th><th>用途</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>网络号全0，主机号全0</td><td>本网络的本主机</td><td>DHCP获取IP前使用，只能作为源地址</td></tr>
+            <tr><td>网络号特定，主机号全0</td><td>网络地址</td><td>代表整个网络，不能分配给主机</td></tr>
+            <tr><td>网络号特定，主机号全1</td><td>广播地址</td><td>向指定网络内所有主机广播</td></tr>
+            <tr><td>全1（255.255.255.255）</td><td>受限广播</td><td>向本网络广播，路由器不转发</td></tr>
+            <tr><td>127.0.0.1</td><td>环回地址</td><td>本地测试，数据不离开主机</td></tr>
+            <tr><td>0.0.0.0</td><td>默认/未知</td><td>默认路由指向或DHCP时使用</td></tr>
+        </tbody>
+    </table>
+
+    <h3>私有IP地址（RFC 1918）</h3>
+    <div class="callout callout-tip">
+        <strong>为什么需要私有地址？</strong> IPv4地址资源有限（只有约43亿个），不可能给每台设备分配一个全球唯一公网IP。私有IP可以在局域网内重复使用，通过NAT（网络地址转换）技术访问Internet。
+    </div>
+
+    <table>
+        <caption>三种私有地址段（必须熟记）</caption>
+        <thead>
+            <tr><th>类别</th><th>地址范围</th><th>前缀</th><th>数量</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>A类私有</td><td>10.0.0.0 ~ 10.255.255.255</td><td>10.0.0.0/8</td><td>1个A类网（约1600万）</td></tr>
+            <tr><td>B类私有</td><td>172.16.0.0 ~ 172.31.255.255</td><td>172.16.0.0/12</td><td>16个B类网</td></tr>
+            <tr><td>C类私有</td><td>192.168.0.0 ~ 192.168.255.255</td><td>192.168.0.0/16</td><td>256个C类网</td></tr>
+        </tbody>
+    </table>
+
+    <div class="sidebar-note">
+        <strong>考试提示：</strong>看到IP地址以10、172.16~172.31、192.168开头，立刻意识到这是<strong>私有地址</strong>。私有地址不能在Internet上路由，必须通过NAT转换后才能访问外网。
+    </div>
+
+    <!-- ==================== 4.3 ==================== -->
+    <h2>4.3 ARP协议</h2>
+
+    <h3>为什么需要ARP？</h3>
+    <p>主机A知道主机B的IP地址（比如192.168.1.2），但在同一局域网内通信时，数据链路层的帧需要使用<strong>MAC地址</strong>来标识目的设备。光知道IP地址还不够，需要把IP地址<strong>解析</strong>成对应的MAC地址——这就是ARP（地址解析协议）的工作。</p>
+
+    <p>简单来说：<strong>ARP解决的是"我知道你的IP，但我需要知道你的MAC地址"的问题。</strong></p>
+
+    <h3>ARP工作流程：4步</h3>
+
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>查ARP缓存</h4>
+                <p>主机在本地<strong>ARP缓存表</strong>中查找目的IP对应的MAC地址。ARP缓存存储了最近通信过的IP-MAC对应关系，每一条目有生存时间（通常2~20分钟），超时后删除。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>广播ARP请求</h4>
+                <p>如果缓存未命中，主机在本局域网内广播一个<strong>ARP请求帧</strong>。目的MAC地址为全1（FF-FF-FF-FF-FF-FF），内容："谁的IP是X.X.X.X？请告诉我你的MAC地址。"</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+                <h4>单播ARP响应</h4>
+                <p>局域网内所有主机都收到该请求，但只有IP匹配的主机B处理它。B发送一个<strong>ARP响应帧</strong>（单播），内容："IP地址X.X.X.X是我的，我的MAC地址是XX-XX-XX-XX-XX-XX。"</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">4</span>
+            <div class="step-content">
+                <h4>更新缓存并通信</h4>
+                <p>A收到ARP响应后，将IP-MAC映射写入ARP缓存，然后用正确的MAC地址封装数据帧进行通信。</p>
+            </div>
+        </div>
+    </div>
+
+    <pre><code>ARP交互过程可视化：
+
+主机A (IP:192.168.1.1)          主机B (IP:192.168.1.2)
+      |                              |
+      |  [1] 查缓存，未找到           |
+      |                              |
+      |  [2] 广播ARP请求              |
+      | ---→ "谁的IP是192.168.1.2？" →|
+      |     (目的MAC=FF-FF-FF-FF-FF-FF) |
+      |                              |
+      |  [3] 单播ARP响应              |
+      | ←-- "192.168.1.2 = AA:BB:CC:DD:EE:FF" ---|
+      |                              |
+      |  [4] 更新缓存，正常通信        |
+      | ---→ 目的MAC=AA:BB:CC:DD:EE:FF →|</code></pre>
+
+    <div class="callout callout-warning">
+        <strong>ARP欺骗（ARP Spoofing）：</strong>攻击者伪造ARP响应，广播"我的IP是网关的IP，我的MAC是攻击者的MAC"。其他主机会更新ARP缓存，将所有发往网关的数据发送到攻击者主机上，实现<strong>中间人攻击（MITM）</strong>。防范措施：静态ARP表、DAI（Dynamic ARP Inspection）。
+    </div>
+
+    <div class="sidebar-note">
+        <strong>考试要点：</strong>ARP<strong>只在同一局域网内</strong>工作。如果目的主机在不同网络，主机通过ARP获取<strong>默认网关</strong>的MAC地址，将数据交给网关路由器转发。
+    </div>
+
+    <!-- ==================== 4.4 ==================== -->
+    <h2>4.4 IP数据报格式</h2>
+
+    <h3>4.4.1 IP首部</h3>
+    <p>IP数据报由<strong>首部</strong>和<strong>数据</strong>两部分组成。固定首部长度为<strong>20字节</strong>，是所有IP数据报必须包含的部分。加上可选项（最长40字节），IP首部总长20~60字节。</p>
+
+    <pre><code>IPv4数据报首部格式（固定20字节）：
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |版本  | 首部长度 |  区分服务     |         总长度               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |         标识                   |标志|       片偏移             |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |  生存时间TTL   |   协议        |        首部校验和             |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        源IP地址                                |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        目的IP地址                              |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                   选项（可选，最长40字节）                      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+</code></pre>
+
+    <table>
+        <caption>IP首部各字段详解</caption>
+        <thead>
+            <tr><th>字段</th><th>位数</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>版本</td><td>4位</td><td>IP协议版本：IPv4=4，IPv6=6</td></tr>
+            <tr><td>首部长度</td><td>4位</td><td>以4字节为单位，最小5（20B），最大15（60B）</td></tr>
+            <tr><td>区分服务</td><td>8位</td><td>早期叫ToS，用于DiffServ QoS标记</td></tr>
+            <tr><td>总长度</td><td>16位</td><td>整个数据报长度（首部+数据），单位字节，最大65535</td></tr>
+            <tr><td>标识</td><td>16位</td><td>标识同一数据报的分片，各分片此字段相同</td></tr>
+            <tr><td>标志</td><td>3位</td><td>DF=1禁止分片；MF=1还有后续分片</td></tr>
+            <tr><td>片偏移</td><td>13位</td><td>分片在原始数据报中的位置，以<strong>8字节</strong>为单位</td></tr>
+            <tr><td>TTL</td><td>8位</td><td>生存时间，每跳减1，减到0丢弃。防止无限循环</td></tr>
+            <tr><td>协议</td><td>8位</td><td>上层协议：ICMP=1,TCP=6,UDP=17,OSPF=89</td></tr>
+            <tr><td>首部校验和</td><td>16位</td><td>仅校验首部（不含数据），每跳重新计算</td></tr>
+            <tr><td>源IP地址</td><td>32位</td><td>发送方的IP地址</td></tr>
+            <tr><td>目的IP地址</td><td>32位</td><td>接收方的IP地址</td></tr>
+            <tr><td>选项</td><td>可变</td><td>记录路由、时间戳等，最多40B，现已少用</td></tr>
+        </tbody>
+    </table>
+
+    <h3>4.4.2 IP分片（必考！）</h3>
+
+    <h4>为什么需要分片？</h4>
+    <p>每种物理网络都有最大传输单元（MTU）。以太网的MTU是1500字节。如果IP数据报大于MTU，路由器必须将其<strong>拆分成多个较小的分片</strong>发送，到达目的主机后再重组。</p>
+
+    <div class="definition">
+        <h4>分片规则</h4>
+        <ul>
+            <li>分片只拆分数据部分，首部复制到每个分片中</li>
+            <li>各分片的<strong>标识</strong>字段相同（属于同一原始数据报）</li>
+            <li>非最后分片<strong>MF=1</strong>，最后分片<strong>MF=0</strong></li>
+            <li><strong>片偏移以8字节为单位</strong>，即偏移值 = 字节偏移 / 8</li>
+            <li>每个分片的数据长度必须是<strong>8的倍数</strong>（最后一片除外）</li>
+        </ul>
+    </div>
+
+    <h4>完整例题：IP分片计算</h4>
+    <div class="callout callout-tip">
+        <strong>题目：</strong>一个IP数据报总长度为4000字节（首部20字节，数据3980字节），链路的MTU=1500字节。请计算各分片的标识、MF标志、片偏移和总长度。
+    </div>
+
+    <p><strong>解题思路：</strong></p>
+    <pre><code>第一步：确定每片能携带的最大数据量
+MTU = 1500字节
+每片首部 = 20字节
+每片最多携带数据 = 1500 - 20 = 1480字节
+
+第二步：检查1480是否是8的倍数
+1480 / 8 = 185 ✓（整除，符合要求）
+
+第三步：计算需要多少片
+总数据 = 3980字节
+片数 = ceil(3980 / 1480) = ceil(2.689) = 3片
+
+第四步：计算每片的数据长度
+前两片：各1480字节
+最后一片：3980 - 1480 × 2 = 1020字节
+
+第五步：计算每片的片偏移
+片1的偏移：0 / 8 = 0
+片2的偏移：1480 / 8 = 185
+片3的偏移：(1480 + 1480) / 8 = 2960 / 8 = 370</code></pre>
+
+    <table>
+        <caption>IP分片结果</caption>
+        <thead>
+            <tr><th>分片</th><th>标识</th><th>MF</th><th>片偏移</th><th>总长度</th><th>数据长度</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>分片1</td><td>12345</td><td>1（还有后续）</td><td>0</td><td>1500</td><td>1480</td></tr>
+            <tr><td>分片2</td><td>12345</td><td>1（还有后续）</td><td>185</td><td>1500</td><td>1480</td></tr>
+            <tr><td>分片3</td><td>12345</td><td>0（最后一片）</td><td>370</td><td>1040</td><td>1020</td></tr>
+        </tbody>
+    </table>
+
+    <pre><code>验证：
+原始数据 = 1480 + 1480 + 1020 = 3980 ✓
+最后一片的数据1020不是8的倍数？没问题——最后一片无此要求</code></pre>
+
+    <!-- ==================== 4.5 ==================== -->
+    <h2>4.5 子网划分（超级重点）</h2>
+
+    <h3>为什么需要子网划分？</h3>
+    <p>分类IP地址有个严重问题：<strong>地址浪费</strong>。一个B类网络有65534个主机号，但大多数组织用不了这么多。同时，一个C类网络只有254个主机号，对稍大一点的组织又不够。</p>
+
+    <p>子网划分的思路是：从<strong>主机号</strong>中借用若干位作为<strong>子网号</strong>，将一个大网络划分为多个小网络。这样既能减少地址浪费，又能缩小广播域、方便管理。</p>
+
+    <div class="definition">
+        <h4>子网划分核心概念</h4>
+        <ul>
+            <li><strong>子网掩码</strong>：32位二进制数，网络号和子网号部分全1，主机号部分全0</li>
+            <li>用 <code>IP地址 AND 子网掩码</code> 即可得到<strong>子网地址</strong></li>
+            <li>子网地址 = 网络号 + 子网号 + 主机号全0</li>
+        </ul>
+    </div>
+
+    <h4>完整例题：B类地址子网划分</h4>
+    <div class="callout callout-tip">
+        <strong>题目：</strong>某组织拥有B类地址150.10.0.0，需要划分4个子网。求子网掩码和每个子网的地址范围。
+    </div>
+
+    <p><strong>解题步骤：</strong></p>
+    <pre><code>第一步：确定需要借多少位
+需要4个子网 → 2² = 4，需要借2位
+
+第二步：计算子网掩码
+B类默认掩码 = 255.255.0.0（前16位为1）
+借2位后，网络位 = 16 + 2 = 18位
+子网掩码 = 255.255.192.0
+
+为什么是192？因为：
+第3字节的前2位是子网号，对应二进制 11000000 = 192
+
+第三步：列出4个子网（变化的是第3字节的前2位）
+子网1：150.10.00 000000.0 → 150.10.0.0
+子网2：150.10.01 000000.0 → 150.10.64.0
+子网3：150.10.10 000000.0 → 150.10.128.0
+子网4：150.10.11 000000.0 → 150.10.192.0
+
+第四步：计算每个子网的主机地址范围
+每个子网的主机位 = 16 - 2 = 14位（主机数 = 2¹⁴ - 2 = 16382）
+
+子网1：150.10.0.1 ~ 150.10.63.254
+子网2：150.10.64.1 ~ 150.10.127.254
+子网3：150.10.128.1 ~ 150.10.191.254
+子网4：150.10.192.1 ~ 150.10.255.254
+
+注意：全0主机号和全1主机号（广播地址）不能分配给主机</code></pre>
+
+    <table>
+        <caption>4个子网的详细地址范围</caption>
+        <thead>
+            <tr><th>子网</th><th>子网地址</th><th>主机范围</th><th>广播地址</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>子网1（00）</td><td>150.10.0.0</td><td>150.10.0.1 ~ 150.10.63.254</td><td>150.10.63.255</td></tr>
+            <tr><td>子网2（01）</td><td>150.10.64.0</td><td>150.10.64.1 ~ 150.10.127.254</td><td>150.10.127.255</td></tr>
+            <tr><td>子网3（10）</td><td>150.10.128.0</td><td>150.10.128.1 ~ 150.10.191.254</td><td>150.10.191.255</td></tr>
+            <tr><td>子网4（11）</td><td>150.10.192.0</td><td>150.10.192.1 ~ 150.10.255.254</td><td>150.10.255.255</td></tr>
+        </tbody>
+    </table>
+
+    <!-- ==================== 4.6 ==================== -->
+    <h2>4.6 CIDR（超级重点）</h2>
+
+    <h3>为什么需要CIDR？</h3>
+    <p>分类IP地址不仅浪费，而且<strong>路由表膨胀</strong>——每个A/B/C类网络都需要一条路由条目。CIDR（无分类域间路由选择）解决了这两个问题：</p>
+    <ul>
+        <li><strong>消除分类</strong>：不再有A/B/C类的概念，IP地址 = 网络前缀 + 主机号</li>
+        <li><strong>斜线记法</strong>：<code>a.b.c.d/n</code>，n是网络前缀的位数</li>
+        <li><strong>路由聚合</strong>：多条路由条目可以合并为一条，大幅缩小路由表</li>
+    </ul>
+
+    <h3>CIDR地址块计算</h3>
+    <div class="definition">
+        <h4>CIDR核心概念</h4>
+        <ul>
+            <li>一个CIDR地址块由<strong>最小地址</strong>和<strong>最大地址</strong>界定</li>
+            <li>地址数量 = 2<sup>(32 - n)</sup></li>
+            <li>最小地址：网络前缀不变，主机号全0</li>
+            <li>最大地址：网络前缀不变，主机号全1</li>
+        </ul>
+    </div>
+
+    <h4>例题：CIDR地址块计算</h4>
+    <div class="callout callout-tip">
+        <strong>题目：</strong>已知地址128.14.35.7/20，求该地址块的最小地址、最大地址和地址数量。
+    </div>
+
+    <p><strong>解题过程：</strong></p>
+    <pre><code>第一步：写出32位二进制
+128.14.35.7 = 10000000.00001110.00100011.00000111
+
+第二步：前20位是网络前缀（下划线部分）
+            10000000.00001110.0010 0011.00000111
+            └──────20位──────┘└──12位主机号──┘
+
+第三步：最小地址 = 前缀不变 + 主机号全0
+            10000000.00001110.0010 0000.00000000
+            = 128.14.32.0
+
+第四步：最大地址 = 前缀不变 + 主机号全1
+            10000000.00001110.0010 1111.11111111
+            = 128.14.47.255
+
+第五步：地址数量 = 2¹² = 4096个地址
+
+注意：最小地址128.14.32.0不是从128.14.35.0开始的！
+因为20位前缀对应的第3字节是前4位0010 = 32</code></pre>
+
+    <h3>例题：CIDR地址分配</h3>
+    <div class="callout callout-tip">
+        <strong>题目：</strong>ISP拥有地址块206.0.64.0/18，需要分配给4个组——A组500个地址、B组250个地址、C组120个地址、D组60个地址。请按从大到小分配，给出每组的前缀长度和地址范围。
+    </div>
+
+    <p><strong>解题步骤：</strong></p>
+    <pre><code>第一步：确定各组的地址需求（2的幂）
+组   需求    实际分配    所需主机位    前缀长度
+A   500      512(2⁹)    9位          32-9=23
+B   250      256(2⁸)    8位          32-8=24
+C   120      128(2⁷)    7位          32-7=25
+D   60        64(2⁶)    6位          32-6=26
+
+第二步：从大到小分配（地址块从206.0.64.0/18开始）
+
+ISP的地址块范围：
+206.0.64.0/18 → 最小206.0.64.0，最大206.0.127.255
+（第3字节64=01000000，前2位是前缀的一部分）
+
+第三步：分配A组（500个，/23）
+206.0.64.0/23 → 206.0.64.0 ~ 206.0.65.255（512个地址）
+
+第四步：分配B组（250个，/24）
+接续地址：206.0.66.0/24 → 206.0.66.0 ~ 206.0.66.255（256个地址）
+
+第五步：分配C组（120个，/25）
+接续地址：206.0.67.0/25 → 206.0.67.0 ~ 206.0.67.127（128个地址）
+
+第六步：分配D组（60个，/26）
+接续地址：206.0.67.128/26 → 206.0.67.128 ~ 206.0.67.191（64个地址）
+
+汇总：
+A组：206.0.64.0/23   (206.0.64.0 ~ 206.0.65.255)
+B组：206.0.66.0/24   (206.0.66.0 ~ 206.0.66.255)
+C组：206.0.67.0/25   (206.0.67.0 ~ 206.0.67.127)
+D组：206.0.67.128/26  (206.0.67.128 ~ 206.0.67.191)</code></pre>
+
+    <h3>最长前缀匹配</h3>
+    <p>路由器在转发分组时，可能同时匹配多个路由条目。CIDR的策略是选择<strong>前缀最长的</strong>那一条——前缀越长，地址范围越小，匹配越精确。</p>
+
+    <div class="callout callout-info">
+        <strong>为什么是最长前缀？</strong> 假设有两条路由条目：<br>
+        <code>206.0.64.0/18</code>（范围大）和 <code>206.0.66.0/24</code>（范围小）<br>
+        目标地址206.0.66.1同时匹配这两条，但/24更精确——<strong>选择最精确的</strong>，而不是最宽泛的。
+    </div>
+
+    <!-- ==================== 4.7 ==================== -->
+    <h2>4.7 ICMP协议</h2>
+
+    <h3>为什么需要ICMP？</h3>
+    <p>IP协议只负责尽力<span style="white-space:nowrap;">送</span>达，不提供差错报告机制。当路由器发现无法转发某个分组（如TTL超时、目的不可达），它需要通知发送方——这就是ICMP（互联网控制报文协议）的作用。</p>
+
+    <div class="definition">
+        <h4>ICMP报文类型</h4>
+        <table>
+            <caption>常见ICMP报文</caption>
+            <thead>
+                <tr><th>类型</th><th>类别</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>0</td><td>询问</td><td>回送应答（Echo Reply）</td></tr>
+                <tr><td>3</td><td>差错</td><td>目的不可达（Destination Unreachable）</td></tr>
+                <tr><td>8</td><td>询问</td><td>回送请求（Echo Request）</td></tr>
+                <tr><td>11</td><td>差错</td><td>超时（Time Exceeded，TTL减到0）</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h3>Ping和Traceroute原理</h3>
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>Ping</h4>
+                <p>发送ICMP回送请求（Type=8），目的主机回复回送应答（Type=0）。通过测量请求-应答的往返时间（RTT），判断目标是否可达及网络延迟。这是最常用的网络诊断工具。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>Traceroute</h4>
+                <p>利用TTL字段和ICMP超时报文：依次发送TTL=1,2,3,...的UDP数据报，每个路由器转发时TTL减1，减到0时丢弃并向源主机发送ICMP超时报文。这样就能逐一发现路径上的所有路由器。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 4.8 ==================== -->
+    <h2>4.8 路由协议（必考对比）</h2>
+
+    <h3>为什么需要路由协议？</h3>
+    <p>互联网由成千上万个自治系统（AS）组成。路由器之间需要<strong>交换网络可达信息</strong>，才能知道某个IP地址往哪个方向转发。路由协议就是路由器之间通信的\"语言\"。按作用范围分为两大类：</p>
+    <ul>
+        <li><strong>IGP（内部网关协议）</strong>：AS内部使用，包括RIP和OSPF</li>
+        <li><strong>EGP（外部网关协议）</strong>：AS之间使用，目前只有BGP</li>
+    </ul>
+
+    <h3>RIP（路由信息协议）</h3>
+    <div class="definition">
+        <h4>RIP要点</h4>
+        <ul>
+            <li><strong>算法</strong>：距离向量（Distance Vector），基于Bellman-Ford算法</li>
+            <li><strong>度量（Metric）</strong>：跳数（Hop Count），每经过一个路由器跳数+1</li>
+            <li><strong>最大跳数</strong>：15跳（16表示不可达）→ RIP只适合小型网络</li>
+            <li><strong>更新方式</strong>：每30秒广播完整路由表到邻居</li>
+            <li><strong>收敛慢</strong>：路由变化后收敛时间长，可能出现\"坏消息传得慢\"问题</li>
+        </ul>
+    </div>
+
+    <h3>OSPF（开放最短路径优先）</h3>
+    <div class="definition">
+        <h4>OSPF要点</h4>
+        <ul>
+            <li><strong>算法</strong>：链路状态（Link State），基于Dijkstra最短路径算法</li>
+            <li><strong>度量（Metric）</strong>：带宽相关（默认=10⁸/带宽bps），更精确</li>
+            <li><strong>更新方式</strong>：只在路由变化时发送<strong>链路状态通告（LSA）</strong>，不是周期性广播</li>
+            <li><strong>收敛快</strong>：路由变化后能迅速收敛</li>
+            <li><strong>区域划分</strong>：支持将AS划分为多个区域，减少LSA传播范围</li>
+            <li><strong>5种报文</strong>：Hello、DD（数据库描述）、LSR（链路状态请求）、LSU（链路状态更新）、LSAck（链路状态确认）</li>
+            <li><strong>适合大型网络</strong></li>
+        </ul>
+    </div>
+
+    <h3>RIP vs OSPF 详细对比</h3>
+    <table>
+        <thead>
+            <tr><th>对比项</th><th>RIP</th><th>OSPF</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>算法类型</td><td>距离向量（Distance Vector）</td><td>链路状态（Link State）</td></tr>
+            <tr><td>核心算法</td><td>Bellman-Ford</td><td>Dijkstra（SPF）</td></tr>
+            <tr><td>度量标准</td><td>跳数（Hop Count）</td><td>带宽/开销（Cost）</td></tr>
+            <tr><td>最大度量</td><td>15跳（16=不可达）</td><td>无上限</td></tr>
+            <tr><td>更新方式</td><td>每30秒广播完整路由表</td><td>路由变化时发送LSA（增量更新）</td></tr>
+            <tr><td>收敛速度</td><td>慢（可能数分钟）</td><td>快（秒级）</td></tr>
+            <tr><td>适用范围</td><td>小型网络</td><td>大型网络</td></tr>
+            <tr><td>层次结构</td><td>无（扁平结构）</td><td>支持区域划分（Backbone Area + 普通区域）</td></tr>
+            <tr><td>路由环路</td><td>有（需要毒性逆转等技术防环）</td><td>无（每个路由器有完整拓扑图）</td></tr>
+            <tr><td>传输协议</td><td>UDP（端口520）</td><td>IP直传（协议号89）</td></tr>
+            <tr><td>报文类型</td><td>2种（请求/响应）</td><td>5种（Hello/DD/LSR/LSU/LSAck）</td></tr>
+        </tbody>
+    </table>
+
+    <h3>BGP（边界网关协议）</h3>
+    <div class="definition">
+        <h4>BGP要点</h4>
+        <ul>
+            <li><strong>位置</strong>：不同AS之间的路由协议（EGP）</li>
+            <li><strong>算法</strong>：路径向量（Path Vector）</li>
+            <li><strong>核心思想</strong>：BGP发言人交换的不仅是可达性信息，还包含完整的<strong>AS路径</strong>（如 AS1-AS2-AS5-AS7），用于避免环路</li>
+            <li><strong>4种报文</strong>：OPEN（建立连接）、UPDATE（更新路由）、NOTIFICATION（差错通知）、KEEPALIVE（保活）</li>
+            <li><strong>度量</strong>：不是简单的跳数或带宽，而是基于多种策略（经济、政治、性能等）</li>
+        </ul>
+    </div>
+
+    <!-- ==================== 4.9 ==================== -->
+    <h2>4.9 IPv6</h2>
+
+    <h3>为什么需要IPv6？</h3>
+    <p>IPv4地址只有32位，最多43亿个地址。虽然通过NAT技术缓解了地址短缺，但这只是权宜之计。IPv6将地址扩展到128位，地址数量是IPv4的2⁹⁶倍——地球上每粒沙子都能分配一个IP地址。</p>
+
+    <div class="definition">
+        <h4>IPv6地址特点</h4>
+        <ul>
+            <li><strong>长度</strong>：128位，是IPv4的4倍</li>
+            <li><strong>表示法</strong>：冒号十六进制，如 <code>2001:0db8:85a3::8a2e:0370:7334</code></li>
+            <li><strong>简化规则</strong>：每组前导0可以省略，连续全0组可以用 <code>::</code> 代替（只能使用一次）</li>
+        </ul>
+    </div>
+
+    <h3>IPv4 vs IPv6 对比</h3>
+    <table>
+        <thead>
+            <tr><th>对比项</th><th>IPv4</th><th>IPv6</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>地址长度</td><td>32位</td><td>128位</td></tr>
+            <tr><td>表示法</td><td>点分十进制</td><td>冒号十六进制</td></tr>
+            <tr><td>首部长度</td><td>20~60字节（可变）</td><td>40字节（固定）</td></tr>
+            <tr><td>分片</td><td>由路由器分片</td><td>由源主机分片（路径MTU发现）</td></tr>
+            <tr><td>校验和</td><td>有（首部校验和）</td><td>无（由上层或链路层保证）</td></tr>
+            <tr><td>ARP</td><td>使用ARP解析MAC</td><td>使用NDP（邻居发现协议）</td></tr>
+            <tr><td>IPsec</td><td>可选</td><td>内建支持</td></tr>
+            <tr><td>地址配置</td><td>DHCP（通常手动或DHCP）</td><td>无状态地址自动配置（SLAAC）</td></tr>
+        </tbody>
+    </table>
+
+    <h3>过渡技术</h3>
+    <p>IPv4到IPv6不能一蹴而就，需要过渡技术：</p>
+    <ul>
+        <li><strong>双协议栈（Dual Stack）</strong>：设备同时运行IPv4和IPv6协议栈</li>
+        <li><strong>隧道技术（Tunneling）</strong>：将IPv6数据报封装在IPv4数据报中传输</li>
+        <li><strong>NAT64/DNS64</strong>：帮助仅IPv6的客户端访问IPv4服务器</li>
+    </ul>
+
+    <!-- ==================== 4.10 ==================== -->
+    <h2>4.10 VPN与NAT</h2>
+
+    <h3>为什么需要VPN和NAT？</h3>
+    <p>私有IP地址（10.x.x.x、172.16.x.x、192.168.x.x）在Internet上不能路由。但大多数家庭和企业使用的都是私有地址。他们上网时需要通过<strong>NAT</strong>将私有地址转换为公网地址。</p>
+
+    <p>同时，企业的不同分支机构（都在内网中）之间需要安全通信——<strong>VPN</strong>在公共互联网上建立一条加密隧道，让分布在不同地点的内网如同在一个局域网中。</p>
+
+    <h3>NAT的工作原理</h3>
+    <div class="definition">
+        <h4>NAT（网络地址转换）</h4>
+        <p>NAT将内部私有IP地址转换为公网IP地址，通常由路由器/NAT网关完成。其核心是维护一张<strong>NAT转换表</strong>，记录内部地址和外部地址的映射关系。</p>
+    </div>
+
+    <p><strong>NAT工作流程（4步）：</strong></p>
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>内部主机发送数据</h4>
+                <p>主机192.168.1.5发送一个数据报到Internet，源IP=192.168.1.5，源端口=3345。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>NAT网关替换地址</h4>
+                <p>NAT网关将源IP替换为自己的公网IP（如210.25.1.1），源端口也替换为一个新的端口号（如5001），并在NAT表中记录映射：192.168.1.5:3345 &harr; 210.25.1.1:5001。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+                <h4>公网传输和响应</h4>
+                <p>数据报在Internet上传输，目的服务器回复的响应数据报发往210.25.1.1:5001。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">4</span>
+            <div class="step-content">
+                <h4>NAT网关还原地址</h4>
+                <p>NAT网关收到响应，查NAT表找到对应内部地址192.168.1.5:3345，将目的IP和端口替换回去，转发给内部主机。</p>
+            </div>
+        </div>
+    </div>
+
+    <h3>NAPT（网络地址端口转换）</h3>
+    <p>NAPT是NAT的扩展——通过<strong>端口号</strong>来区分不同内部主机的连接。多个内部主机可以共享同一个公网IP，因为端口号不同。<strong>你家的路由器就是NAPT！</strong>全家人的手机、电脑共享一个公网IP上网。</p>
+
+    <!-- ==================== 本章小结 ==================== -->
+    <h2>本章小结</h2>
+
+    <div class="callout callout-info">
+        <strong>知识框架回顾：</strong>
+        <ul>
+            <li><strong>网络层功能</strong>：路由选择 + 分组转发，Internet采用数据报服务（无连接）</li>
+            <li><strong>分类IP地址</strong>：A/B/C/D/E五类，私有地址（10/172.16/192.168）</li>
+            <li><strong>ARP</strong>：IP→MAC解析，4步流程：查缓存→广播请求→单播响应→更新缓存</li>
+            <li><strong>IP数据报</strong>：20字节首部，IP分片——偏移以8字节为单位</li>
+            <li><strong>子网划分</strong>：从主机号借位作子网号，子网掩码标记</li>
+            <li><strong>CIDR</strong>：斜线记法，地址块计算，最长前缀匹配</li>
+            <li><strong>ICMP</strong>：Ping（回送请求/应答）、Traceroute（利用TTL超时报文）</li>
+            <li><strong>路由协议</strong>：RIP（距离向量，跳数15，30秒广播）、OSPF（链路状态，Dijkstra）、BGP（路径向量，AS路径）</li>
+            <li><strong>IPv6</strong>：128位，冒号十六进制，过渡技术（双协议栈/隧道）</li>
+            <li><strong>NAT</strong>：私有地址→公网地址转换，NAPT通过端口复用</li>
+        </ul>
+    </div>
+
+    <!-- ==================== 练习题 ==================== -->
+    <h2>练习题</h2>
+
+    <h3>选择题</h3>
+    <details>
+        <summary>题1：IP地址类别判断</summary>
+        <div class="details-content">
+            <p><strong>题目：</strong>IP地址172.20.10.1属于哪一类？</p>
+            <p>A. A类 &nbsp; B. B类 &nbsp; C. C类 &nbsp; D. D类</p>
+            <p><strong>答案：B</strong>（172在128~191范围内，属于B类地址）</p>
+        </div>
+    </details>
+
+    <details>
+        <summary>题2：私有地址识别</summary>
+        <div class="details-content">
+            <p><strong>题目：</strong>以下哪个是私有IP地址？</p>
+            <p>A. 8.8.8.8 &nbsp; B. 172.32.1.1 &nbsp; C. 192.168.1.1 &nbsp; D. 114.114.114.114</p>
+            <p><strong>答案：C</strong>（192.168.x.x是C类私有地址；172.32.x.x不在172.16~172.31范围内，不是私有地址）</p>
+        </div>
+    </details>
+
+    <h3>计算题</h3>
+
+    <details>
+        <summary>题3：IP分片计算</summary>
+        <div class="details-content">
+            <p><strong>题目：</strong>一个IP数据报总长度为5000字节（首部20字节，数据4980字节），MTU=1500字节。求各分片的标识、MF、片偏移和总长度。</p>
+            <p><strong>解答：</strong></p>
+            <pre><code>每片数据 = 1500 - 20 = 1480字节（1480/8=185，整除）
+片数 = ceil(4980/1480) = ceil(3.36) = 4片
+前3片各1480字节，最后一片 = 4980 - 1480×3 = 540字节
+
+分片1：标识=X, MF=1, 偏移=0,   总长=1500
+分片2：标识=X, MF=1, 偏移=185, 总长=1500
+分片3：标识=X, MF=1, 偏移=370, 总长=1500
+分片4：标识=X, MF=0, 偏移=555, 总长=560 (540+20)
+
+验证：540/8=67.5（不是整数？最后一片无此要求）</code></pre>
+        </div>
+    </details>
+
+    <details>
+        <summary>题4：子网划分</summary>
+        <div class="details-content">
+            <p><strong>题目：</strong>某组织拥有C类地址192.168.10.0，需要划分8个子网。求子网掩码和每个子网的地址范围。</p>
+            <p><strong>解答：</strong></p>
+            <pre><code>需要8个子网 → 2³=8，借3位
+C类默认掩码 = 255.255.255.0
+借3位后 → 掩码 = 255.255.255.224（224=11100000）
+每个子网有 2⁵-2 = 30台主机
+
+子网1：192.168.10.0   ~ 192.168.10.31  （00 000~11 111）
+子网2：192.168.10.32  ~ 192.168.10.63
+子网3：192.168.10.64  ~ 192.168.10.95
+子网4：192.168.10.96  ~ 192.168.10.127
+子网5：192.168.10.128 ~ 192.168.10.159
+子网6：192.168.10.160 ~ 192.168.10.191
+子网7：192.168.10.192 ~ 192.168.10.223
+子网8：192.168.10.224 ~ 192.168.10.255
+
+每个子网有效主机范围：子网地址+1 ~ 广播地址-1
+例如子网2：192.168.10.33 ~ 192.168.10.62</code></pre>
+        </div>
+    </details>
+
+    <details>
+        <summary>题5：CIDR地址块</summary>
+        <div class="details-content">
+            <p><strong>题目：</strong>已知地址10.20.15.30/12，求最小地址、最大地址和地址数量。</p>
+            <p><strong>解答：</strong></p>
+            <pre><code>10.20.15.30 = 00001010.00010100.00001111.00011110
+/12 → 前12位为前缀
+
+最小地址 = 前缀不变 + 主机号全0
+00001010.00010000.00000000.00000000 = 10.16.0.0
+
+最大地址 = 前缀不变 + 主机号全1
+00001010.00011111.11111111.11111111 = 10.31.255.255
+
+地址数量 = 2²⁰ = 1,048,576个</code></pre>
+        </div>
+    </details>
+
+    <details>
+        <summary>题6：CIDR地址聚合</summary>
+        <div class="details-content">
+            <p><strong>题目：</strong>将以下三个地址块聚合成一个CIDR地址块：</p>
+            <p>206.0.68.0/24、206.0.69.0/24、206.0.70.0/24、206.0.71.0/24</p>
+            <p><strong>解答：</strong></p>
+            <pre><code>观察4个地址的第3字节：
+68 = 01000100
+69 = 01000101
+70 = 01000110
+71 = 01000111
+
+共同前缀 = 前6位相同（010001）
+前两个字节 + 第3字节的前6位 = 16 + 6 = 22位
+→ 聚合地址块：206.0.68.0/22
+
+验算：
+最小地址 = 206.0.68.0
+最大地址 = 206.0.71.255
+包含 2¹⁰ = 1024个地址 ✓</code></pre>
+        </div>
+    </details>
+
+    <h3>简答题</h3>
+    <details>
+        <summary>题7：ARP跨网段问题</summary>
+        <div class="details-content">
+            <p><strong>题目：</strong>主机A（IP=192.168.1.2/24）想给主机B（IP=10.0.0.2/8）发送数据。主机A会如何获取主机B的MAC地址？请详细说明过程。</p>
+            <p><strong>解答：</strong></p>
+            <p>主机A通过子网掩码判断：192.168.1.2 AND 255.255.255.0 = 192.168.1.0，10.0.0.2 AND 255.255.255.0 = 10.0.0.0，两者不在同一网络。</p>
+            <p>因此主机A：</p>
+            <ol>
+                <li>查路由表找到默认网关（假设为192.168.1.1）</li>
+                <li>通过ARP获取默认网关192.168.1.1的MAC地址</li>
+                <li>将数据帧的目的MAC设为网关的MAC，目的IP仍设为主机B的IP（10.0.0.2）</li>
+                <li>将帧发送给网关，由网关路由器转发</li>
+            </ol>
+            <p><strong>核心：</strong>ARP只在<strong>同一局域网</strong>内工作。跨网络通信时，ARP获取的是<strong>网关</strong>的MAC地址，而不是目的主机的MAC地址。</p>
+        </div>
+    </details>
+
+    <details>
+        <summary>题8：RIP路由更新</summary>
+        <div class="details-content">
+            <p><strong>题目：</strong>在RIP协议中，为什么跳数限制为15？"坏消息传得慢"是什么意思？</p>
+            <p><strong>解答：</strong></p>
+            <p><strong>为什么限制15？</strong>RIP使用跳数作为度量，16表示不可达。限制15是为了防止路由环路——如果跳数无上限，路由更新可能在环路中无限循环。</p>
+            <p><strong>"坏消息传得慢"：</strong>当某个网络不可达时（断网），好消息（该网络可达）传播很快，但坏消息（该网络不可达）传播很慢。因为路由器可能从邻居那里学习到已经失效的路由（邻居还没更新自己的路由表），导致路由环路。解决方法包括：毒性逆转（将该路由跳数设为16并广播）、水平分割（不从收到路由的接口再发回去）。</p>
+        </div>
+    </details>
+
+    <!-- ==================== 页脚导航 ==================== -->
+    <footer class="chapter-footer">
+        <nav class="chapter-nav">
+            <a href="03-data-link-layer.html">&laquo; 上一章：数据链路层</a>
+            <a href="index.html">返回目录</a>
+            <a href="05-transport-layer.html">下一章：传输层 &raquo;</a>
+        </nav>
+    </footer>
+
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

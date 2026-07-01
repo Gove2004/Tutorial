@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第6章 应用层 - 计算机网络期末复习</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+</head>
+<body>
+<main>
+
+<nav class="chapter-nav">
+    <a href="05-transport-layer.html">&laquo; 第5章 运输层</a>
+    <a href="index.html">目录</a>
+    <a href="index.html">回到首页 &raquo;</a>
+</nav>
+
+<h1>第6章 应用层</h1>
+<p class="intro">应用层是TCP/IP体系中最贴近用户的一层——用户每天都在和使用应用层协议的应用程序打交道：用浏览器看网页（HTTP）、发邮件（SMTP/POP3/IMAP）、访问网站（DNS）、传文件（FTP）、自动获取IP地址（DHCP）。这一章我们来理解这些日常使用的服务"背后"发生了什么。和前面几章一样，每个协议我们都会从<strong>为什么需要它</strong>开始，再讲<strong>它是什么</strong>，最后看<strong>实际怎么工作</strong>。</p>
+
+<div class="callout callout-tip">
+    <strong>本章考点</strong>
+    <ul>
+        <li>DNS递归查询与迭代查询的完整流程</li>
+        <li>HTTP请求报文和响应报文的结构、HTTP状态码分类</li>
+        <li>HTTP/1.0 vs 1.1 vs 2.0 的区别</li>
+        <li>SMTP/POP3/IMAP三种电子邮件协议的功能对比</li>
+        <li>DHCP的DORA四步工作流程</li>
+        <li>FTP主动与被动模式的区别</li>
+    </ul>
+</div>
+
+<!-- ================ 6.1 ================ -->
+<h2>6.1 域名系统DNS</h2>
+
+<h3>为什么需要DNS？</h3>
+<p>想一想：当你想要访问一个网站时，你在浏览器地址栏里输入的是什么？是 <code>www.example.com</code>，而不是 <code>93.184.216.34</code>。但网络层的IP协议只知道IP地址，不知道域名。所以我们需要一种机制，把人类易记的域名转换成机器能处理的IP地址。</p>
+
+<p>这就是<strong>DNS（Domain Name System，域名系统）</strong>要解决的问题——它是一个分布在互联网上的<strong>层次化</strong>的"翻译服务"。说"层次化"是因为：如果让一台服务器记住全世界所有域名和IP的对应关系，这台服务器会被压垮。DNS的解决方案是把这个任务分摊给不同层次的服务器来共同完成。</p>
+
+<div class="definition">
+    <h4>DNS的核心功能</h4>
+    <p>将<strong>域名</strong>（如 www.example.com）解析为<strong>IP地址</strong>（如 93.184.216.34）。这是一个<strong>分布式、层次化</strong>的数据库系统，全世界没有任何一台服务器存有全部域名信息。</p>
+</div>
+
+<h3>域名的层次结构</h3>
+<p>域名是<strong>从右到左</strong>阅读的层次结构。以 <code>www.example.com</code> 为例：</p>
+
+<div class="steps">
+    <div class="step">
+        <span class="step-number">.</span>
+        <div class="step-content">
+            <h4>根域名（Root）</h4>
+            <p>最顶层，用一个"点"表示，通常省略不写。根域名服务器是DNS体系的"最高权威"。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">.com</span>
+        <div class="step-content">
+            <h4>顶级域名（Top-Level Domain, TLD）</h4>
+            <p>包括通用顶级域名（.com, .org, .edu, .net等）和国家顶级域名（.cn, .jp, .uk等）。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">example</span>
+        <div class="step-content">
+            <h4>二级域名（Second-Level Domain）</h4>
+            <p>组织或个人注册的域名。example.com的所有者拥有这个二级域名的管理权。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">www</span>
+        <div class="step-content">
+            <h4>三级域名（Third-Level Domain）/ 主机名</h4>
+            <p>二级域名所有者可以在自己域名下创建任意多个三级域名，如 www、mail、ftp等。</p>
+        </div>
+    </div>
+</div>
+
+<p>顶级域名分为三类：</p>
+<ul>
+    <li><strong>通用顶级域名（gTLD）</strong>：.com（商业）、.org（非营利组织）、.net（网络服务）、.edu（教育）、.gov（政府）等</li>
+    <li><strong>国家顶级域名（ccTLD）</strong>：.cn（中国）、.us（美国）、.jp（日本）、.uk（英国）等</li>
+    <li><strong>基础结构域名</strong>：.arpa，用于反向DNS解析（从IP地址反查域名）</li>
+</ul>
+
+<h3>域名服务器的层次</h3>
+<p>和域名的层次结构相对应，域名服务器也分为四个层次：</p>
+
+<table>
+    <thead>
+        <tr><th>层次</th><th>谁管理</th><th>知道什么</th><th>特点</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>根域名服务器</strong></td><td>ICANN授权的机构</td><td>所有顶级域名服务器的IP地址</td><td>全球13组（用A~M编号），每组有多个镜像。是DNS查询的"入口"。</td></tr>
+        <tr><td><strong>顶级域名服务器</strong></td><td>各TLD的管理机构</td><td>该TLD下所有二级域名的权威服务器地址</td><td>如. com的TLD服务器知道所有.com域名的权威服务器在哪。</td></tr>
+        <tr><td><strong>权威域名服务器</strong></td><td>域名所有者或DNS服务商</td><td>该域名下所有DNS记录（A记录、MX记录、CNAME记录等）</td><td>每个域名的最终"答案"就在这里。</td></tr>
+        <tr><td><strong>本地域名服务器</strong></td><td>ISP或企业网络管理员</td><td>缓存了最近查询过的域名记录</td><td>用户主机直接访问的DNS服务器，是解析的"第一站"。</td></tr>
+    </tbody>
+</table>
+
+<h3>DNS解析过程：递归查询与迭代查询</h3>
+<p>当你在浏览器输入 <code>www.example.com</code> 并回车时，背后发生了一系列的DNS查询。理解这个流程，首先要明确两种查询方式：</p>
+
+<table class="comparison">
+    <thead>
+        <tr><th>对比维度</th><th>递归查询</th><th>迭代查询</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>工作方式</td><td>你问一个人，他负责帮你找到答案，中间他问了谁你不关心</td><td>你问一个人，他说"我不知道，你去问那个人"，你再去问下一家</td></tr>
+        <tr><td>谁的负担大</td><td>被查询的服务器（它要替你把活干完）</td><td>客户端（你要自己跑多家）</td></tr>
+        <tr><td>客户端复杂度</td><td>简单——问一次就拿到结果</td><td>复杂——要多次查询</td></tr>
+        <tr><td>典型用法</td><td>主机对本地DNS服务器</td><td>本地DNS服务器对根/顶级/权威服务器</td></tr>
+    </tbody>
+</table>
+
+<p>实际的DNS解析过程通常是两种方式的<strong>混合使用</strong>。以下是完整的流程：</p>
+
+<div class="steps">
+    <div class="step">
+        <span class="step-number">1</span>
+        <div class="step-content">
+            <h4>主机查询本地DNS服务器（递归查询）</h4>
+            <p>你的电脑向本地DNS服务器（可能是你的路由器、或者ISP的DNS如 8.8.8.8）发出查询："www.example.com的IP是什么？" 这是<strong>递归查询</strong>——本地DNS服务器必须给出最终答案。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">2</span>
+        <div class="step-content">
+            <h4>本地DNS查询根服务器（迭代查询）</h4>
+            <p>本地DNS服务器检查自己的缓存，没找到。于是问根服务器："www.example.com的IP是什么？" 根服务器说："我不知道，但我告诉你.com的TLD服务器在哪里。"（返回.com TLD服务器的IP地址）这是<strong>迭代查询</strong>——根服务器没有替本地DNS去查，而是给了"下一站"的地址。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">3</span>
+        <div class="step-content">
+            <h4>本地DNS查询TLD服务器（迭代查询）</h4>
+            <p>本地DNS服务器问.com的TLD服务器："www.example.com的IP是什么？" TLD服务器说："我不知道，但我知道example.com的权威服务器在哪里。"（返回example.com权威服务器的IP地址）</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">4</span>
+        <div class="step-content">
+            <h4>本地DNS查询权威服务器（迭代查询）</h4>
+            <p>本地DNS服务器问example.com的权威服务器："www.example.com的IP是什么？" 权威服务器查了一下自己的DNS记录，回答："www.example.com的IP是93.184.216.34。"</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">5</span>
+        <div class="step-content">
+            <h4>返回最终结果</h4>
+            <p>本地DNS服务器把得到的IP地址（93.184.216.34）返回给你的电脑。你的电脑用这个IP地址和www.example.com的服务器建立TCP连接。</p>
+        </div>
+    </div>
+</div>
+
+<p>这个过程中，主机只发了一次查询（步骤1），剩下的查询工作都由本地DNS服务器代为完成。主机不需要知道根服务器在哪、TLD服务器在哪——它只需要知道本地DNS服务器的地址就够了。</p>
+
+<h3>DNS高速缓存</h3>
+<p>每次DNS查询都需要经过根服务器→TLD服务器→权威服务器这个链条吗？如果真是这样，根服务器和TLD服务器会累垮。实际上，DNS<strong>大量使用缓存</strong>（Caching）来减少查询次数：</p>
+<ul>
+    <li>本地DNS服务器会把查询过的域名记录<strong>缓存</strong>一段时间</li>
+    <li>每条缓存记录都有一个<strong>TTL（生存时间）</strong>，过期后自动删除</li>
+    <li>如果再次收到同样域名的查询，直接从缓存返回结果，不用再去根服务器和TLD服务器绕一圈</li>
+    <li>主机本身也有DNS缓存（操作系统和浏览器各自维护一个DNS缓存）</li>
+</ul>
+
+<p>这就是为什么你访问一个网站后，第二次访问通常比第一次快——因为DNS解析这一步被缓存跳过了。</p>
+
+<!-- ================ 6.2 ================ -->
+<h2>6.2 文件传输协议FTP</h2>
+
+<h3>为什么需要FTP？</h3>
+<p>在网络中传输文件是一个基本需求。HTTP也可以传输文件，但HTTP的设计初衷是获取网页资源——它是一种"拉"（Pull）协议。FTP是专门为文件传输设计的，它既支持"拉"（从服务器下载文件）也支持"推"（上传文件到服务器）。</p>
+
+<p>FTP的特殊之处在于：它使用<strong>两个并行的TCP连接</strong>来完成工作——一个负责传命令，一个负责传数据。为什么要分开？因为命令和数据在性质上完全不同：命令很短（几条指令）、需要可靠传输；数据可能很大（整个文件）、传输时间长。如果把命令和数据混在同一个连接里，数据传输出错或延迟时，命令也会被卡住。</p>
+
+<table>
+    <thead>
+        <tr><th>连接</th><th>端口</th><th>用途</th><th>生命周期</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>控制连接</strong></td><td>21</td><td>传输命令和应答（登录、目录浏览、文件操作命令）</td><td>整个会话期间持续存在</td></tr>
+        <tr><td><strong>数据连接</strong></td><td>20（主动模式）/ 随机端口（被动模式）</td><td>传输实际的文件数据</td><td>每次文件传输时建立，完成后关闭</td></tr>
+    </tbody>
+</table>
+
+<h3>主动模式 vs 被动模式</h3>
+<p>FTP的数据连接可以在两种模式下建立，它们的核心区别是：<strong>谁主动发起数据连接</strong>。</p>
+
+<table class="comparison">
+    <thead>
+        <tr><th>对比维度</th><th>主动模式（Active / PORT）</th><th>被动模式（Passive / PASV）</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>数据连接发起方</td><td>服务器主动连接客户端</td><td>客户端主动连接服务器</td></tr>
+        <tr><td>数据连接方向</td><td>服务器:20 &rarr; 客户端:随机端口</td><td>客户端:随机端口 &rarr; 服务器:随机端口</td></tr>
+        <tr><td>对客户端的要求</td><td>客户端必须开放随机端口等待服务器连接</td><td>客户端不需要开放额外端口</td></tr>
+        <tr><td>穿越防火墙/NAT</td><td>困难（防火墙通常阻止外来的主动连接）</td><td>容易（连接由客户端主动发起，防火墙允许）</td></tr>
+        <tr><td>使用频率</td><td>较少（主要是历史原因）</td><td>广泛使用（更安全、更兼容）</td></tr>
+    </tbody>
+</table>
+
+<p>具体的交互过程是这样的：</p>
+<p><strong>主动模式：</strong>客户端通过控制连接告诉服务器"我在某个端口等着你连"（PORT命令）。服务器从自己的20端口向客户端指定的端口发起数据连接。</p>
+<p><strong>被动模式：</strong>客户端通过控制连接告诉服务器"我想用被动模式"（PASV命令）。服务器回复"好的，我在某个端口等着你连"。客户端向服务器的这个端口发起数据连接。</p>
+
+<div class="sidebar-note">
+    <strong>为什么被动模式更常用？</strong>想象一个场景：客户端在公司内网，前面有防火墙和NAT。主动模式下，服务器要主动连客户端的某个端口——防火墙看到"外来的连接请求"，十有八九会拦下来。被动模式下，客户端主动连服务器——防火墙认为这是"对外的请求的回应"，通常会放行。这就是被动模式在现代网络中占主导地位的原因。
+</div>
+
+<h3>用户认证</h3>
+<p>FTP支持两种访问方式：</p>
+<ul>
+    <li><strong>账户认证</strong>：用户在FTP服务器上有账户，通过用户名和密码登录，拥有对应的读写权限</li>
+    <li><strong>匿名FTP</strong>：使用 "anonymous" 作为用户名，任意邮箱地址作为密码。通常只能下载，不能上传。公共文件下载（如开源软件镜像站）多用此方式</li>
+</ul>
+
+<div class="callout callout-warning">
+    <strong>FTP的安全问题</strong>：传统FTP的所有数据（包括用户名和密码）都是<strong>明文</strong>传输的。这意味着在同一个网络中的任何人都可以抓包看到你的密码。安全替代方案：SFTP（基于SSH的文件传输，22端口）或FTPS（FTP over SSL/TLS）。
+</div>
+
+<h3>TFTP：简化版FTP</h3>
+<p>TFTP（Trivial File Transfer Protocol，简单文件传输协议）是FTP的"轻量版"：</p>
+<ul>
+    <li>基于<strong>UDP</strong>而不是TCP（所以不可靠，需要应用层自己处理重传）</li>
+    <li>没有用户认证机制</li>
+    <li>只能读写文件，不能列出目录</li>
+    <li>实现代码量极小，适合嵌入在路由器、交换机等网络设备的固件中</li>
+    <li>使用69端口</li>
+</ul>
+
+<!-- ================ 6.3 ================ -->
+<h2>6.3 万维网与HTTP</h2>
+
+<h3>为什么需要HTTP？</h3>
+<p>万维网（World Wide Web）的核心需求很简单：用户想通过"点击链接"的方式，在互联网上获取各种资源（网页、图片、视频等）。这个需求背后有几个基本问题要解决：</p>
+<ul>
+    <li>如何唯一标识一个资源？→ <strong>URL</strong>（统一资源定位符）</li>
+    <li>如何描述资源的内容？→ <strong>HTML</strong>（超文本标记语言）</li>
+    <li>如何传输资源？→ <strong>HTTP</strong>（超文本传输协议）</li>
+</ul>
+
+<div class="definition">
+    <h4>URL格式</h4>
+    <p>URL（Uniform Resource Locator）的通用格式：<br>
+    <strong>&lt;协议&gt;://&lt;主机名&gt;:&lt;端口号&gt;/&lt;路径&gt;</strong><br>
+    示例：<code>https://www.example.com:443/index.html</code><br>
+    其中协议是http或https，主机名是域名或IP地址，端口号可省略（HTTP默认80，HTTPS默认443）。</p>
+</div>
+
+<h3>HTTP报文格式</h3>
+
+<p>HTTP的核心是"请求-响应"模式：客户端发送一个请求报文，服务器返回一个响应报文。两种报文的结构非常相似，都由四部分组成。</p>
+
+<h4>HTTP请求报文</h4>
+
+<pre><code>GET /index.html HTTP/1.1          ← 请求行（方法 + URL + HTTP版本）
+Host: www.example.com              ← 首部行
+User-Agent: Mozilla/5.0
+Accept: text/html, application/json
+Accept-Language: zh-CN
+Connection: keep-alive
+                                   ← 空行（CRLF，分隔首部和实体体）
+                                   ← 实体体（GET请求通常为空）</code></pre>
+
+<p>请求行中的<strong>方法（Method）</strong>告诉服务器客户端想做什么：</p>
+<ul>
+    <li><strong>GET</strong>：请求读取URL标识的资源（最常用）</li>
+    <li><strong>HEAD</strong>：只请求资源的首部（不返回实体体），用于检查资源是否存在或获取元信息</li>
+    <li><strong>POST</strong>：向服务器提交数据（如表单提交、上传文件），数据放在实体体中</li>
+    <li><strong>PUT</strong>：上传文件到指定路径（替换已有资源）</li>
+    <li><strong>DELETE</strong>：删除指定资源</li>
+    <li><strong>OPTIONS</strong>：查询服务器支持哪些方法</li>
+</ul>
+
+<h4>HTTP响应报文</h4>
+
+<pre><code>HTTP/1.1 200 OK                    ← 状态行（HTTP版本 + 状态码 + 短语）
+Date: Thu, 12 Jun 2026 08:00:00 GMT  ← 首部行
+Server: Apache/2.4.41 (Unix)
+Content-Type: text/html; charset=UTF-8
+Content-Length: 1234
+Last-Modified: Wed, 11 Jun 2026 12:00:00 GMT
+                                   ← 空行
+&lt;!DOCTYPE html&gt;                    ← 实体体（实际资源内容）
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;Example&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;&lt;h1&gt;Hello World&lt;/h1&gt;&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+
+<h3>HTTP状态码（高频考点）</h3>
+<p>状态码是服务器对请求处理结果的数字表示，分为五大类。考试中需要重点记忆的是加粗的部分：</p>
+
+<table>
+    <thead>
+        <tr><th>类别</th><th>范围</th><th>含义</th><th>必须记住的状态码</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>信息性</strong></td><td>1xx</td><td>请求已收到，正在处理中</td><td>100 Continue（客户端应继续发送请求体）</td></tr>
+        <tr><td class="good"><strong>成功</strong></td><td>2xx</td><td>请求成功处理</td><td><strong>200 OK</strong>（成功，返回请求的资源）、204 No Content（成功但无内容返回）</td></tr>
+        <tr><td><strong>重定向</strong></td><td>3xx</td><td>需要进一步操作</td><td><strong>301 Moved Permanently</strong>（永久重定向）、<strong>302 Found</strong>（临时重定向）、304 Not Modified（缓存有效）</td></tr>
+        <tr><td class="bad"><strong>客户端错误</strong></td><td>4xx</td><td>客户端请求有误</td><td><strong>400 Bad Request</strong>（请求格式错误）、<strong>403 Forbidden</strong>（禁止访问）、<strong>404 Not Found</strong>（资源不存在）</td></tr>
+        <tr><td class="bad"><strong>服务器错误</strong></td><td>5xx</td><td>服务器处理失败</td><td><strong>500 Internal Server Error</strong>（服务器内部错误）、<strong>502 Bad Gateway</strong>（网关错误）、<strong>503 Service Unavailable</strong>（服务暂时不可用）</td></tr>
+    </tbody>
+</table>
+
+<div class="callout callout-danger">
+    <strong>考试必记：</strong>200（成功）、301（永久重定向→搜索引擎更新URL）、302（临时重定向）、304（缓存未过期→使用本地缓存）、400（请求格式错了）、403（有权限问题）、404（经典"找不到"）、500（服务器崩了）、503（服务器太忙了）。
+</div>
+
+<h3>HTTP版本演进</h3>
+
+<table class="comparison">
+    <thead>
+        <tr><th>对比维度</th><th>HTTP/1.0（1996）</th><th>HTTP/1.1（1999）</th><th>HTTP/2.0（2015）</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>连接方式</strong></td><td class="bad">非持续连接：每个请求新建一个TCP连接</td><td class="good">持续连接：默认keep-alive，多个请求复用同一个TCP连接</td><td class="good">持续连接+多路复用</td></tr>
+        <tr><td><strong>请求方式</strong></td><td>串行：发一个、等一个、再发下一个</td><td>串行+可选流水线：可以连续发请求，但响应必须按序返回</td><td>并行多路复用：一个连接内同时处理多个请求和响应</td></tr>
+        <tr><td><strong>数据传输</strong></td><td>文本格式</td><td>文本格式</td><td>二进制帧（更高效）</td></tr>
+        <tr><td><strong>首部压缩</strong></td><td class="bad">无</td><td class="bad">无</td><td class="good">HPACK压缩（减少重复首部开销）</td></tr>
+        <tr><td><strong>服务器推送</strong></td><td class="bad">不支持</td><td class="bad">不支持</td><td class="good">支持（服务器可主动推送资源）</td></tr>
+        <tr><td><strong>Host字段</strong></td><td>可选</td><td>必须</td><td>必须（兼容1.1语义）</td></tr>
+    </tbody>
+</table>
+
+<p>为什么HTTP/1.1最大的改进是持续连接？我们来算一笔账：一个网页平均需要加载80个资源（HTML、CSS、JS、图片等）。在HTTP/1.0中，每个资源都需要建立和关闭一次TCP连接——80次三次握手+80次四次挥手，光连接管理的开销就大得惊人。HTTP/1.1允许多个请求复用同一个TCP连接，大幅减少了开销。</p>
+
+<p>但HTTP/1.1还有一个问题：<strong>队头阻塞（Head-of-Line Blocking）</strong>。在一个持续连接上，如果第一个请求的响应还没回来，后面的所有请求虽然已经发出去了，但它们的响应必须排队等待。HTTP/2.0用<strong>多路复用</strong>解决了这个问题——多个请求和响应可以在同一个连接中交错传输，互不阻塞。</p>
+
+<h3>持续连接：非流水线 vs 流水线</h3>
+<ul>
+    <li><strong>非流水线方式</strong>：客户端收到一个响应后，才能发出下一个请求。缺点是每获取一个资源就浪费了一个RTT的等待时间。</li>
+    <li><strong>流水线方式</strong>：客户端可以连续发出多个请求，不必等前面的响应回来。服务器按请求到达的顺序依次返回响应。优点是减少了空闲等待时间，但队头阻塞问题仍然存在——如果第一个响应很大，后面的响应即使已经准备好了，也要等前面传完。</li>
+</ul>
+
+<h3>Cookie与Session</h3>
+<p>HTTP是<strong>无状态</strong>的协议——每个请求都是独立的，服务器不记得上一次请求是谁发的。但很多应用需要"记住"用户：购物车里的商品、登录状态、个性化设置……</p>
+
+<p><strong>Cookie</strong>就是在客户端（浏览器）保存状态信息的技术：</p>
+<ol>
+    <li>用户登录后，服务器在响应报文中添加 <code>Set-Cookie</code> 首部，内容可能是用户的身份标识或会话ID</li>
+    <li>浏览器收到后，把Cookie保存到本地</li>
+    <li>以后每次访问同一个网站，浏览器自动在请求报文中携带 <code>Cookie</code> 首部</li>
+    <li>服务器根据Cookie中的信息识别用户，"记住"用户的状态</li>
+</ol>
+
+<div class="sidebar-note">
+    <strong>Cookie vs Session：</strong>Cookie保存在<strong>客户端</strong>（浏览器中），Session数据保存在<strong>服务器端</strong>。通常的工作方式是：服务器生成一个Session ID，通过Cookie发送给客户端，客户端在后续请求中回传这个Session ID，服务器根据Session ID找到对应的Session数据。
+</div>
+
+<h3>代理服务器与Web缓存</h3>
+<p>代理服务器（Proxy Server）是客户端和服务器之间的"中间人"。它最常见的用途是<strong>Web缓存（Web Cache）</strong>：</p>
+
+<p>工作原理：</p>
+<ol>
+    <li>客户端第一次请求某个资源时，代理服务器代表客户端向目标服务器发起请求</li>
+    <li>代理服务器把返回的资源<strong>缓存</strong>到本地</li>
+    <li>另一个客户端请求同一个资源时，代理服务器直接返回缓存的副本，不用再去源服务器获取</li>
+</ol>
+
+<p>Web缓存的好处：</p>
+<ul>
+    <li><strong>减少延迟</strong>：缓存距离客户端更近，响应更快</li>
+    <li><strong>节省带宽</strong>：源服务器不需要重复传输相同的内容</li>
+    <li><strong>减轻源服务器负载</strong>：大量请求在代理层就被处理了</li>
+</ul>
+
+<p>代理服务器的其他用途：过滤和访问控制（企业限制员工访问某些网站）、匿名化（隐藏客户端的真实IP）、负载均衡（将请求分发到多台服务器）。</p>
+
+<!-- ================ 6.4 ================ -->
+<h2>6.4 电子邮件</h2>
+
+<h3>为什么需要电子邮件协议？</h3>
+<p>发邮件看起来很简单——写好内容、点击发送、对方收到。但背后涉及三个不同阶段的问题：</p>
+<ul>
+    <li><strong>发送阶段</strong>：从你的电脑把邮件发到你的邮件服务器。用什么协议？<strong>SMTP</strong>。</li>
+    <li><strong>传输阶段</strong>：你的邮件服务器把邮件发送到对方的邮件服务器。也用<strong>SMTP</strong>。</li>
+    <li><strong>接收阶段</strong>：对方从他的邮件服务器把邮件取到自己的设备。用什么协议？<strong>POP3</strong> 或 <strong>IMAP</strong>。</li>
+</ul>
+
+<p>注意一个关键区别：SMTP是<strong>推（Push）</strong>协议——主动把邮件推出去。POP3和IMAP是<strong>拉（Pull）</strong>协议——主动去服务器上取邮件。</p>
+
+<div class="definition">
+    <h4>电子邮件系统的三大组件</h4>
+    <ul>
+        <li><strong>用户代理（User Agent, UA）</strong>：用户撰写、阅读、管理邮件的工具。如Outlook、Thunderbird、Gmail Web界面。</li>
+        <li><strong>邮件服务器（Mail Server）</strong>：负责存储和转发邮件。发送方邮件服务器用SMTP发送，接收方邮件服务器用POP3/IMAP让用户取件。</li>
+        <li><strong>邮件协议</strong>：定义了邮件如何在组件之间传输。SMTP（发送）、POP3（接收-下载模式）、IMAP（接收-在线模式）。</li>
+    </ul>
+</div>
+
+<h3>SMTP：发送邮件</h3>
+<p>SMTP（Simple Mail Transfer Protocol，简单邮件传输协议）是电子邮件体系中最核心的协议。它只管"把邮件送到对方的邮件服务器"。</p>
+
+<p>SMTP的特点：</p>
+<ul>
+    <li>使用<strong>TCP 25端口</strong>（保证可靠传输）</li>
+    <li>采用<strong>命令/应答</strong>交互方式，所有命令和响应都是ASCII文本（方便调试）</li>
+    <li>只能传输<strong>7位ASCII文本</strong>（不能直接传二进制文件——这是MIME要解决的问题）</li>
+</ul>
+
+<p>SMTP的通信过程分为三个阶段：</p>
+
+<div class="steps">
+    <div class="step">
+        <span class="step-number">1</span>
+        <div class="step-content">
+            <h4>连接建立</h4>
+            <p>发送方邮件服务器与接收方邮件服务器建立TCP连接（端口25）。接收方返回220（服务就绪），发送方发送HELO/EHLO命令表明身份。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">2</span>
+        <div class="step-content">
+            <h4>邮件传送</h4>
+            <p>发送方依次发送：MAIL FROM（发件人地址）、RCPT TO（收件人地址）、DATA（邮件内容）。每个命令都得到接收方的确认后，才执行下一步。DATA命令后，发送方发送完整的邮件内容（包括首部和主体），以单独一行的"点"（.）结束。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">3</span>
+        <div class="step-content">
+            <h4>连接释放</h4>
+            <p>发送方发送QUIT命令，接收方回复221（服务关闭），释放TCP连接。</p>
+        </div>
+    </div>
+</div>
+
+<h3>POP3：接收邮件（下载模式）</h3>
+<p>POP3（Post Office Protocol version 3，邮局协议第3版）是最早的邮件接收协议之一。它模仿了"去邮局取信"的模式：</p>
+<ul>
+    <li>使用<strong>TCP 110端口</strong></li>
+    <li>用户连接到邮件服务器，输入用户名和密码进行认证</li>
+    <li>将服务器上的邮件<strong>下载</strong>到本地设备</li>
+    <li>下载后，通常<strong>删除</strong>服务器上的邮件副本</li>
+    <li>邮件在本地阅读，支持离线使用</li>
+</ul>
+
+<p>POP3的缺点很明显：邮件只保存在你下载的那台设备上。如果你用电脑下载了邮件，手机上就看不到。这对于今天多设备并用的使用习惯来说，很不方便。</p>
+
+<h3>IMAP：接收邮件（在线模式）</h3>
+<p>IMAP（Internet Message Access Protocol，互联网消息访问协议）是更现代的邮件接收协议：</p>
+<ul>
+    <li>使用<strong>TCP 143端口</strong></li>
+    <li>邮件<strong>保留在服务器上</strong>不被删除</li>
+    <li>客户端可以在线<strong>浏览、搜索、管理</strong>服务器上的邮件</li>
+    <li>支持<strong>文件夹管理</strong>：可以创建、删除、重命名服务器上的文件夹</li>
+    <li>支持<strong>部分下载</strong>：可以先只下载邮件头（发件人、主题等），需要时再下载全文和附件</li>
+    <li><strong>多设备同步</strong>：电脑和手机上都看到同样的邮件状态（已读、已回复、已删除等）</li>
+</ul>
+
+<div class="callout callout-info">
+    <strong>一句话总结SMTP/POP3/IMAP的关系</strong>：SMTP是"送信员"——把信送到对方的邮箱所在的邮局。POP3是"取信人"——把信从邮局取走（邮局不留底）。IMAP是"在线邮箱管理员"——直接在邮局里看信、整理信，邮局始终保存着所有信件。
+</div>
+
+<h3>SMTP vs POP3 vs IMAP 对比</h3>
+
+<table class="comparison">
+    <thead>
+        <tr><th>对比维度</th><th>SMTP</th><th>POP3</th><th>IMAP</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>用途</td><td>发送邮件</td><td>接收邮件</td><td>接收邮件</td></tr>
+        <tr><td>方向</td><td>推（Push）</td><td>拉（Pull）</td><td>拉（Pull）</td></tr>
+        <tr><td>端口</td><td>25</td><td>110</td><td>143</td></tr>
+        <tr><td>加密端口</td><td>465（SMTPS）</td><td>995（POP3S）</td><td>993（IMAPS）</td></tr>
+        <tr><td>邮件存储位置</td><td>—</td><td>下载到本地（服务器副本通常删除）</td><td>保留在服务器上</td></tr>
+        <tr><td>离线阅读</td><td>—</td><td>支持</td><td>有限（需要提前缓存）</td></tr>
+        <tr><td>多设备同步</td><td>—</td><td>不支持</td><td>支持</td></tr>
+        <tr><td>服务器端文件夹管理</td><td>—</td><td>不支持</td><td>支持</td></tr>
+    </tbody>
+</table>
+
+<h3>电子邮件格式</h3>
+<p>一封电子邮件由三部分构成：</p>
+<ol>
+    <li><strong>信封</strong>：SMTP传输时使用的信息，包括发件人地址和收件人地址（在SMTP的MAIL FROM和RCPT TO命令中指定）</li>
+    <li><strong>首部</strong>：包含From（发件人）、To（收件人）、Subject（主题）、Date（日期）、CC（抄送）、BCC（密送）等字段</li>
+    <li><strong>主体</strong>：邮件的实际内容</li>
+</ol>
+
+<h3>MIME：突破SMTP的ASCII限制</h3>
+<p>SMTP只能传输7位ASCII文本——这意味着中文、图片、附件、二进制文件统统不能直接传输。MIME（Multipurpose Internet Mail Extensions，多用途互联网邮件扩展）解决了这个问题。</p>
+
+<p>MIME不是替代SMTP，而是对SMTP的<strong>扩展</strong>。它在邮件首部中增加额外的字段，告诉接收方：</p>
+<ul>
+    <li><code>MIME-Version: 1.0</code> — 告诉接收方这是MIME邮件</li>
+    <li><code>Content-Type: text/plain; charset=UTF-8</code> — 说明内容的类型和编码</li>
+    <li><code>Content-Transfer-Encoding: base64</code> — 说明内容是如何编码的</li>
+</ul>
+
+<p>MIME使用了<strong>Base64编码</strong>：把二进制数据（如图片）转换成由64个可打印ASCII字符组成的文本串。SMTP可以传输这些文本串，接收方再解码还原成原始数据。</p>
+
+<p>MIME还支持<strong>多部分邮件（Multipart Messages）</strong>：一封邮件可以同时包含纯文本版本、HTML版本和图片附件。接收方根据邮件客户端的支持情况选择显示哪个版本。</p>
+
+<!-- ================ 6.5 ================ -->
+<h2>6.5 DHCP：动态主机配置协议</h2>
+
+<h3>为什么需要DHCP？</h3>
+<p>想象一下：你带着笔记本电脑到咖啡厅，连上Wi-Fi，然后就可以上网了。你不需要手动输入IP地址、子网掩码、默认网关、DNS服务器——所有这些配置都是<strong>自动</strong>完成的。</p>
+
+<p>如果没有DHCP，每一台连接到网络的设备都需要网络管理员<strong>手动配置</strong>：</p>
+<ul>
+    <li>分配一个不重复的IP地址</li>
+    <li>配置正确的子网掩码</li>
+    <li>配置默认网关的IP地址</li>
+    <li>配置DNS服务器的IP地址</li>
+</ul>
+
+<p>在一个只有几台设备的小型网络中，手动配置是可行的。但在一个大学校园网中（数千台设备），或者在一个咖啡厅的公共Wi-Fi中（每天有几百个陌生设备连接），手动配置就是灾难。DHCP（Dynamic Host Configuration Protocol）就是为解决这个问题而生的——<strong>让设备接入网络时自动获取所需的网络配置</strong>。</p>
+
+<h3>DORA：DHCP的四步工作流程</h3>
+<p>DHCP的工作过程包含四个步骤，缩写为<strong>DORA</strong>（Discover → Offer → Request → Acknowledge）：</p>
+
+<div class="steps">
+    <div class="step">
+        <span class="step-number">D</span>
+        <div class="step-content">
+            <h4>Discover（发现）</h4>
+            <p>客户端（新接入的设备）还不知道DHCP服务器在哪，也不知道自己的IP地址。它广播发送一个DHCP Discover报文（目的IP=255.255.255.255，这是广播地址），相当于在喊："这里有设备需要IP地址，有DHCP服务器吗？"</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">O</span>
+        <div class="step-content">
+            <h4>Offer（提供）</h4>
+            <p>网络中的DHCP服务器收到Discover报文后，从自己的IP地址池中挑选一个可用的IP地址，广播发送DHCP Offer报文："我是DHCP服务器，我给你分配这个IP地址：192.168.1.100，子网掩码：255.255.255.0，默认网关：192.168.1.1，DNS：8.8.8.8"。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">R</span>
+        <div class="step-content">
+            <h4>Request（请求）</h4>
+            <p>客户端可能收到多个DHCP服务器的Offer（如果有多个DHCP服务器）。客户端从中选择一个（通常是第一个到达的），然后广播发送DHCP Request报文："我接受192.168.1.100这个地址，我选择的是这个DHCP服务器"。为什么要广播？为了让所有DHCP服务器都知道——选中的那个服务器准备分配，没被选中的可以收回Offer。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">A</span>
+        <div class="step-content">
+            <h4>Acknowledge（确认）</h4>
+            <p>被选中的DHCP服务器广播发送DHCP ACK报文："确认分配，192.168.1.100现在归你了！" 客户端收到后，开始使用这个IP地址和其他配置参数。</p>
+        </div>
+    </div>
+</div>
+
+<div class="callout callout-info">
+    <strong>为什么前三步都要用广播？</strong>因为Discover阶段客户端还没有IP地址（也不知道DHCP服务器的地址），所以只能用广播（255.255.255.255）来"喊话"。Offer阶段服务器用广播因为客户端还没有IP地址。Request和Acknowledge用广播是为了通知所有DHCP服务器（确保没被选中的服务器把Offer回收回去）。
+</div>
+
+<h3>租期管理</h3>
+<p>DHCP分配的IP地址不是永久占用的——因为网络中的设备数量通常远大于可分配的IP地址数量（比如一个咖啡厅只有254个可用的私有IP地址，但一天可能有上千个设备连接）。DHCP使用<strong>租约（Lease）</strong>机制来管理IP地址的分配：</p>
+<ul>
+    <li>每个分配的IP地址有一个租用期限（通常24小时~7天）</li>
+    <li>当租期过<strong>半（50%）</strong>时，客户端会向<strong>原DHCP服务器</strong>发送<strong>单播</strong>的Request续租</li>
+    <li>如果续租失败（原服务器没回应），在租期过<strong>87.5%</strong>时，客户端广播Request向<strong>任何</strong>DHCP服务器续租</li>
+    <li>租约到期后，客户端必须释放该IP地址，重新执行DORA流程</li>
+</ul>
+
+<p>这种机制既保证了IP地址的高效利用（不用的地址会被回收），又保证了设备的持续连接（在租期内可以续租，不会断网）。</p>
+
+<!-- ================ 6.6 ================ -->
+<h2>6.6 其他应用层协议</h2>
+
+<h3>6.6.1 Telnet</h3>
+<p>Telnet是互联网上最早的远程登录协议之一，允许用户通过网络登录到远程主机并在远程主机上执行命令。</p>
+
+<div class="callout callout-warning">
+    <strong>Telnet的重要安全缺陷</strong>：Telnet的所有数据（包括用户名和密码）都以<strong>明文</strong>传输。在今天的网络环境中，这是不可接受的。因此几乎所有的远程登录需求都已经被SSH（Secure Shell，使用22端口，加密传输）取代。目前Telnet主要用于网络设备（如交换机、路由器）的本地调试。
+</div>
+
+<p>Telnet的特点：</p>
+<ul>
+    <li>使用<strong>TCP 23端口</strong></li>
+    <li>客户/服务器模式</li>
+    <li>使用NVT（Network Virtual Terminal，网络虚拟终端）格式屏蔽不同终端设备的差异</li>
+</ul>
+
+<h3>6.6.2 SNMP</h3>
+<p>SNMP（Simple Network Management Protocol，简单网络管理协议）是网络管理的"眼睛和耳朵"——让网络管理员能够监控和管理网络中的各种设备（路由器、交换机、服务器、打印机等）。</p>
+
+<p>SNMP的工作方式：</p>
+<ul>
+    <li>使用<strong>UDP 161端口</strong>（管理器发送查询）和<strong>162端口</strong>（设备发送Trap通知）</li>
+    <li>基于<strong>MIB（Management Information Base，管理信息库）</strong>——每个被管理的设备都有一个MIB，存储了该设备的各种状态信息（CPU使用率、接口流量、运行时间等）</li>
+    <li>两种工作模式：<strong>轮询（Polling）</strong>——管理器定期查询设备的状态；<strong>陷阱（Trap）</strong>——设备在发生异常时主动通知管理器</li>
+</ul>
+
+<!-- ================ 本章小结 ================ -->
+<h2>本章小结</h2>
+
+<div class="callout callout-info">
+    <strong>第6章知识框架</strong>
+    <ul>
+        <li><strong>DNS（53端口，UDP）</strong>：层次化的域名结构（根→TLD→二级→三级）；4类域名服务器（根/TLD/权威/本地）；递归与迭代查询（混合使用）；DNS缓存（TTL机制）。</li>
+        <li><strong>FTP（21+20端口，TCP）</strong>：控制连接（21，传命令）+数据连接（20或随机端口，传数据）；主动模式 vs 被动模式（谁发起数据连接）；匿名FTP；TFTP（UDP，69端口）。</li>
+        <li><strong>HTTP（80/443端口，TCP）</strong>：请求报文（方法行+首部+空行+实体）；响应报文（状态行+首部+空行+实体）；状态码5类（1xx/2xx/3xx/4xx/5xx）；HTTP/1.0/1.1/2.0对比（持续连接、多路复用）；Cookie（客户端保存状态，无状态→有状态）；Web缓存。</li>
+        <li><strong>电子邮件</strong>：三大件（用户代理+邮件服务器+协议）；SMTP（25端口，推，发送）；POP3（110端口，拉，下载后删除）；IMAP（143端口，拉，保留在服务器）；MIME（突破ASCII限制，Base64编码，多部分邮件）。</li>
+        <li><strong>DHCP（67/68端口，UDP）</strong>：DORA四步（Discover→Offer→Request→Acknowledge）；租期管理（50%续租、87.5%再续租、到期释放）。</li>
+        <li><strong>其他</strong>：Telnet（23端口，明文，被SSH取代）；SNMP（161/162端口，UDP，MIB+轮询+Trap）。</li>
+    </ul>
+</div>
+
+<!-- ================ 练习题 ================ -->
+<h2>练习题</h2>
+
+<div class="callout callout-tip">
+    <strong>以下练习题覆盖第6章考试核心考点，先独立完成再核对答案。</strong>
+</div>
+
+<h3>一、选择题</h3>
+
+<p><strong>题目1：</strong>以下哪种DNS查询方式中，DNS服务器要替客户端完成全部查询并返回最终结果？</p>
+<p>A. 迭代查询 &nbsp;&nbsp; B. 递归查询 &nbsp;&nbsp; C. 反向查询 &nbsp;&nbsp; D. 正向查询</p>
+
+<p><strong>题目2：</strong>HTTP响应中状态码200的含义是什么？</p>
+<p>A. 资源已永久移动 &nbsp;&nbsp; B. 请求成功 &nbsp;&nbsp; C. 资源未找到 &nbsp;&nbsp; D. 服务器内部错误</p>
+
+<p><strong>题目3：</strong>SMTP协议使用哪个端口？</p>
+<p>A. 80 &nbsp;&nbsp; B. 25 &nbsp;&nbsp; C. 110 &nbsp;&nbsp; D. 143</p>
+
+<p><strong>题目4：</strong>以下哪个协议将邮件保留在服务器上，支持多设备同步？</p>
+<p>A. SMTP &nbsp;&nbsp; B. POP3 &nbsp;&nbsp; C. IMAP &nbsp;&nbsp; D. MIME</p>
+
+<p><strong>题目5：</strong>DHCP的DORA流程中，R代表什么？</p>
+<p>A. Release &nbsp;&nbsp; B. Request &nbsp;&nbsp; C. Renew &nbsp;&nbsp; D. Response</p>
+
+<p><strong>题目6：</strong>FTP的控制连接使用哪个端口？</p>
+<p>A. 20 &nbsp;&nbsp; B. 21 &nbsp;&nbsp; C. 22 &nbsp;&nbsp; D. 23</p>
+
+<p><strong>题目7：</strong>HTTP/1.1相对于HTTP/1.0最重要的改进是什么？</p>
+<p>A. 二进制传输 &nbsp;&nbsp; B. 首部压缩 &nbsp;&nbsp; C. 持续连接 &nbsp;&nbsp; D. 服务器推送</p>
+
+<p><strong>题目8：</strong>管理.com域名的服务器属于什么类型的域名服务器？</p>
+<p>A. 根域名服务器 &nbsp;&nbsp; B. 顶级域名服务器 &nbsp;&nbsp; C. 权威域名服务器 &nbsp;&nbsp; D. 本地域名服务器</p>
+
+<p><strong>题目9：</strong>HTTP状态码404表示什么？</p>
+<p>A. 服务器内部错误 &nbsp;&nbsp; B. 请求成功 &nbsp;&nbsp; C. 资源未找到 &nbsp;&nbsp; D. 禁止访问</p>
+
+<p><strong>题目10：</strong>以下哪个协议使用UDP？</p>
+<p>A. HTTP &nbsp;&nbsp; B. FTP &nbsp;&nbsp; C. SMTP &nbsp;&nbsp; D. TFTP</p>
+
+<p><strong>题目11：</strong>HTTP状态码301表示什么？</p>
+<p>A. 资源未找到 &nbsp;&nbsp; B. 永久重定向 &nbsp;&nbsp; C. 临时重定向 &nbsp;&nbsp; D. 服务器内部错误</p>
+
+<p><strong>题目12：</strong>IMAP使用哪个端口？</p>
+<p>A. 25 &nbsp;&nbsp; B. 110 &nbsp;&nbsp; C. 143 &nbsp;&nbsp; D. 993</p>
+
+<h3>二、简答题</h3>
+
+<p><strong>题目13：</strong>请详细描述DNS递归查询和迭代查询的区别，并以访问 www.example.com 为例，说明实际的DNS解析过程中如何结合使用这两种查询方式。</p>
+
+<p><strong>题目14：</strong>HTTP请求报文和响应报文分别由哪四部分组成？请写出一个GET请求报文和一个200响应报文的例子。</p>
+
+<p><strong>题目15：</strong>请比较SMTP、POP3、IMAP三种电子邮件协议的用途、工作模式（推/拉）、端口号、以及邮件的存储方式。</p>
+
+<p><strong>题目16：</strong>请描述DHCP的DORA四步流程，并说明为什么Discover和Offer阶段必须使用广播。</p>
+
+<p><strong>题目17：</strong>FTP主动模式和被动模式有什么区别？为什么被动模式在现代网络中更常见？</p>
+
+<p><strong>题目18：</strong>请解释Cookie在HTTP协议中的作用和工作原理。HTTP为什么需要Cookie？</p>
+
+<p><strong>题目19：</strong>请列出HTTP/1.0、HTTP/1.1、HTTP/2.0的主要区别。</p>
+
+<details>
+    <summary>参考答案（点击展开）</summary>
+    <div class="details-content">
+        <p><strong>选择题答案：</strong></p>
+        <p>1-B &nbsp; 2-B &nbsp; 3-B &nbsp; 4-C &nbsp; 5-B &nbsp; 6-B &nbsp; 7-C &nbsp; 8-B &nbsp; 9-C &nbsp; 10-D &nbsp; 11-B &nbsp; 12-C</p>
+        <p><strong>简答题答案要点：</strong></p>
+        <p><strong>题目13：</strong>递归查询：DNS服务器替客户端完成全部查询并返回最终结果。迭代查询：DNS服务器只返回下一步应该查询的服务器地址。实际过程：主机向本地DNS发起递归查询，本地DNS依次向根/TLD/权威服务器发起迭代查询，最后将结果返回主机。</p>
+        <p><strong>题目14：</strong>请求报文 = 请求行 + 首部行 + 空行 + 实体体。示例见6.3节。响应报文 = 状态行 + 首部行 + 空行 + 实体体。示例见6.3节。</p>
+        <p><strong>题目15：</strong>SMTP（推，25端口，发送邮件）；POP3（拉，110端口，下载到本地并从服务器删除）；IMAP（拉，143端口，邮件保留在服务器上支持在线管理和多设备同步）。</p>
+        <p><strong>题目16：</strong>D=Discover（客户端广播找服务器）、O=Offer（服务器广播提供IP）、R=Request（客户端广播接受分配）、A=Acknowledge（服务器确认）。Discover和Offer必须用广播因为客户端此时没有IP地址也不知道服务器地址。</p>
+        <p><strong>题目17：</strong>主动模式：服务器主动连客户端的数据端口。被动模式：客户端主动连服务器的数据端口。被动模式更常见是因为客户端主动发起连接可以穿越防火墙和NAT。</p>
+        <p><strong>题目18：</strong>HTTP是无状态协议，每个请求独立。Cookie让服务器能识别用户：服务器通过Set-Cookie首部发送用户标识给客户端，客户端在后续请求中自动携带Cookie。这样服务器就知道请求来自同一用户。</p>
+        <p><strong>题目19：</strong>HTTP/1.0非持续连接（每个请求新建TCP连接）；HTTP/1.1默认持续连接（keep-alive），支持流水线，Host字段必须；HTTP/2.0二进制帧，多路复用（一个连接同时处理多个请求），HPACK首部压缩，服务器推送。</p>
+    </div>
+</details>
+
+<p style="text-align:center; margin-top:3em; font-size:1.2em; color:#007acc;">
+    <strong>恭喜！计算机网络期末复习教程的全部章节已完成。</strong><br>
+    建议回到目录查看完整学习路径。
+</p>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="05-transport-layer.html">&laquo; 第5章 运输层</a>
+        <a href="index.html">目录</a>
+        <a href="index.html">回到首页 &raquo;</a>
+    </nav>
+</footer>
+
+<script src="assets/script.js"></script>
+</main>
+</body>
+</html>

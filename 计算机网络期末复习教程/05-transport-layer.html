@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第5章 运输层 - 计算机网络期末复习</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+</head>
+<body>
+<main>
+
+<nav class="chapter-nav">
+    <a href="04-network-layer.html">&laquo; 第4章 网络层</a>
+    <a href="index.html">目录</a>
+    <a href="06-application-layer.html">第6章 应用层 &raquo;</a>
+</nav>
+
+<h1>第5章 运输层</h1>
+<p class="intro">这一章是期末考试中分量最重、大题出现频率最高的章节——没有之一。运输层是整个TCP/IP体系里承上启下的枢纽，它把网络层的"主机到主机"通信提升到了"进程到进程"通信。而TCP协议中关于可靠传输、流量控制、拥塞控制的机制，每一块都是大题的出题素材。本章的讲授方式和其他章节不同：每一个核心机制，我都会先讲清楚<strong>为什么</strong>需要它，再说<strong>它是什么</strong>，最后展示<strong>实际怎么用</strong>。这是考试复习中最需要深入理解的一章。</p>
+
+<div class="callout callout-danger">
+    <strong>本章大题考点预警（每年必考）</strong>
+    <ul>
+        <li>TCP拥塞控制的四种算法——慢开始、拥塞避免、快重传、快恢复，几乎每年都有计算大题</li>
+        <li>TCP三次握手与四次挥手的完整流程（包括状态变迁、序号确认号的变化）</li>
+        <li>TCP报文段首部各字段的含义——特别是六个标志位</li>
+        <li>流量控制中滑动窗口的计算</li>
+        <li>UDP首部结构和校验和中的伪首部概念</li>
+    </ul>
+</div>
+
+<!-- ================ 5.1 ================ -->
+<h2>5.1 运输层概述</h2>
+
+<h3>为什么需要运输层？</h3>
+<p>让我们从一个问题开始。网络层（IP协议）已经能把数据包从一台主机送到另一台主机了——但这就够了吗？想象一下：你的电脑上同时开着浏览器（访问网页）、微信（收发消息）、邮件客户端（收取邮件），这三个应用都在进行网络通信。网络层把数据包送到了你的电脑，但它不知道这个数据包是给浏览器的、给微信的、还是给邮件客户端的。</p>
+<p>这就好比快递员把包裹送到了你家楼下，但不知道这个包裹该交给家里的哪个人。运输层要解决的，正是这个问题：<strong>把数据准确交付给主机上对应的应用进程</strong>。</p>
+
+<div class="definition">
+    <h4>运输层的核心使命</h4>
+    <p>为运行在不同主机上的<strong>应用进程</strong>提供逻辑通信服务。网络层提供的是<strong>主机到主机</strong>的通信，运输层将之提升为<strong>进程到进程</strong>的通信。</p>
+</div>
+
+<h3>端口号：进程的"门牌号"</h3>
+<p>运输层用什么来标识不同的应用进程？答案是<strong>端口号</strong>。端口号是一个16位的整数，范围0~65535。一个应用进程要使用网络通信，就需要向操作系统申请一个端口号。IP地址标识了主机，端口号标识了该主机上的进程——两者合在一起，称为<strong>套接字（Socket）</strong>，格式为 <code>IP地址:端口号</code>。</p>
+
+<p>端口号分成三个区间，每个区间有不同的用途：</p>
+
+<table>
+    <thead>
+        <tr><th>类别</th><th>范围</th><th>分配方式</th><th>典型例子</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>熟知端口</td><td>0~1023</td><td>由IANA统一分配给最常用的服务</td><td>HTTP=80, HTTPS=443, FTP=21, SSH=22, SMTP=25, DNS=53</td></tr>
+        <tr><td>注册端口</td><td>1024~49151</td><td>公司或应用向IANA登记使用</td><td>MySQL=3306, PostgreSQL=5432, Tomcat=8080</td></tr>
+        <tr><td>动态端口</td><td>49152~65535</td><td>客户端临时随机分配，用完即释放</td><td>浏览器打开网页时自己分配的临时端口</td></tr>
+    </tbody>
+</table>
+
+<p>这里有一个重要的概念要理解：<strong>复用与分用</strong>。</p>
+<p><strong>复用</strong>发生在发送方：你的浏览器、微信、邮件客户端三个进程，可以同时使用同一个TCP（或UDP）协议把数据发出去，运输层负责把不同进程的数据封装成报文段，交给网络层发送。</p>
+<p><strong>分用</strong>发生在接收方：对方的运输层收到数据后，检查报文段中的目的端口号，就知道这个数据该交给哪个进程了。</p>
+
+<div class="callout callout-tip">
+    <strong>用一个类比来理解</strong>：运输层的复用分用就像一栋大楼的收发室。大楼里有很多公司（应用进程），快递员把包裹送到收发室（网络层把数据送到主机），收发室工作人员根据包裹上写的公司名称（端口号），把包裹分发给对应的公司（应用进程）。
+</div>
+
+<h3>TCP vs UDP：两个截然不同的选择</h3>
+<p>运输层提供了两种协议：TCP和UDP。为什么需要两种？因为不同的应用有不同的需求。我给你讲一个故事来理解：</p>
+<p>假设你要寄一份重要的合同文件——你肯定希望它安全到达，不能丢、不能错、顺序不能乱。你会选择挂号信或者快递，有签收确认、有追踪编号。这就是<strong>TCP</strong>：可靠、有序、有连接。</p>
+<p>但如果你是在看网络直播呢？直播的每一帧画面，你希望尽快看到，如果不小心丢了一帧，你宁可继续看后面的画面，也不希望画面停下来等待重传那一帧。这就是<strong>UDP</strong>：快速、轻量、但不保证可靠。</p>
+
+<table class="comparison">
+    <thead>
+        <tr><th>对比维度</th><th>TCP</th><th>UDP</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>连接</td><td class="good">面向连接（先建立再通信）</td><td class="bad">无连接（直接发）</td></tr>
+        <tr><td>可靠性</td><td class="good">可靠交付（确认+重传）</td><td class="bad">尽最大努力交付（不保证）</td></tr>
+        <tr><td>数据边界</td><td>面向字节流（无边界）</td><td>面向报文（有边界）</td></tr>
+        <tr><td>流量控制</td><td class="good">有</td><td class="bad">无</td></tr>
+        <tr><td>拥塞控制</td><td class="good">有</td><td class="bad">无</td></tr>
+        <tr><td>首部开销</td><td>20字节</td><td>8字节</td></tr>
+        <tr><td>传输效率</td><td>较低</td><td>较高</td></tr>
+        <tr><td>典型应用</td><td>网页(HTTP)、邮件(SMTP)、文件传输(FTP)</td><td>DNS查询、视频直播、VoIP、在线游戏</td></tr>
+    </tbody>
+</table>
+
+<!-- ================ 5.2 ================ -->
+<h2>5.2 UDP协议</h2>
+
+<h3>为什么需要UDP？</h3>
+<p>上一节提到，TCP提供可靠服务，但代价是复杂、有延迟、有额外的开销。有些场景下，"可靠性"反而是累赘。比如DNS查询：客户端发一个请求问"www.example.com的IP是什么？"，服务器返回一个答案。整个交互就是一问一答，一次搞定。如果为此建立TCP连接（三次握手），查询完再释放连接（四次挥手），光连接管理的开销就比实际传输的数据还多。再比如视频通话：每一帧画面都在快速变化，偶尔丢一帧用户根本注意不到，但如果为了重传丢掉的帧而导致画面卡顿，体验反而更差。</p>
+<p>UDP就是为这些场景设计的——它把复杂度降到最低，只做一件事：<strong>在IP的基础上加上端口号，实现进程到进程的通信</strong>，其他一切都不管。</p>
+
+<div class="callout callout-info">
+    <strong>UDP的核心设计哲学</strong>：只做最必要的事，剩下的交给应用层自己去处理。如果应用需要可靠性，应用自己在UDP之上实现（比如QUIC协议就是在UDP之上实现可靠传输）。
+</div>
+
+<h3>UDP的特点</h3>
+<p>UDP的全称是User Datagram Protocol（用户数据报协议）。它的特点可以概括为五个方面：</p>
+<ul>
+    <li><strong>无连接</strong>：发送数据前不需要握手，直接发。节省了建立连接的时间。</li>
+    <li><strong>不可靠</strong>：UDP不保证数据一定到达对方，不保证到达的顺序，也不保证不重复。它只是把数据报发出去，至于对方收没收到——它不关心。</li>
+    <li><strong>面向报文</strong>：应用层交给UDP一个完整的报文，UDP加上首部后直接交给IP层，不做拆分也不做合并。接收方的UDP也是直接把完整的报文交给应用层。这就意味着报文边界是保留的。</li>
+    <li><strong>无拥塞控制</strong>：不管网络是否拥塞，UDP照发不误。这看起来有点"自私"，但对于实时应用来说恰恰是必需的——你总不能因为网络拥塞就让视频通话停下来吧？</li>
+    <li><strong>首部开销极小</strong>：固定8字节首部。</li>
+</ul>
+
+<h3>UDP首部格式</h3>
+<p>UDP首部只有8字节，分成4个字段，每个字段2字节：</p>
+
+<table>
+    <thead>
+        <tr><th>字段</th><th>长度</th><th>作用</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>源端口号</td><td>2字节</td><td>发送方的端口号。如果接收方需要回复，就用这个端口号回；不需要回复时可以置0。</td></tr>
+        <tr><td>目的端口号</td><td>2字节</td><td>接收方的端口号。运输层分用时就是靠这个字段来找到对应的应用进程。</td></tr>
+        <tr><td>UDP长度</td><td>2字节</td><td>UDP首部+数据的总长度（字节数）。最小值为8（只有首部没有数据）。</td></tr>
+        <tr><td>UDP校验和</td><td>2字节</td><td>检测整个UDP报文段在传输过程中是否出错。</td></tr>
+    </tbody>
+</table>
+
+<pre><code> 比特: 0               15 16              31
+       +------------------+------------------+
+       |    源端口号       |    目的端口号     |
+       +------------------+------------------+
+       |    UDP长度        |    UDP校验和      |
+       +------------------+------------------+
+       |                                      |
+       |          数据（如果有）               |
+       |                                      |
+       +--------------------------------------+</code></pre>
+
+<h3>UDP校验和与伪首部</h3>
+<p>UDP的校验和虽然只有2字节，但它有一个很有意思的设计——<strong>伪首部</strong>。</p>
+
+<p>为什么需要伪首部？因为UDP只负责进程到进程的通信，它本身不处理IP地址。但是，如果IP层把数据报送错了主机呢？UDP需要能检测到这个错误。伪首部的设计就是为此：在校验和的计算中，临时把IP层的源地址和目的地址包含进来，这样如果IP地址传错了，校验和就能发现。</p>
+
+<p>伪首部有12字节，结构如下：</p>
+
+<table>
+    <thead>
+        <tr><th>字段</th><th>长度</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>源IP地址</td><td>4字节</td><td>来自IP数据报</td></tr>
+        <tr><td>目的IP地址</td><td>4字节</td><td>来自IP数据报</td></tr>
+        <tr><td>全0</td><td>1字节</td><td>填充</td></tr>
+        <tr><td>协议号</td><td>1字节</td><td>UDP的协议号为17</td></tr>
+        <tr><td>UDP长度</td><td>2字节</td><td>UDP数据报长度</td></tr>
+    </tbody>
+</table>
+
+<p>校验和的计算步骤：</p>
+<ol>
+    <li>在UDP数据报前面临时加上12字节的伪首部（注意：伪首部只用于计算，不传输）</li>
+    <li>如果数据部分长度为奇数，末尾补一个0字节</li>
+    <li>把伪首部、UDP首部、数据部分全部看作16位字的序列</li>
+    <li>对所有16位字做二进制<strong>反码求和</strong></li>
+    <li>把求和结果取反码，写入校验和字段</li>
+</ol>
+
+<div class="sidebar-note">
+    <strong>注意</strong>：在IPv4中，UDP的校验和是<strong>可选的</strong>（可置为0表示不校验），但在IPv6中校验和是<strong>强制</strong>的。另外有趣的一点是：UDP的校验和计算和TCP的校验和计算方式完全一样，只是伪首部中的协议号不同（UDP=17，TCP=6）。
+</div>
+
+<!-- ================ 5.3 ================ -->
+<h2>5.3 TCP协议概述</h2>
+
+<div class="definition">
+    <h4>TCP：Transmission Control Protocol（传输控制协议）</h4>
+    <p>TCP是运输层中<strong>最重要、最复杂</strong>的协议。它提供面向连接的、可靠的、全双工的字节流服务。</p>
+</div>
+
+<p>TCP的特点可以从下面几个维度来理解：</p>
+
+<ol>
+    <li><strong>面向连接</strong>：在数据传输之前，通信双方必须通过三次握手建立一条TCP连接，通信结束后通过四次挥手释放连接。这里的"连接"是逻辑上的——TCP在双方各自维护一个连接状态记录，而不是像电路交换那样真的建立一条物理通路。</li>
+    <li><strong>可靠交付</strong>：TCP通过序号、确认、重传等机制，确保数据无差错、不丢失、不重复、按序到达。这是TCP最核心的价值。</li>
+    <li><strong>全双工通信</strong>：TCP连接建立后，双方可以同时发送和接收数据，互不干扰。</li>
+    <li><strong>面向字节流</strong>：应用层交给TCP的数据被看作一个无结构的字节流。TCP根据自己的策略决定如何分段（比如根据MSS来切分），接收方再把这些段重新组装成完整的字节流交给应用层。应用层看不到分段的边界。</li>
+    <li><strong>流量控制</strong>：TCP通过滑动窗口机制，确保发送方的发送速率不超过接收方的接收能力。</li>
+    <li><strong>拥塞控制</strong>：TCP通过慢开始、拥塞避免、快重传、快恢复等算法，避免发送方发送过快导致网络过载。</li>
+    <li><strong>点对点通信</strong>：每条TCP连接只能连接两个端点，不支持广播或多播。</li>
+</ol>
+
+<!-- ================ 5.4 ================ -->
+<h2>5.4 可靠传输原理</h2>
+
+<h3>为什么需要可靠传输？</h3>
+<p>网络层（IP协议）提供的是"尽最大努力交付"的服务——数据报可能在传输过程中丢失、重复、乱序、出错。作为上层协议的TCP，承诺给应用层提供"可靠"的服务，就必须解决这些问题。那么，可靠传输的基本原理是什么？我们从最简单的方案开始，一步步推导出TCP实际采用的机制。</p>
+
+<h3>5.4.1 停止等待协议：最朴素的可靠传输</h3>
+<p>想象这样一个场景：你给朋友发了一条微信消息，不确定他收到没有——你会怎么做？最简单的办法是：发完消息后等着，直到他回复"收到了"，再发下一条。如果他一直没回复，你就重发一遍。</p>
+<p>这就是<strong>停止等待（Stop-and-Wait）</strong>协议的核心思想：发送方每发送一个数据包，就必须等待接收方的确认，收到确认后才能发送下一个。</p>
+
+<div class="steps">
+    <div class="step">
+        <span class="step-number">1</span>
+        <div class="step-content">
+            <h4>发送方发送数据</h4>
+            <p>发送一个数据分组，同时启动一个超时计时器（防止数据或确认丢失）。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">2</span>
+        <div class="step-content">
+            <h4>接收方接收并确认</h4>
+            <p>接收方收到数据后，发送确认（ACK）给发送方。如果数据有误，丢弃并等待重传。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">3</span>
+        <div class="step-content">
+            <h4>发送方处理确认</h4>
+            <p>如果在超时前收到确认，发送下一个数据包。如果超时了还没收到确认，重传之前的数据包。</p>
+        </div>
+    </div>
+</div>
+
+<p>停止等待协议需要处理三种情况：</p>
+<ul>
+    <li><strong>无差错情况</strong>：发送→确认→发送→确认，流程正常，一切顺利。</li>
+    <li><strong>数据包丢失或出错</strong>：发送方超时后重传。接收方如果收到重复的数据包（因为上次其实已经收到了），就丢弃重复包，再次发送确认。</li>
+    <li><strong>确认丢失或迟到</strong>：发送方超时后重传，接收方收到重复数据后丢弃并再次确认。发送方收到迟到的确认（对应之前发送的包），直接丢弃它。</li>
+</ul>
+
+<div class="callout callout-warning">
+    <strong>停止等待协议的最大问题——效率极低</strong><br>
+    我们来做一道简单的计算题。假设数据包长度为1000字节，信道传输速率是1Mbps，两端之间的往返时间RTT=100ms。那么发送一个数据包需要的时间 = 1000&times;8 / 1,000,000 = 8ms。等待确认需要至少半个RTT=50ms。所以信道利用率 = 8 / (8 + 50) &asymp; <strong>13.8%</strong>。超过86%的时间都在等待！在长距离网络（比如跨洋通信，RTT可能达到200ms以上），利用率会更低。<br>
+    这就是为什么需要<strong>流水线传输</strong>——一次发送多个数据包，而不是发一个等一个。
+</div>
+
+<h3>5.4.2 连续ARQ：滑动窗口与累积确认</h3>
+<p>为了解决停止等待协议效率太低的问题，连续ARQ（Automatic Repeat reQuest）协议引入了两个关键机制：<strong>滑动窗口</strong>和<strong>累积确认</strong>。</p>
+
+<p><strong>滑动窗口</strong>的工作方式是这样的：发送方维护一个"发送窗口"，窗口内可以包含多个数据包。发送方可以连续发送窗口内的所有数据包，而不必等待每个包的确认。每收到一个确认，窗口就向前滑动，新的数据包就可以进入窗口被发送。</p>
+
+<p><strong>累积确认</strong>进一步提升了效率：接收方不用对每个收到的数据包都单独发送确认，而是可以一次确认多个。比如，接收方收到了序号1、2、3的数据包，它只需要发送一个ACK=4的确认，就表示"序号4之前的所有数据都已正确收到"。</p>
+
+<div class="callout callout-tip">
+    <strong>累积确认的巧妙之处</strong>：它把多次确认合并为一次，大大减少了确认报文的数量。但代价是：如果中间的某个数据包丢失了（比如序号2丢失了，但3、4收到了），接收方只能继续发送ACK=2（因为这是它期望收到的下一个序号），发送方就需要重传从序号2开始的所有后续数据包。
+</div>
+
+<h3>5.4.3 后退N帧（GBN）与选择重传（SR）</h3>
+<p>连续ARQ有两大类实现方式，它们的核心区别在于"丢包后重传什么"：</p>
+
+<table class="comparison">
+    <thead>
+        <tr><th>对比维度</th><th>后退N帧（Go-Back-N）</th><th>选择重传（Selective Repeat）</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>丢包后的处理</td><td>从丢失的包开始，重传之后<strong>所有</strong>的包</td><td>只重传<strong>丢失的那个</strong>包</td></tr>
+        <tr><td>接收方缓存</td><td>只需缓存1个包（按序交付）</td><td>需要缓存窗口内所有乱序到达的包</td></tr>
+        <tr><td>确认方式</td><td>累积确认</td><td>每个包独立确认</td></tr>
+        <tr><td>窗口大小限制</td><td>无特殊限制</td><td>发送窗口必须 &le; 2<sup>n-1</sup>（防止歧义）</td></tr>
+        <tr><td>丢包时的重传量</td><td>大</td><td>小</td></tr>
+        <tr><td>实现复杂度</td><td>简单（接收方几乎不需要缓存）</td><td>复杂（接收方需要管理缓存窗口）</td></tr>
+    </tbody>
+</table>
+
+<div class="sidebar-note">
+    <strong>TCP实际采用哪种？</strong>早期的TCP实现比较接近GBN，后来引入了<strong>选择性确认（SACK）</strong>选项，允许接收方精确告知发送方哪些数据块已收到、哪些丢了。现代TCP在启用SACK选项后，行为更接近SR——只重传真正丢失的那部分数据。
+</div>
+
+<!-- ================ 5.5 ================ -->
+<h2>5.5 TCP报文段格式（非常重要，高频考点）</h2>
+
+<p>这一节的内容几乎每次考试都会考到。TCP报文段的首部固定部分为<strong>20字节</strong>，后面还有最多40字节的选项部分——所以首部最大可以到60字节。每一个字段都有自己的用途，我们逐一来看。</p>
+
+<pre><code> 比特: 0                   15 16                  31
+       +--------------------+----------------------+
+       |       源端口号       |       目的端口号      |
+       +--------------------+----------------------+
+       |                   序号(seq)                |
+       +-------------------------------------------+
+       |                确认号(ack)                  |
+       +-------+------+----+----------------------+
+       |数据偏移| 保留  |URG|ACK|PSH|RST|SYN|FIN|  窗口  |
+       +-------+------+----+----------------------+
+       |      校验和         |       紧急指针        |
+       +--------------------+----------------------+
+       |              选项（可选，0~40B）            |
+       +--------------------+----------------------+
+       |                  数据                        |
+       +---------------------------------------------+</code></pre>
+
+<table>
+    <thead>
+        <tr><th>字段</th><th>长度</th><th>详细说明</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>源端口号</td><td>16位（2字节）</td><td>发送方的端口号。</td></tr>
+        <tr><td>目的端口号</td><td>16位（2字节）</td><td>接收方的端口号。</td></tr>
+        <tr><td>序号（seq）</td><td>32位（4字节）</td><td>本报文段数据部分的<strong>第一个字节</strong>在整个TCP字节流中的编号。TCP把数据看作字节流，每个字节都有一个序号。例：如果字节流中第一个字节的序号为0，发送了1000字节，则第一个报文段的序号=0，第二个报文段的序号=1000。</td></tr>
+        <tr><td>确认号（ack）</td><td>32位（4字节）</td><td>期望收到的<strong>下一个</strong>数据字节的序号。同时表示该序号之前的所有字节都已正确接收。例：ack=1001表示序号0~1000都已收到，下一个期望收到序号1001。</td></tr>
+        <tr><td>数据偏移</td><td>4位</td><td>TCP首部的总长度（以<strong>4字节</strong>为单位）。最小值5（对应20字节固定首部），最大值15（对应60字节首部）。</td></tr>
+        <tr><td>保留</td><td>6位</td><td>保留给将来使用，目前必须置0。</td></tr>
+        <tr><td>标志位</td><td>6位（各1位）</td><td>见下方详细说明——这6个位是考试常客。</td></tr>
+        <tr><td>窗口</td><td>16位（2字节）</td><td>接收方告知发送方自己的接收窗口大小（rwnd），用于流量控制。最大可表示65535字节。</td></tr>
+        <tr><td>校验和</td><td>16位（2字节）</td><td>对伪首部+TCP首部+TCP数据进行校验。TCP的协议号为6。</td></tr>
+        <tr><td>紧急指针</td><td>16位（2字节）</td><td>仅在URG=1时有效，指出紧急数据在报文段中的末尾位置（相对于seq的偏移量）。</td></tr>
+        <tr><td>选项</td><td>0~40字节</td><td>常见选项包括：MSS（最大报文段长度）、SACK（选择性确认）、时间戳（用于RTT测量和防序号绕回）等。</td></tr>
+    </tbody>
+</table>
+
+<p>6个标志位需要特别记忆——它们在三次握手、四次挥手和日常数据传输中各自扮演着重要角色：</p>
+
+<table>
+    <thead>
+        <tr><th>标志位</th><th>名称</th><th>作用</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>URG</strong></td><td>Urgent（紧急）</td><td>为1时表示有紧急数据，紧急指针字段有效。接收方收到后应优先处理紧急数据。</td></tr>
+        <tr><td><strong>ACK</strong></td><td>Acknowledgment（确认）</td><td>为1时表示确认号字段有效。除了最初的两个SYN报文，所有报文段中ACK都必须置1。</td></tr>
+        <tr><td><strong>PSH</strong></td><td>Push（推送）</td><td>为1时表示接收方应<strong>立即</strong>将数据交给应用层，不要等缓冲区满了再交付。</td></tr>
+        <tr><td><strong>RST</strong></td><td>Reset（复位）</td><td>为1时表示TCP连接出现严重问题（如主机崩溃），必须强制释放连接。</td></tr>
+        <tr><td><strong>SYN</strong></td><td>Synchronize（同步）</td><td>在建立连接时使用。SYN=1表示这是一个连接请求或连接接受报文。三次握手的第一次和第二次都用到了SYN。</td></tr>
+        <tr><td><strong>FIN</strong></td><td>Finish（终止）</td><td>为1时表示发送方已经没有数据要发送了，请求释放连接。四次挥手的第一步和第三步用到FIN。</td></tr>
+    </tbody>
+</table>
+
+<div class="definition">
+    <h4>MSS——Maximum Segment Size（最大报文段长度）</h4>
+    <p>MSS是TCP报文段中<strong>数据部分</strong>的最大长度。它不等于MTU（最大传输单元）。在以太网环境下，MTU=1500字节，MSS = MTU - IP首部(20) - TCP首部(20) = <strong>1460字节</strong>。</p>
+    <p>MSS在TCP连接建立时通过选项字段协商确定。双方各自通告自己支持的MSS，取<strong>较小值</strong>作为本次连接使用的MSS。这样做的目的是避免IP层分片——如果TCP分段后的数据长度加上首部不超过MTU，IP层就不需要再进行分片了。</p>
+</div>
+
+<!-- ================ 5.6 ================ -->
+<h2>5.6 TCP可靠传输的实现</h2>
+
+<p>上一节我们看了TCP报文段的"外壳"，这一节我们看TCP如何利用这些字段来实现可靠传输。关键机制有三个：序号、确认、重传。</p>
+
+<h3>5.6.1 序号机制</h3>
+<p>前面提到，TCP把数据看作一个字节流，每个字节都有一个序号。这个序号是32位的，范围0~2<sup>32</sup>-1，循环使用（溢出后从0重新开始）。</p>
+<p>为什么需要按字节编号？因为TCP是面向字节流的——数据没有边界。序号精确标识了每个字节的位置，接收方就可以按字节来确认、按字节来排序、按字节来去重。</p>
+
+<div class="callout callout-info">
+    <strong>例子</strong>：假设TCP字节流从序号0开始。应用层交给TCP 5000字节的数据。TCP可能会这样分段发送：<br>
+    - 第一个报文段：数据是字节0~999，序号字段 = 0<br>
+    - 第二个报文段：数据是字节1000~1999，序号字段 = 1000<br>
+    - 第三个报文段：数据是字节2000~2999，序号字段 = 2000<br>
+    以此类推。注意，每个报文段的序号值就是该段中第一个字节在整个字节流中的位置。
+</div>
+
+<h3>5.6.2 累积确认</h3>
+<p>接收方发送确认时，确认号字段的值表示"下一个期望收到的字节的序号"，同时也意味着"该序号之前的所有字节都已收到"。</p>
+
+<p>这里有一个非常重要的细节：<strong>TCP只确认那些连续的字节</strong>。如果接收方收到了字节0~999和字节2000~2999，但字节1000~1999丢失了，那么接收方仍然发送ack=1000——即使后面的字节已经收到了，但由于前面的缺口没有补上，不能向前移动确认号。</p>
+
+<p>这种设计的好处是简单、稳健——发送方只需要记住一个数字（最近被确认的序号），就知道哪些数据已经安全到达了。坏处是——如果发生丢包，发送方不知道是只丢了中间那一段，还是丢了那一段之后的所有数据。这个问题的解决方案就是我们接下来要讲的重传机制。</p>
+
+<h3>5.6.3 重传机制</h3>
+
+<h4>超时重传</h4>
+<p>TCP为每个发送的报文段设置一个超时计时器。如果在<strong>超时重传时间（RTO, Retransmission TimeOut）</strong>内没有收到确认，就重传该报文段。</p>
+
+<p>RTO的设定是一个很微妙的问题：设得太短，还没等确认回来就重传，浪费带宽；设得太长，丢包后要等很久才能恢复，用户体验差。理想的RTO应该略大于当前的往返时间（RTT）。</p>
+
+<p>RTO的计算过程是这样的：</p>
+<ol>
+    <li>每次发送一个报文段，记录发送时刻；收到对应的确认后，计算RTT样本值（当前时刻 - 发送时刻）。</li>
+    <li>计算平滑的RTT估计值 RTT<sub>s</sub>：<br>
+        RTT<sub>s</sub> = (1 - &alpha;) &times; RTT<sub>s(旧)</sub> + &alpha; &times; RTT<sub>样本</sub><br>
+        其中 &alpha; 通常取 1/8 = 0.125。</li>
+    <li>同时计算RTT的偏差 RTT<sub>D</sub>（类似方差的概念）：<br>
+        RTT<sub>D</sub> = (1 - &beta;) &times; RTT<sub>D(旧)</sub> + &beta; &times; |RTT<sub>s</sub> - RTT<sub>样本</sub>|<br>
+        其中 &beta; 通常取 1/4 = 0.25。</li>
+    <li>最终 RTO = RTT<sub>s</sub> + 4 &times; RTT<sub>D</sub>。</li>
+</ol>
+
+<div class="callout callout-warning">
+    <strong>Karn算法</strong>：当一个报文段被重传后，收到确认时无法区分这个确认是对原始报文段还是重传报文段的回应。Karn算法规定：重传的报文段不用于RTT样本计算（避免混淆），并且每次重传后RTO加倍（指数退避），直到不再重传为止。
+</div>
+
+<h4>快速重传</h4>
+<p>超时重传的缺点是——要等到超时计时器到期才知道丢包了。能不能更快地发现丢包？可以，这就是快速重传的设计动机。</p>
+
+<p>快速重传依赖于一个观察：当接收方收到一个序号不连续的数据时（比如收到了序号1001~2000，但还没收到0~1000），它会立即发送一个确认（重复确认），确认号仍然是它期望收到的那个序号（比如ack=1000）。发送方收到重复确认，就知道接收方还在等那个数据。</p>
+
+<p>具体规则是：发送方连续收到<strong>3个相同的冗余ACK</strong>（总共收到4个相同的ACK），就认为对应的报文段已经丢失，立即重传，不等超时计时器到期。</p>
+
+<div class="steps">
+    <div class="step">
+        <span class="step-number">1</span>
+        <div class="step-content">
+            <h4>发送方连续发送数据</h4>
+            <p>seq=1、seq=2、seq=3、seq=4、seq=5 连续发出。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">2</span>
+        <div class="step-content">
+            <h4>seq=2丢失</h4>
+            <p>接收方收到了seq=1、3、4、5。由于seq=2丢失，接收方发出ack=2（重复确认）。每次收到一个失序的报文段，都发送ack=2。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">3</span>
+        <div class="step-content">
+            <h4>发送方收到3个冗余ACK</h4>
+            <p>发送方收到ack=2、ack=2、ack=2（加上第一次的ack=2，共4个相同的确认）。立即重传seq=2。</p>
+        </div>
+    </div>
+</div>
+
+<h3>5.6.4 选择性确认（SACK）</h3>
+<p>快速重传解决了"何时重传"的问题，但没有解决"重传什么"的问题。在累积确认的机制下，如果发送方重传seq=2后，接收方收到seq=2，就可以发送ack=6，表示seq=1~5全部收到。但在重传seq=2之前，发送方不知道3、4、5是否已收到。</p>
+
+<p><strong>SACK（Selective Acknowledgment）</strong>选项解决了这个问题。SACK允许接收方在确认中额外告知："我虽然还没确认序号2，但我已经收到了序号3、4、5。"发送方就知道只需要重传序号2，不需要重传3、4、5。</p>
+
+<p>SACK的使用条件：</p>
+<ul>
+    <li>通信双方都必须支持SACK选项（在连接建立时通过选项协商）</li>
+    <li>SACK选项包含一组不连续的字节块边界（左边界和右边界）</li>
+    <li>SACK信息是"建议性"的——发送方可以选择不采纳（选择继续用GBN方式）</li>
+</ul>
+
+<!-- ================ 5.7 ================ -->
+<h2>5.7 TCP流量控制</h2>
+
+<h3>为什么需要流量控制？</h3>
+<p>想象一个场景：发送方是一个高速服务器，接收方是一个手机。服务器可以每秒发1GB数据，但手机的接收缓冲区只有64KB。如果不加控制，服务器发过来的数据会迅速填满手机的缓冲区，后续到达的数据只能被丢弃。丢弃了又要重传——不仅浪费带宽，还造成恶性循环。</p>
+<p><strong>流量控制（Flow Control）</strong>的目的就是：<strong>让发送方的发送速率不超过接收方的接收能力</strong>。这和下一节要讲的拥塞控制不同——流量控制只关心收发双方的能力匹配，不关心网络的负载情况。</p>
+
+<h3>滑动窗口机制</h3>
+<p>TCP用<strong>滑动窗口</strong>来实现流量控制。接收方在TCP报文段首部的"窗口"字段中，填入自己当前的接收窗口大小（rwnd, receiver window）。发送方根据这个值来限制自己发送的数据量。</p>
+
+<div class="definition">
+    <h4>发送窗口 = min(拥塞窗口 cwnd, 接收窗口 rwnd)</h4>
+    <p>发送方的实际发送窗口受两个因素的制约：<strong>拥塞窗口（cwnd）</strong>反映网络当前的承载能力，由拥塞控制算法决定；<strong>接收窗口（rwnd）</strong>反映接收方的接收能力，由流量控制机制决定。最终的发送窗口取两者的较小值。</p>
+</div>
+
+<p>发送方维护的发送窗口可以分为三个区域：</p>
+<ul>
+    <li><strong>已发送并已确认</strong>：这些字节安全到达，窗口左边界位于此</li>
+    <li><strong>已发送但未确认</strong>：这些字节已发出，等待接收方的确认</li>
+    <li><strong>允许发送但未发送</strong>：这些字节在窗口内，可以随时发送</li>
+    <li><strong>不可发送</strong>：窗口右边界之外的字节，必须等窗口滑动后才能发送</li>
+</ul>
+
+<p>窗口的滑动过程是这样的：</p>
+<ol>
+    <li>发送方在窗口内连续发送数据（可以一次性发完窗口内的所有数据，也可以分批发送）</li>
+    <li>接收方收到数据后进行处理，处理完后缓冲区腾出空间，接收方在确认报文中通过窗口字段告知新的rwnd</li>
+    <li>发送方收到确认后，窗口向右滑动。滑动后，新的数据进入窗口范围，可以继续发送</li>
+    <li>如果rwnd变为0，发送方停止发送，进入"等待窗口更新"状态</li>
+</ol>
+
+<h3>持续计时器与零窗口探测</h3>
+<p>当接收方通告rwnd=0时，发送方停止发送。一段时间后，接收方处理完了一些数据，缓冲区有了空间，于是发送一个更新报文给发送方，告知新的非零窗口大小。</p>
+<p>问题来了：这个更新报文如果丢失了呢？接收方以为发送方知道了，等待发送方发数据；发送方以为窗口还是0，等待接收方发更新。双方都在等对方——<strong>死锁</strong>。</p>
+
+<p>解决方案是：</p>
+<ul>
+    <li>发送方在收到rwnd=0后，启动一个<strong>持续计时器（Persistence Timer）</strong></li>
+    <li>持续计时器到期时，发送方发送一个<strong>零窗口探测（Zero Window Probe）</strong>报文段（只有一个字节数据的报文段）</li>
+    <li>接收方必须回应这个探测报文，即使窗口为0也要回复（告知当前窗口大小）</li>
+    <li>如果接收方回复窗口仍为0，发送方重置持续计时器，继续等待</li>
+    <li>如果接收方回复窗口非0，发送方恢复发送</li>
+</ul>
+
+<p>持续计时器的超时时间采用指数退避策略：第一次到期后未得到非零窗口回复，下一次的等待时间加倍。</p>
+
+<!-- ================ 5.8 ================ -->
+<h2>5.8 TCP拥塞控制（超级重点，必考大题）</h2>
+
+<div class="callout callout-danger">
+    <strong>必考大题预警！</strong>拥塞控制是期末考试中分值最高的大题考点。以下内容不仅仅是理解，而是要熟练掌握计算过程。我会用完整的数值推导来演示每一种情况。
+</div>
+
+<h3>为什么需要拥塞控制？</h3>
+<p>流量控制解决的是"发送方太快，接收方跟不上"的问题。但还有另一种情况：发送方和接收方都没问题，但<strong>网络中间的路由器</strong>撑不住了。</p>
+<p>想象一下：很多台计算机同时通过同一个路由器发送数据，路由器的缓存是有限的。如果所有计算机的发送速率都超过了路由器的转发能力，路由器的缓存会迅速被填满，后续到达的数据包只能被丢弃。被丢弃的数据包会触发发送方的重传——这又往网络中加入了更多的数据包，进一步加重拥塞。最终可能导致<strong>拥塞崩溃</strong>：网络吞吐量急剧下降，几乎无法正常工作。</p>
+<p><strong>拥塞控制（Congestion Control）</strong>的目的就是：<strong>避免发送方向网络中注入过多的数据，防止网络过载</strong>。</p>
+
+<table class="comparison">
+    <thead>
+        <tr><th>对比维度</th><th>拥塞控制</th><th>流量控制</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>目标</td><td>防止网络过载</td><td>防止接收方过载</td></tr>
+        <tr><td>控制对象</td><td>网络整体负载</td><td>发送方与接收方之间</td></tr>
+        <tr><td>涉及因素</td><td>路由器的处理能力和缓存大小</td><td>接收方的缓冲区大小</td></tr>
+        <tr><td>控制变量</td><td>拥塞窗口 cwnd</td><td>接收窗口 rwnd</td></tr>
+        <tr><td>本质</td><td>全局性问题（涉及整个网络）</td><td>局部性问题（只涉及通信双方）</td></tr>
+    </tbody>
+</table>
+
+<h3>5.8.1 慢开始与拥塞避免</h3>
+
+<p>TCP拥塞控制使用一个称为<strong>拥塞窗口（cwnd, congestion window）</strong>的变量来控制发送速率。cwnd的单位通常是<strong>MSS</strong>（最大报文段长度），但也经常直接用字节数来表示。</p>
+
+<p>拥塞控制分成两个阶段，中间用一个门限值（ssthresh，慢开始门限）来分隔：</p>
+
+<h4>慢开始（Slow Start）</h4>
+<p>初始时，cwnd=1（1个MSS）。每收到一个对新报文段的确认，cwnd增加1个MSS。这意味着每经过一个RTT，cwnd就<strong>翻倍</strong>。所以慢开始阶段的窗口增长速度是指数级的。</p>
+
+<div class="callout callout-tip">
+    <strong>慢开始并不"慢"</strong>：指数增长是非常快的。1 &rarr; 2 &rarr; 4 &rarr; 8 &rarr; 16 &rarr; 32……仅用5个RTT，cwnd就从1增长到32。之所以叫"慢开始"，是因为它最初的起点很小（cwnd=1），而不是因为速度慢。正确的理解是"从慢开始，后面越来越快"。
+</div>
+
+<h4>拥塞避免（Congestion Avoidance）</h4>
+<p>当cwnd增长到ssthresh（慢开始门限）时，进入拥塞避免阶段。这阶段的规则是：每经过一个RTT，cwnd增加1个MSS。增长方式是<strong>线性</strong>的（加法增大）。</p>
+
+<h3>5.8.2 快重传与快恢复</h3>
+
+<h4>超时重传的处理</h4>
+<p>如果发送方因为<strong>超时</strong>而重传数据，它的处理方式很激进：</p>
+<ul>
+    <li><strong>ssthresh</strong> = cwnd / 2（把门限值降为当前cwnd的一半）</li>
+    <li><strong>cwnd</strong> = 1（窗口大小回到初始值）</li>
+    <li>重新进入<strong>慢开始</strong>阶段</li>
+</ul>
+
+<h4>收到3个冗余ACK的处理（快重传+快恢复）</h4>
+<p>如果发送方是因为<strong>3个冗余ACK</strong>（而不是超时）而触发重传，处理方式温和得多：</p>
+<ul>
+    <li><strong>ssthresh</strong> = cwnd / 2</li>
+    <li><strong>cwnd</strong> = ssthresh（窗口减半，而不是回到1）</li>
+    <li>直接进入<strong>拥塞避免</strong>阶段（不回到慢开始）</li>
+</ul>
+<p>为什么这样的处理更温和？因为3个冗余ACK意味着接收方仍然在正常发送确认，网络并没有完全瘫痪，只是出现了轻微的丢包。所以cwnd只需要减半，而不是归零。</p>
+
+<h3>5.8.3 拥塞控制状态机</h3>
+<p>TCP拥塞控制可以看作一个有限状态机，有三个主要状态：</p>
+
+<div class="steps">
+    <div class="step">
+        <span class="step-number">1</span>
+        <div class="step-content">
+            <h4>慢开始状态</h4>
+            <p>cwnd指数增长（每轮翻倍）。当cwnd &ge; ssthresh 时，进入拥塞避免。如果发生超时：ssthresh=cwnd/2, cwnd=1, 重新开始慢开始。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">2</span>
+        <div class="step-content">
+            <h4>拥塞避免状态</h4>
+            <p>cwnd线性增长（每轮+1）。如果发生超时：ssthresh=cwnd/2, cwnd=1, 进入慢开始。如果收到3个冗余ACK：执行快重传+快恢复。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">3</span>
+        <div class="step-content">
+            <h4>快恢复状态</h4>
+            <p>收到3个冗余ACK后进入。cwnd=cwnd/2, ssthresh=cwnd/2。收到新的ACK后，进入拥塞避免。</p>
+        </div>
+    </div>
+</div>
+
+<details>
+    <summary>完整状态转换图（点击展开）</summary>
+    <div class="details-content">
+        <ul>
+            <li><strong>慢开始 &rarr; 拥塞避免</strong>：条件：cwnd &ge; ssthresh</li>
+            <li><strong>慢开始 &rarr; 慢开始（重新开始）</strong>：条件：发生超时。操作：ssthresh=cwnd/2, cwnd=1</li>
+            <li><strong>拥塞避免 &rarr; 慢开始</strong>：条件：发生超时。操作：ssthresh=cwnd/2, cwnd=1</li>
+            <li><strong>拥塞避免 &rarr; 快恢复</strong>：条件：收到3个冗余ACK。操作：ssthresh=cwnd/2, cwnd=ssthresh（或cwnd/2），重传丢失报文段</li>
+            <li><strong>快恢复 &rarr; 拥塞避免</strong>：条件：收到新的ACK（不是冗余ACK）。操作：cwnd=ssthresh，进入拥塞避免</li>
+            <li><strong>快恢复 &rarr; 慢开始</strong>：条件：快恢复过程中发生超时。操作：ssthresh=cwnd/2, cwnd=1</li>
+        </ul>
+    </div>
+</details>
+
+<h3>5.8.4 拥塞控制计算例题【必考题型】</h3>
+
+<div class="callout callout-danger">
+    <strong>以下三组例题覆盖了拥塞控制大题的所有题型，请逐行理解每一步的推导过程。</strong>
+</div>
+
+<h4>例题一：基础慢开始+拥塞避免</h4>
+
+<div class="definition">
+    <h4>题目</h4>
+    <p>假设TCP的初始拥塞窗口cwnd=1，慢开始门限ssthresh=16（单位均为MSS）。请计算前8轮传输中各轮的cwnd值，并标明每轮所处的阶段。</p>
+</div>
+
+<p><strong>推导过程：</strong></p>
+
+<p><strong>第1轮：</strong>cwnd=1 &lt; ssthresh=16，处于<strong>慢开始</strong>阶段。发送1个MSS的数据，收到确认后cwnd翻倍：cwnd=1 &rarr; <strong>2</strong>。</p>
+<p><strong>第2轮：</strong>cwnd=2 &lt; ssthresh=16，慢开始。发送2个MSS的数据，收到确认后cwnd翻倍：cwnd=2 &rarr; <strong>4</strong>。</p>
+<p><strong>第3轮：</strong>cwnd=4 &lt; ssthresh=16，慢开始。cwnd翻倍：4 &rarr; <strong>8</strong>。</p>
+<p><strong>第4轮：</strong>cwnd=8 &lt; ssthresh=16，慢开始。cwnd翻倍：8 &rarr; <strong>16</strong>。注意，此时cwnd=16已经等于ssthresh了。</p>
+<p><strong>第5轮：</strong>cwnd=16 &ge; ssthresh=16，进入<strong>拥塞避免</strong>阶段。每轮cwnd增加1：16 &rarr; <strong>17</strong>。</p>
+<p><strong>第6轮：</strong>cwnd=17，拥塞避免。cwnd+1：17 &rarr; <strong>18</strong>。</p>
+<p><strong>第7轮：</strong>cwnd=18，拥塞避免。cwnd+1：18 &rarr; <strong>19</strong>。</p>
+<p><strong>第8轮：</strong>cwnd=19，拥塞避免。cwnd+1：19 &rarr; <strong>20</strong>。</p>
+
+<table>
+    <thead>
+        <tr><th>轮次</th><th>阶段</th><th>本轮开始时cwnd</th><th>本轮结束时cwnd</th><th>增长方式</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>1</td><td>慢开始</td><td>1</td><td>2</td><td>指数（&times;2）</td></tr>
+        <tr><td>2</td><td>慢开始</td><td>2</td><td>4</td><td>指数（&times;2）</td></tr>
+        <tr><td>3</td><td>慢开始</td><td>4</td><td>8</td><td>指数（&times;2）</td></tr>
+        <tr><td>4</td><td>慢开始</td><td>8</td><td>16</td><td>指数（&times;2）</td></tr>
+        <tr><td>5</td><td>拥塞避免</td><td>16</td><td>17</td><td>线性（+1）</td></tr>
+        <tr><td>6</td><td>拥塞避免</td><td>17</td><td>18</td><td>线性（+1）</td></tr>
+        <tr><td>7</td><td>拥塞避免</td><td>18</td><td>19</td><td>线性（+1）</td></tr>
+        <tr><td>8</td><td>拥塞避免</td><td>19</td><td>20</td><td>线性（+1）</td></tr>
+    </tbody>
+</table>
+
+<h4>例题二：超时场景（经典必考）</h4>
+
+<div class="definition">
+    <h4>题目</h4>
+    <p>已知TCP连接，初始ssthresh=32，初始cwnd=1。在第6轮传输结束时发生超时。求：(1) 第1到第12轮各轮的cwnd值；(2) 画出cwnd随时间变化的趋势图（数据表格形式）。</p>
+</div>
+
+<p><strong>推导过程：</strong></p>
+
+<p><strong>第1轮：</strong>慢开始。cwnd=1 &rarr; <strong>2</strong>（指数增长）</p>
+<p><strong>第2轮：</strong>慢开始。cwnd=2 &rarr; <strong>4</strong></p>
+<p><strong>第3轮：</strong>慢开始。cwnd=4 &rarr; <strong>8</strong></p>
+<p><strong>第4轮：</strong>慢开始。cwnd=8 &rarr; <strong>16</strong></p>
+<p><strong>第5轮：</strong>慢开始。cwnd=16 &rarr; <strong>32</strong>（到达ssthresh）</p>
+<p><strong>第6轮：</strong>本应进入拥塞避免，cwnd=32 &rarr; <strong>33</strong>。但<strong>第6轮结束时发生超时</strong>。</p>
+
+<p>超时发生后：ssthresh = cwnd/2 = 33/2 = <strong>16</strong>（向下取整为16），cwnd = <strong>1</strong>（回到初始值），重新进入慢开始。</p>
+
+<p><strong>第7轮：</strong>慢开始。cwnd=1 &rarr; <strong>2</strong></p>
+<p><strong>第8轮：</strong>慢开始。cwnd=2 &rarr; <strong>4</strong></p>
+<p><strong>第9轮：</strong>慢开始。cwnd=4 &rarr; <strong>8</strong></p>
+<p><strong>第10轮：</strong>慢开始。cwnd=8 &rarr; <strong>16</strong>（cwnd已达ssthresh=16）</p>
+<p><strong>第11轮：</strong>cwnd=16 &ge; ssthresh=16，进入拥塞避免。cwnd=16 &rarr; <strong>17</strong>（线性+1）</p>
+<p><strong>第12轮：</strong>拥塞避免。cwnd=17 &rarr; <strong>18</strong></p>
+
+<table>
+    <thead>
+        <tr><th>轮次</th><th>阶段</th><th>本轮开始时cwnd</th><th>本轮结束时cwnd</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>1</td><td>慢开始</td><td>1</td><td>2</td></tr>
+        <tr><td>2</td><td>慢开始</td><td>2</td><td>4</td></tr>
+        <tr><td>3</td><td>慢开始</td><td>4</td><td>8</td></tr>
+        <tr><td>4</td><td>慢开始</td><td>8</td><td>16</td></tr>
+        <tr><td>5</td><td>慢开始</td><td>16</td><td>32</td></tr>
+        <tr><td>6</td><td>拥塞避免</td><td>32</td><td>33（超时！）</td></tr>
+        <tr><td colspan="4">超时后：ssthresh=16, cwnd=1，回到慢开始</td></tr>
+        <tr><td>7</td><td>慢开始（重启）</td><td>1</td><td>2</td></tr>
+        <tr><td>8</td><td>慢开始</td><td>2</td><td>4</td></tr>
+        <tr><td>9</td><td>慢开始</td><td>4</td><td>8</td></tr>
+        <tr><td>10</td><td>慢开始</td><td>8</td><td>16</td></tr>
+        <tr><td>11</td><td>拥塞避免</td><td>16</td><td>17</td></tr>
+        <tr><td>12</td><td>拥塞避免</td><td>17</td><td>18</td></tr>
+    </tbody>
+</table>
+
+<h4>例题三：快重传+快恢复场景</h4>
+
+<div class="definition">
+    <h4>题目</h4>
+    <p>在第8轮结束时，cwnd=24，ssthresh=16。此时发送方连续收到3个冗余ACK（快重传触发）。问：(1) 此时ssthresh更新为多少？(2) cwnd更新为多少？(3) 后续进入什么阶段？(4) 第9轮到第12轮的cwnd分别是多少？</p>
+</div>
+
+<p><strong>推导过程：</strong></p>
+
+<p>收到3个冗余ACK的处理规则：</p>
+<ul>
+    <li>ssthresh = cwnd / 2 = 24 / 2 = <strong>12</strong></li>
+    <li>cwnd = ssthresh = <strong>12</strong>（窗口减半，但不回到1）</li>
+    <li>直接进入<strong>拥塞避免</strong>阶段</li>
+</ul>
+
+<p>后续各轮：</p>
+<p><strong>第9轮：</strong>拥塞避免。cwnd=12 &rarr; <strong>13</strong></p>
+<p><strong>第10轮：</strong>拥塞避免。cwnd=13 &rarr; <strong>14</strong></p>
+<p><strong>第11轮：</strong>拥塞避免。cwnd=14 &rarr; <strong>15</strong></p>
+<p><strong>第12轮：</strong>拥塞避免。cwnd=15 &rarr; <strong>16</strong></p>
+
+<table>
+    <thead>
+        <tr><th>轮次</th><th>阶段</th><th>cwnd变化</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>8（结束）</td><td>拥塞避免</td><td>24 &rarr; 12</td><td>收到3个冗余ACK，快重传+快恢复</td></tr>
+        <tr><td>9</td><td>拥塞避免</td><td>12 &rarr; 13</td><td>线性增长</td></tr>
+        <tr><td>10</td><td>拥塞避免</td><td>13 &rarr; 14</td><td>线性增长</td></tr>
+        <tr><td>11</td><td>拥塞避免</td><td>14 &rarr; 15</td><td>线性增长</td></tr>
+        <tr><td>12</td><td>拥塞避免</td><td>15 &rarr; 16</td><td>线性增长</td></tr>
+    </tbody>
+</table>
+
+<div class="callout callout-warning">
+    <strong>区分超时 vs 3个冗余ACK的核心区别</strong>：
+    <ul>
+        <li><strong>超时</strong>：ssthresh=cwnd/2, cwnd=1 &rarr; 重新慢开始</li>
+        <li><strong>3个冗余ACK</strong>：ssthresh=cwnd/2, cwnd=ssthresh &rarr; 直接进入拥塞避免</li>
+    </ul>
+    超时意味着网络问题更严重（确认都丢失了），所以处理更激进（cwnd归1）。冗余ACK说明接收方还在正常工作，所以处理更温和（cwnd减半即可）。
+</div>
+
+<h4>快恢复阶段的补充细节</h4>
+<p>在快恢复阶段，还有一个重要的细节：在收到3个冗余ACK、进入快恢复后，如果<strong>在快恢复期间继续收到冗余ACK</strong>（不是新的ACK），每收到一个冗余ACK，cwnd临时增加1个MSS。这是因为每个冗余ACK都意味着有一个数据包已经离开了网络（接收方收到了，但因为不连续而产生了确认），所以可以多发送一个数据包。</p>
+
+<p>具体来说：</p>
+<ol>
+    <li>收到3个冗余ACK，触发快重传和快恢复：cwnd = cwnd/2 = 12</li>
+    <li>重传丢失的报文段后，如果又收到第4个、第5个冗余ACK：每收到一个，cwnd临时+1（cwnd=13, 14, ...）</li>
+    <li>当收到一个<strong>新的ACK</strong>（确认了之前丢失的数据），退出快恢复：cwnd = ssthresh = 12，进入拥塞避免</li>
+</ol>
+
+<p>这个细节在部分教材中有所涉及，了解即可，考试中最核心的是掌握超时和3个冗余ACK的基本处理。</p>
+
+<!-- ================ 5.9 ================ -->
+<h2>5.9 TCP连接管理（高频考点）</h2>
+
+<p>TCP是面向连接的协议——在数据传输开始前必须要建立连接，传输结束后要释放连接。这两个过程分别称为<strong>三次握手</strong>和<strong>四次挥手</strong>。</p>
+
+<h3>5.9.1 为什么需要三次握手？</h3>
+<p>在双方正式开始传输数据之前，需要确保两件事：一是双方都确认对方的存在（"你还活着吗？""我还活着！"），二是双方都准备好接收数据了（"我准备好了""我收到了你的确认，我也准备好了"）。这其实就是三次握手的本质——<strong>确认双方的发送和接收能力都正常</strong>。</p>
+
+<p>用两个人通话来类比：</p>
+<ul>
+    <li>第一次："喂，你能听到我吗？"（客户端测试自己的发送能力和服务器的接收能力）</li>
+    <li>第二次："听到了！你能听到我吗？"（服务器告诉客户端自己收到了，并测试自己的发送能力和客户端的接收能力）</li>
+    <li>第三次："我也听到了！"（客户端告诉服务器自己收到了，双方确认完毕）</li>
+</ul>
+
+<h3>三次握手的完整流程</h3>
+
+<div class="steps">
+    <div class="step">
+        <span class="step-number">1</span>
+        <div class="step-content">
+            <h4>第一次握手：SYN</h4>
+            <p><strong>客户端 &rarr; 服务器</strong></p>
+            <p>客户端发送一个TCP报文段：<strong>SYN=1</strong>，seq=<strong>x</strong>（x是客户端随机生成的初始序号）。</p>
+            <p>客户端进入<strong>SYN-SENT</strong>状态，等待服务器的确认。</p>
+            <p>这个报文的目的：告诉服务器"我想和你建立连接，我的初始序号是x"。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">2</span>
+        <div class="step-content">
+            <h4>第二次握手：SYN + ACK</h4>
+            <p><strong>服务器 &rarr; 客户端</strong></p>
+            <p>服务器收到SYN报文后，回复一个报文段：<strong>SYN=1</strong>，<strong>ACK=1</strong>，seq=<strong>y</strong>（y是服务器随机生成的初始序号），ack=<strong>x+1</strong>（确认收到客户端的SYN）。</p>
+            <p>服务器进入<strong>SYN-RCVD</strong>状态。</p>
+            <p>这个报文的目的：告诉客户端"我收到了你的连接请求，同意建立连接，我的初始序号是y，我期望收到的下一个字节序号是x+1"。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">3</span>
+        <div class="step-content">
+            <h4>第三次握手：ACK</h4>
+            <p><strong>客户端 &rarr; 服务器</strong></p>
+            <p>客户端收到服务器的SYN+ACK后，回复一个报文段：<strong>ACK=1</strong>，seq=<strong>x+1</strong>，ack=<strong>y+1</strong>。</p>
+            <p>客户端进入<strong>ESTABLISHED</strong>（已建立连接）状态。</p>
+            <p>服务器收到这个ACK后，也进入<strong>ESTABLISHED</strong>状态。</p>
+            <p>这个报文的目的：告诉服务器"我收到了你的确认，现在我们可以正式通信了"。</p>
+        </div>
+    </div>
+</div>
+
+<details>
+    <summary>为什么是三次，而不是两次？（面试高频题）</summary>
+    <div class="details-content">
+        <p>这是一个经典问题。核心原因是：<strong>防止已失效的连接请求到达服务器，造成错误</strong>。</p>
+        <p>我们来看一个具体场景：</p>
+        <ol>
+            <li>客户端发送了一个连接请求SYN报文，但这个报文在网络中滞留了（比如因为路由器拥塞）。</li>
+            <li>客户端等了一段时间没收到确认，以为报文丢失了，就重新发送了一个新的SYN。新的SYN顺利到达服务器，完成连接、传输数据、释放连接——一切正常。</li>
+            <li>但就在这时，第一个滞留的SYN报文到达了服务器。</li>
+            <li>如果只有两次握手：服务器收到这个SYN，以为客户端要建立新的连接，于是回复SYN+ACK并进入ESTABLISHED状态，分配资源等待客户端发送数据。</li>
+            <li>但客户端根本没有要建立新连接！它不会理会这个SYN+ACK。服务器就一直傻等，浪费资源。</li>
+        </ol>
+        <p>而三次握手可以避免这个问题：如果服务器收到的是过期的SYN，回复SYN+ACK后，客户端发现这个SYN+ACK对应的是一个自己早已完成的连接（或者自己没有发起过请求），就会发送一个<strong>RST</strong>报文来复位连接。服务器收到RST后，释放资源。</p>
+        <p>一句话总结：<strong>三次握手可以防止"已失效的连接请求报文段"到达服务器后，错误地建立一个无用的连接</strong>。</p>
+    </div>
+</details>
+
+<h3>5.9.2 四次挥手：释放连接</h3>
+
+<p>TCP连接是全双工的——双方可以同时发送和接收数据。因此释放连接时，需要双方各自单独关闭自己的数据发送通道。这就是为什么需要四次挥手，而不是两次。</p>
+
+<div class="steps">
+    <div class="step">
+        <span class="step-number">1</span>
+        <div class="step-content">
+            <h4>第一次挥手：FIN</h4>
+            <p><strong>客户端 &rarr; 服务器</strong></p>
+            <p>客户端发送FIN=1，seq=<strong>u</strong>。客户端进入<strong>FIN-WAIT-1</strong>状态。</p>
+            <p>含义：客户端告诉服务器"我的数据发完了，我要关闭我这一侧的发送通道"。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">2</span>
+        <div class="step-content">
+            <h4>第二次挥手：ACK</h4>
+            <p><strong>服务器 &rarr; 客户端</strong></p>
+            <p>服务器回复ACK=1，seq=v，ack=u+1。服务器进入<strong>CLOSE-WAIT</strong>状态。客户端收到后进入<strong>FIN-WAIT-2</strong>状态。</p>
+            <p>含义：服务器告诉客户端"我收到了你的关闭请求"。至此，从客户端到服务器的方向已经关闭。</p>
+            <p><strong>半关闭状态</strong>：此时服务器到客户端的方向仍然可以发送数据。如果服务器还有数据没发完，可以继续发送。这就是全双工连接的特性——每一侧独立关闭。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">3</span>
+        <div class="step-content">
+            <h4>第三次挥手：FIN</h4>
+            <p><strong>服务器 &rarr; 客户端</strong></p>
+            <p>服务器发送完所有数据后，发送FIN=1，ACK=1，seq=w，ack=u+1。服务器进入<strong>LAST-ACK</strong>状态。</p>
+            <p>含义：服务器告诉客户端"我的数据也发完了，可以关闭连接了"。</p>
+        </div>
+    </div>
+    <div class="step">
+        <span class="step-number">4</span>
+        <div class="step-content">
+            <h4>第四次挥手：ACK</h4>
+            <p><strong>客户端 &rarr; 服务器</strong></p>
+            <p>客户端回复ACK=1，seq=u+1，ack=w+1。客户端进入<strong>TIME-WAIT</strong>状态。</p>
+            <p>服务器收到这个ACK后，进入<strong>CLOSED</strong>状态。</p>
+            <p>客户端在TIME-WAIT状态等待<strong>2MSL</strong>后，进入<strong>CLOSED</strong>状态。</p>
+        </div>
+    </div>
+</div>
+
+<h3>TIME-WAIT状态与2MSL</h3>
+<p>四次挥手中，TIME-WAIT状态经常被问到。为什么客户端在发送最后一个ACK后不直接关闭，而要等待2MSL？两个原因：</p>
+
+<ol>
+    <li><strong>保证最后一个ACK能到达服务器</strong>：如果客户端发送的最后一个ACK丢失了，服务器会超时重传FIN（第三次挥手）。客户端在TIME-WAIT期间可以重新发送ACK。如果没有TIME-WAIT，客户端直接关闭了，服务器重传的FIN到达时，客户端已经"消失"了，服务器永远收不到ACK，无法正常关闭。</li>
+    <li><strong>防止旧连接的报文干扰新连接</strong>：2MSL（2倍的Maximum Segment Lifetime，最长报文段寿命）的时间足够让本次连接中所有在网络中传输的报文段都消失（要么到达目的地，要么被丢弃）。这样，下一次使用相同IP和端口建立新连接时，不会收到旧连接的残留报文。</li>
+</ol>
+
+<div class="sidebar-note">
+    <strong>MSL通常设为多少？</strong>标准中MSL建议为2分钟，所以2MSL约为4分钟。但在实际实现中（如Linux），MSL通常设为30秒，所以2MSL=60秒。
+</div>
+
+<h3>5.9.3 TCP连接状态变迁图</h3>
+<p>TCP连接在整个生命周期中经历多个状态，从开始到结束的完整状态路径：</p>
+
+<table>
+    <thead>
+        <tr><th>状态</th><th>含义</th><th>所属阶段</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>CLOSED</td><td>初始关闭状态</td><td>起点/终点</td></tr>
+        <tr><td>SYN-SENT</td><td>已发送SYN，等待SYN+ACK</td><td>三次握手（客户端）</td></tr>
+        <tr><td>SYN-RCVD</td><td>已收到SYN，已回复SYN+ACK</td><td>三次握手（服务器）</td></tr>
+        <tr><td>ESTABLISHED</td><td>连接已建立，可传输数据</td><td>数据传输</td></tr>
+        <tr><td>FIN-WAIT-1</td><td>已发送FIN，等待ACK</td><td>四次挥手（客户端）</td></tr>
+        <tr><td>FIN-WAIT-2</td><td>已收到对FIN的ACK，等待对方的FIN</td><td>四次挥手（客户端）</td></tr>
+        <tr><td>CLOSE-WAIT</td><td>已收到FIN，已回复ACK，等待上层关闭</td><td>四次挥手（服务器）</td></tr>
+        <tr><td>LAST-ACK</td><td>已发送FIN，等待最后一个ACK</td><td>四次挥手（服务器）</td></tr>
+        <tr><td>TIME-WAIT</td><td>已发送最后ACK，等待2MSL</td><td>四次挥手（客户端）</td></tr>
+        <tr><td>CLOSING</td><td>双方同时发送FIN的过渡状态</td><td>特殊情况</td></tr>
+    </tbody>
+</table>
+
+<!-- ================ 本章小结 ================ -->
+<h2>本章小结</h2>
+
+<div class="callout callout-info">
+    <strong>第5章核心知识框架</strong>
+    <ul>
+        <li><strong>运输层定位</strong>：网络层之上，为进程提供端到端通信。核心机制：端口号、复用与分用。</li>
+        <li><strong>UDP</strong>：无连接、不可靠、面向报文、8字节首部。校验和用到伪首部（包含IP地址）。</li>
+        <li><strong>可靠传输原理</strong>：从停止等待（效率低）到连续ARQ（滑动窗口+累积确认），GBN vs SR。</li>
+        <li><strong>TCP报文段格式（重点）</strong>：20字节固定首部，6个标志位（URG/ACK/PSH/RST/SYN/FIN），MSS=1460。</li>
+        <li><strong>TCP可靠传输</strong>：序号机制（字节流编号）、累积确认、超时重传（RTO计算）、快速重传（3冗余ACK）、SACK。</li>
+        <li><strong>TCP流量控制</strong>：滑动窗口，发送窗口=min(cwnd,rwnd)，持续计时器+零窗口探测防死锁。</li>
+        <li><strong>TCP拥塞控制（必考大题）</strong>：慢开始（指数增长）、拥塞避免（线性增长）、快重传+快恢复（cwnd减半不归零）。</li>
+        <li><strong>TCP连接管理</strong>：三次握手（防过期连接请求）、四次挥手（TIME-WAIT+2MSL）。</li>
+    </ul>
+</div>
+
+<!-- ================ 练习题 ================ -->
+<h2>练习题【大题必练】</h2>
+
+<div class="callout callout-danger">
+    <strong>以下练习题覆盖了期末考试中运输章节的核心题型。请先独立完成，再核对答案。</strong>
+</div>
+
+<h3>一、简答题</h3>
+<p><strong>题目1：</strong>请画出TCP三次握手的完整过程，标注每一步的SYN/ACK标志位、序号和确认号，以及双方的状态变迁。</p>
+<p><strong>题目2：</strong>TCP四次挥手中，为什么要有TIME-WAIT状态？为什么要等待2MSL？</p>
+<p><strong>题目3：</strong>为什么TCP需要三次握手而不是两次握手？请用具体场景说明。</p>
+<p><strong>题目4：</strong>拥塞控制和流量控制的区别是什么？各自控制什么变量？</p>
+<p><strong>题目5：</strong>请列出TCP报文段首部固定部分的6个标志位，并说明各自的用途。</p>
+<p><strong>题目6：</strong>什么是MSS？在以太网环境下（MTU=1500字节，IP首部20字节，TCP首部20字节），MSS的值是多少？</p>
+<p><strong>题目7：</strong>请简述UDP校验和中伪首部的作用和结构。</p>
+<p><strong>题目8：</strong>什么是Karn算法？它解决了什么问题？</p>
+
+<h3>二、拥塞控制计算大题【必考】</h3>
+<p><strong>题目9：</strong>TCP的拥塞窗口cwnd初始值为1，ssthresh=12（单位均为MSS）。在第6轮传输结束时，发送方检测到超时。请计算第1~12轮各轮次开始和结束时的cwnd值，并标明每轮所处的阶段。</p>
+
+<p><strong>题目10：</strong>第8轮结束时，当前cwnd=32，ssthresh=20。此时发送方收到3个冗余ACK。请回答：(1) ssthresh更新为多少？(2) cwnd更新为多少？(3) 进入什么阶段？(4) 计算第9~12轮的cwnd值。</p>
+
+<h3>三、流量控制计算</h3>
+<p><strong>题目11：</strong>TCP接收方通告的接收窗口rwnd=800字节，发送方已发送序号1~600的数据，其中序号1~200已确认、201~600尚未确认。请问：(1) 发送方当前还能发送多少字节？(2) 如果此时收到一个确认确认了序号1~400，发送窗口滑动后能发送多少字节？</p>
+
+<p><strong>题目12：</strong>当接收方将rwnd设置为0后，发送方停止发送。为了防止死锁，发送方采用了什么机制？请描述该机制的工作过程。</p>
+
+<h3>四、选择题</h3>
+<p><strong>题目13：</strong>UDP首部有多少字节？</p>
+<p>A. 20 &nbsp;&nbsp; B. 8 &nbsp;&nbsp; C. 16 &nbsp;&nbsp; D. 4</p>
+
+<p><strong>题目14：</strong>以下哪个不是TCP拥塞控制算法？</p>
+<p>A. 慢开始 &nbsp;&nbsp; B. 拥塞避免 &nbsp;&nbsp; C. 停止等待 &nbsp;&nbsp; D. 快恢复</p>
+
+<p><strong>题目15：</strong>TCP流量控制中，发送窗口的实际大小由什么决定？</p>
+<p>A. rwnd &nbsp;&nbsp; B. cwnd &nbsp;&nbsp; C. min(cwnd, rwnd) &nbsp;&nbsp; D. max(cwnd, rwnd)</p>
+
+<p><strong>题目16：</strong>TCP三次握手中，第二次握手服务器发送的报文段包含哪些标志位？</p>
+<p>A. SYN &nbsp;&nbsp; B. SYN+ACK &nbsp;&nbsp; C. ACK &nbsp;&nbsp; D. FIN</p>
+
+<p><strong>题目17：</strong>以下哪个协议使用UDP？</p>
+<p>A. HTTP &nbsp;&nbsp; B. FTP &nbsp;&nbsp; C. DNS &nbsp;&nbsp; D. SMTP</p>
+
+<p><strong>题目18：</strong>TCP的序号字段是多少位？</p>
+<p>A. 16位 &nbsp;&nbsp; B. 24位 &nbsp;&nbsp; C. 32位 &nbsp;&nbsp; D. 8位</p>
+
+<p><strong>题目19：</strong>快重传由什么事件触发？</p>
+<p>A. 超时 &nbsp;&nbsp; B. 收到1个冗余ACK &nbsp;&nbsp; C. 收到3个冗余ACK &nbsp;&nbsp; D. 收到RST</p>
+
+<details>
+    <summary>参考答案（点击展开）</summary>
+    <div class="details-content">
+        <p><strong>题目1-8</strong>：请对照本章各节的详细内容核对。</p>
+        <p><strong>题目9：</strong></p>
+        <ul>
+            <li>第1轮: 慢开始, 1&rarr;2</li>
+            <li>第2轮: 慢开始, 2&rarr;4</li>
+            <li>第3轮: 慢开始, 4&rarr;8</li>
+            <li>第4轮: 慢开始, 8&rarr;12（ssthresh=12，已到达门限）</li>
+            <li>第5轮: 慢开始, 12&rarr;13（超过门限，本轮结束时进入拥塞避免）</li>
+            <li>第6轮: 拥塞避免, 13&rarr;14（超时！）</li>
+            <li colspan="2">超时后：ssthresh=14/2=7, cwnd=1, 重新慢开始</li>
+            <li>第7轮: 慢开始, 1&rarr;2</li>
+            <li>第8轮: 慢开始, 2&rarr;4</li>
+            <li>第9轮: 慢开始, 4&rarr;7（ssthresh=7，已到达门限）</li>
+            <li>第10轮: 慢开始, 7&rarr;8（超出门限，本轮结束时进入拥塞避免）</li>
+            <li>第11轮: 拥塞避免, 8&rarr;9</li>
+            <li>第12轮: 拥塞避免, 9&rarr;10</li>
+        </ul>
+        <p><strong>题目10：</strong>(1) ssthresh=32/2=16 (2) cwnd=16 (3) 进入拥塞避免 (4) 第9轮:16&rarr;17, 第10轮:17&rarr;18, 第11轮:18&rarr;19, 第12轮:19&rarr;20</p>
+        <p><strong>题目11：</strong>(1) 发送窗口=rwnd=800，已发送未确认=400字节（序号201~600），还能发送800-400=400字节（序号601~1000）。 (2) 收到确认后，发送窗口滑动到覆盖序号401~1200，已发送未确认=序号601~800共200字节，还能发送400字节（序号801~1200）。</p>
+        <p><strong>题目12：</strong>持续计时器+零窗口探测。见5.7.3节。</p>
+        <p><strong>题目13：</strong>B</p>
+        <p><strong>题目14：</strong>C（停止等待是可靠传输原理中的基础协议，不是TCP拥塞控制算法）</p>
+        <p><strong>题目15：</strong>C</p>
+        <p><strong>题目16：</strong>B</p>
+        <p><strong>题目17：</strong>C</p>
+        <p><strong>题目18：</strong>C</p>
+        <p><strong>题目19：</strong>C</p>
+    </div>
+</details>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="04-network-layer.html">&laquo; 第4章 网络层</a>
+        <a href="index.html">目录</a>
+        <a href="06-application-layer.html">第6章 应用层 &raquo;</a>
+    </nav>
+</footer>
+
+<script src="assets/script.js"></script>
+</main>
+</body>
+</html>

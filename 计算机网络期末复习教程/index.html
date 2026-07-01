@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>计算机网络 - 期末复习教程</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <h1>计算机网络</h1>
+        <p class="intro">期末复习教程 &mdash; 覆盖计算机网络核心知识体系，从物理层到应用层的完整学习路径</p>
+
+        <div class="version-info">
+            <p><strong>版本：</strong>v1.0 | <strong>更新日期：</strong>2026-06-12</p>
+            <p><strong>适用课程：</strong>计算机网络（大学本科）</p>
+        </div>
+
+        <div class="callout callout-info">
+            <strong>关于本教程</strong>
+            <ul>
+                <li><strong>前置知识</strong>：计算机基础知识（了解基本硬件、操作系统概念）</li>
+                <li><strong>学习深度</strong>：系统掌握，覆盖核心概念、协议原理、对比分析和期末考试考点</li>
+                <li><strong>主题风格</strong>：技术蓝，适合网络协议类教程，代码和配置高亮优化</li>
+                <li><strong>使用方式</strong>：双击 <code>index.html</code> 即可开始学习</li>
+                <li><strong>参考教材</strong>：《计算机网络》（谢希仁 编著）</li>
+            </ul>
+        </div>
+
+        <h2>课程目录</h2>
+        <p>本教程共 6 章，按照计算机网络体系结构自底向上组织：</p>
+
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-overview.html">第 1 章 &mdash; 概述</a></h3>
+                <p>计算机网络基本概念、互联网组成与发展、电路交换与分组交换、网络分类与拓扑、性能指标、OSI/TCP-IP体系结构</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-physical-layer.html">第 2 章 &mdash; 物理层</a></h3>
+                <p>物理层基本功能、数据通信基础（编码/调制/信道容量）、传输媒体、信道复用技术（FDM/WDM/TDM/CDM）、宽带接入技术（ADSL/HFC/FTTx）</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="03-data-link-layer.html">第 3 章 &mdash; 数据链路层</a></h3>
+                <p>帧与三个基本问题、差错检测（CRC/海明码）、PPP协议、CSMA/CD协议、以太网MAC层、VLAN、高速以太网</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-network-layer.html">第 4 章 &mdash; 网络层</a></h3>
+                <p>IP协议与分类IP地址、ARP、子网划分/CIDR、ICMP、路由协议（RIP/OSPF/BGP）、IPv6、IP多播、VPN与NAT</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="05-transport-layer.html">第 5 章 &mdash; 运输层</a></h3>
+                <p>UDP协议、TCP协议详解（可靠传输/流量控制/拥塞控制/连接管理）、TCP报文段格式、三次握手与四次挥手</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-application-layer.html">第 6 章 &mdash; 应用层</a></h3>
+                <p>DNS域名系统、FTP文件传输、WWW与HTTP、电子邮件协议（SMTP/POP3/IMAP）、DHCP动态配置</p>
+            </div>
+        </div>
+
+        <h2>学习路径建议</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>第 1 章（概述）</h4>
+                    <p>建立计算机网络的整体认知，理解体系结构分层思想、性能指标，这是后续所有章节的基础</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>第 2-3 章（物理层 + 数据链路层）</h4>
+                    <p>掌握数据从比特流到帧的传输过程，理解差错控制、介质访问控制等底层机制</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>第 4 章（网络层）</h4>
+                    <p>核心章节！IP协议、子网划分、路由协议——重点投入时间</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>第 5-6 章（运输层 + 应用层）</h4>
+                    <p>TCP可靠传输与拥塞控制（高频考点）、DNS/HTTP/电子邮件等应用协议</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>考试重点提示</h2>
+        <div class="callout callout-tip">
+            <strong>高频考点：</strong>
+            <ul>
+                <li><strong>第 1 章</strong> &mdash; 电路交换与分组交换对比、OSI与TCP/IP体系结构、时延计算</li>
+                <li><strong>第 2 章</strong> &mdash; 奈氏准则与香农公式、CDMA码分复用计算</li>
+                <li><strong>第 3 章</strong> &mdash; CRC校验计算、CSMA/CD最短帧长、MAC地址与帧格式</li>
+                <li><strong>第 4 章</strong> &mdash; 子网划分与CIDR计算、ARP协议流程、RIP/OSPF对比</li>
+                <li><strong>第 5 章</strong> &mdash; 三次握手与四次挥手、TCP流量控制与拥塞控制、序号确认机制（必考大题）</li>
+                <li><strong>第 6 章</strong> &mdash; DNS解析过程、HTTP报文格式、SMTP与POP3对比</li>
+            </ul>
+        </div>
+
+        <h2>参考资源</h2>
+        <ul>
+            <li>《计算机网络（第8版）》谢希仁 编著 &mdash; 教材核心参考</li>
+            <li>《TCP/IP详解 卷1：协议》Stevens 著</li>
+            <li><a href="https://tools.ietf.org/html/" target="_blank">IETF RFC 文档</a></li>
+            <li><a href="https://www.iso.org/standard/20269.html" target="_blank">ISO OSI 参考模型标准</a></li>
+        </ul>
+    </main>
+</body>
+</html>

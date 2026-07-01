@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第1章 概述 - 计算机网络期末复习</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+    <main>
+        <nav class="chapter-nav">
+            <a href="index.html">&larr; 回到目录</a>
+            <a href="02-physical-layer.html">下一章：物理层 &rarr;</a>
+        </nav>
+
+        <h1>第1章 概述</h1>
+        <p class="intro">这一章是整个计算机网络的绪论课。就像学习一门新语言先了解历史背景和基本语法一样，学习计算机网络也需要先建立整体认知：它为什么出现、由什么组成、怎么工作、性能如何衡量。本章是后续所有章节的理论基石，考试占比约15%。</p>
+
+        <!-- ==================== 1.1 ==================== -->
+        <h2 id="1-1">1.1 计算机网络基本概念：为什么需要计算机网络？</h2>
+
+        <h3>从单机到网络：一个简单故事</h3>
+
+        <p>想象20世纪80年代的办公室。张三在电脑上写好年度报告，想交给隔壁办公室的李四。怎么办？最常见的办法：把文件拷贝到一张软盘上（1.44MB方形塑料盘），然后走过去把软盘递给李四。俗称"跑腿网络"（sneakernet）——用鞋底传输数据。</p>
+
+        <p>如果文件很大（几百MB的演示文稿），一张软盘装不下得拆成好几张。如果两人在不同城市就得邮寄。如果需要实时更新（如股票报价），软盘拷贝完全不可行。</p>
+
+        <p>显然我们需要更好的方式——让计算机之间<strong>直接通过线路连接</strong>，数据以电/光信号传输，瞬间到达。这就是计算机网络的原始动机。</p>
+
+        <div class="callout callout-tip">
+            <strong>思考</strong>：计算机网络要解决的核心问题是什么？<br>
+            答案：<strong>让地理位置不同的计算机能相互通信、共享资源</strong>。
+        </div>
+
+        <div class="definition">
+            <h4>计算机网络的定义</h4>
+            <p><strong>计算机网络</strong>是将地理位置不同的具有独立功能的多台计算机及其外部设备，通过通信线路连接起来，在网络操作系统、网络管理软件及网络通信协议的管理和协调下，实现<strong>资源共享</strong>和<strong>信息传递</strong>的计算机系统。</p>
+        </div>
+
+        <h3>三要素：设备 + 链路 + 协议</h3>
+        <p>从定义中提炼出计算机网络的<strong>三要素</strong>，缺一不可：</p>
+        <table>
+            <tr><th>要素</th><th>类比</th><th>说明</th><th>举例</th></tr>
+            <tr><td><strong>计算机设备</strong></td><td>说话的人</td><td>至少两台独立功能的计算机</td><td>PC、服务器、手机</td></tr>
+            <tr><td><strong>通信链路</strong></td><td>电话线</td><td>连接计算机的物理通道</td><td>双绞线、光纤、无线电波</td></tr>
+            <tr><td><strong>网络协议</strong></td><td>语言规则</td><td>通信双方必须遵守的规则</td><td>TCP/IP、HTTP、FTP</td></tr>
+        </table>
+
+        <p>比方：两个人打电话需要<strong>电话机</strong>（设备）、<strong>电话线</strong>（链路）和<strong>同一种语言</strong>（协议），缺一不可。</p>
+
+        <h3>两个核心维度：带宽和延迟</h3>
+        <p>评价网络主要看两个指标：</p>
+        <ul>
+            <li><strong>带宽（Bandwidth）</strong>：水管粗细。越粗单位时间流过的水越多。</li>
+            <li><strong>延迟（Latency）</strong>：水从源头到目的地的时间。即使水管很粗，距离远也需要时间。</li>
+        </ul>
+        <table class="comparison">
+            <tr><th>比喻</th><th>网络术语</th><th>影响什么</th></tr>
+            <tr><td>水管粗细</td><td>带宽</td><td>单位时间能传多少数据</td></tr>
+            <tr><td>水流速度</td><td>延迟/时延</td><td>数据一端到另一端要多久</td></tr>
+        </table>
+
+        <div class="sidebar-note">
+            <strong>经验</strong>：下载大文件带宽决定速度；网页打开和游戏更关心延迟（ping值）。
+        </div>
+
+        <p><strong>理解检查</strong>：在线射击游戏画面卡顿、人物瞬移，是带宽不够还是延迟太高？<br>
+        <span style="color:#555;">（答案：延迟太高。游戏数据量不大但需极低延迟。）</span></p>
+
+        <!-- ==================== 1.2 ==================== -->
+        <h2 id="1-2">1.2 互联网发展史</h2>
+
+        <h3>为什么讲历史？</h3>
+        <p>理解互联网发展史，能帮你回答常见问题："为什么互联网采用现在的结构？"答案在历史中——互联网不是一次性设计出来的，而是不断演进的结果。</p>
+
+        <h3>第一阶段：ARPANET的故事（1969年）</h3>
+        <p>20世纪60年代，美国国防部高级研究计划局（ARPA）想建立一个<strong>去中心化</strong>的军事通信网络。传统电话网是中心化的——中心被摧毁全网瘫痪。冷战背景下这显然不靠谱。</p>
+
+        <p>1969年，ARPANET诞生，最初<strong>4个节点</strong>：</p>
+        <table>
+            <tr><th>节点</th><th>机构</th><th>地点</th></tr>
+            <tr><td>1</td><td>UCLA（加州大学洛杉矶分校）</td><td>洛杉矶</td></tr>
+            <tr><td>2</td><td>SRI（斯坦福研究院）</td><td>门洛帕克</td></tr>
+            <tr><td>3</td><td>UCSB（加州大学圣塔芭芭拉分校）</td><td>圣塔芭芭拉</td></tr>
+            <tr><td>4</td><td>犹他大学</td><td>盐湖城</td></tr>
+        </table>
+
+        <p>1969年10月29日，UCLA学生试图远程登录SRI，输入"LOG"后系统崩溃——这是互联网的第一次通信，只成功三个字母，但开启了新纪元。</p>
+
+        <p>1983年1月1日，ARPANET正式采用<strong>TCP/IP协议族</strong>，这天被视为<strong>互联网的正式诞生日</strong>。TCP/IP像统一了度量衡，让不同厂商的设备能互相通信。</p>
+
+        <h3>第二阶段：三级结构互联网（1985-1993）</h3>
+        <p>1985年，美国国家科学基金会（NSF）建立NSFNET，形成<strong>三级结构</strong>：</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>主干网</h4>
+                    <p>国家级高速网络，连接各主要节点。速度从56kbps升级到T3（44.736Mbps）。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>地区网</h4>
+                    <p>覆盖一个地理区域（如一个州），连接区域内各类网络。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>校园网/企业网</h4>
+                    <p>最底层用户网络，连接大学、研究机构或企业。</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>第三阶段：多层次ISP结构（1994年至今）</h3>
+        <p>1994年互联网全面商业化。NSFNET退役，由<strong>ISP</strong>运营。形成多层次ISP结构：</p>
+        <table>
+            <tr><th>层次</th><th>角色</th><th>示例</th></tr>
+            <tr><td>骨干ISP（Tier 1）</td><td>国际级骨干网，互相对等连接</td><td>AT&T、中国电信骨干网</td></tr>
+            <tr><td>区域ISP（Tier 2）</td><td>向骨干ISP购买带宽，服务下游</td><td>各地运营商分公司</td></tr>
+            <tr><td>本地ISP（Tier 3）</td><td>直接面向家庭和企业</td><td>长城宽带、小区宽带</td></tr>
+        </table>
+
+        <div class="sidebar-note">
+            <strong>考试提示</strong>：互联网三阶段（ARPANET -> 三级结构 -> 多层次ISP）常考选择题和简答题，记住关键年份和特征。
+        </div>
+
+        <h3>互联网标准化组织</h3>
+        <table>
+            <tr><th>组织</th><th>全称</th><th>类比</th><th>职责</th></tr>
+            <tr><td>ISOC</td><td>Internet Society（互联网协会）</td><td>董事会</td><td>领导机构，负责总体方向</td></tr>
+            <tr><td>IETF</td><td>Internet Engineering Task Force（互联网工程任务组）</td><td>工程师团队</td><td>制定技术标准，发布RFC</td></tr>
+            <tr><td>IRTF</td><td>Internet Research Task Force（互联网研究任务组）</td><td>研究团队</td><td>长期前沿技术研究</td></tr>
+        </table>
+
+        <h4>RFC文档类型</h4>
+        <p><strong>RFC</strong>（Request For Comments，请求评论）——名字体现互联网开放协作精神。<strong>并非所有RFC都是标准</strong>：</p>
+        <table>
+            <tr><th>类型</th><th>说明</th></tr>
+            <tr><td>标准类</td><td>经IETF审查的正式标准，编号STD xxxx</td></tr>
+            <tr><td>草案类</td><td>讨论中的提案，可能发展为标准</td></tr>
+            <tr><td>实验类</td><td>用于实验目的</td></tr>
+            <tr><td>信息类</td><td>提供背景信息、指南</td></tr>
+            <tr><td>历史类</td><td>已被替代或废弃</td></tr>
+        </table>
+
+        <p>标准确立流程：<strong>互联网草案</strong>（有效6月） -> <strong>建议标准</strong> -> <strong>草案标准</strong>（需2个独立实现验证） -> <strong>互联网标准</strong>。</p>
+
+        <p><strong>理解检查</strong>：RFC中的"Request For Comments"体现了什么理念？<br>
+        <span style="color:#555;">（答案：开放、协作、多方参与——标准制定不是某公司说了算，而是公开讨论、同行评审。）</span></p>
+
+        <!-- ==================== 1.3 ==================== -->
+        <h2 id="1-3">1.3 互联网的组成</h2>
+        <p>从<strong>工作方式</strong>角度，互联网分为<strong>边缘部分</strong>和<strong>核心部分</strong>：</p>
+        <table class="comparison">
+            <tr><th></th><th>边缘部分</th><th>核心部分</th></tr>
+            <tr><td><strong>组成</strong></td><td>主机（端系统）</td><td>路由器 + 通信链路</td></tr>
+            <tr><td><strong>类比</strong></td><td>城市住户</td><td>高速公路系统</td></tr>
+            <tr><td><strong>功能</strong></td><td>运行应用程序，为用户服务</td><td>连通性和数据转发</td></tr>
+            <tr><td><strong>示例</strong></td><td>PC、服务器、手机</td><td>路由器、光纤骨干网</td></tr>
+        </table>
+
+        <h3>边缘部分：两种通信模式</h3>
+
+        <div class="tabs">
+            <div class="tab-buttons">
+                <button class="active">C/S模式（客户-服务器）</button>
+                <button>P2P模式（对等）</button>
+            </div>
+
+            <div class="tab-content active">
+                <h4>C/S模式</h4>
+                <p><strong>场景</strong>：打开浏览器访问百度。你电脑是<strong>客户</strong>，百度是<strong>服务器</strong>。服务器7x24小时开机等客户来"敲门"。</p>
+                <ul>
+                    <li><strong>角色</strong>：客户请求服务，服务器提供服务</li>
+                    <li><strong>特点</strong>：客户间不直接通信，服务器固定IP</li>
+                    <li><strong>优点</strong>：管理集中、安全性好</li>
+                    <li><strong>缺点</strong>：服务器压力大——双十一淘宝每秒处理几十万请求</li>
+                    <li><strong>典型</strong>：Web、电子邮件、FTP</li>
+                </ul>
+            </div>
+
+            <div class="tab-content">
+                <h4>P2P模式</h4>
+                <p><strong>场景</strong>：用BT下载电影，从其他用户下载片段，同时上传给别人。每台电脑<strong>既是客户又是服务器</strong>。</p>
+                <ul>
+                    <li><strong>角色</strong>：节点地位对等，无固定服务器</li>
+                    <li><strong>特点</strong>：用户越多速度越快（上传者变多了）</li>
+                    <li><strong>优点</strong>：可扩展性好，无单点故障</li>
+                    <li><strong>缺点</strong>：管理困难、安全性低</li>
+                    <li><strong>典型</strong>：BT下载、微信文件传输、区块链</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="sidebar-note">
+            <strong>比较</strong>：实际应用常混合两种模式。微信聊天走C/S（消息先到腾讯服务器），传大文件走P2P（直接手机间传输）。
+        </div>
+
+        <p><strong>理解检查</strong>：BT下载为何"下载的人越多速度越快"而C/S模式中"访问的人越多服务器越慢"？<br>
+        <span style="color:#555;">（答案：P2P中每个下载者也上传，总带宽越大；C/S所有请求压在一台服务器。）</span></p>
+
+        <h3>核心部分：路由器的作用</h3>
+        <p>核心部分的主角是<strong>路由器</strong>——网络中的"交通警察"，查看数据包目的地址，决定转发到哪条链路。核心部分就是大量路由器互连的网状网络。</p>
+
+        <!-- ==================== 1.4 ==================== -->
+        <h2 id="1-4">1.4 三种交换方式（必考对比）</h2>
+
+        <div class="callout callout-danger">
+            <strong>高频考点</strong>：三种交换方式对比几乎每年必考，可能是选择、简答或论述题。务必理解原理和优缺点。
+        </div>
+
+        <p>交换方式解决同一个问题：<strong>数据怎么从源主机传送到目的主机？</strong></p>
+
+        <h3>电路交换（Circuit Switching）——打电话的方式</h3>
+        <p><strong>WHY</strong>：电话通信设计。如果每次说话前先"抢占线路"，说完释放，通话无法进行。所以<strong>先建立专用通路，独占直到通话结束</strong>。</p>
+
+        <p><strong>WHAT</strong>：通信前建立一条<strong>端到端的专用物理通路</strong>，通路被双方独占。</p>
+
+        <p><strong>HOW</strong>：三个阶段：</p>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>建立连接（拨号）</h4>
+                    <p>源端发出连接请求，中间节点逐段分配资源，建立端到端专用通路。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>通信（通话）</h4>
+                    <p>数据沿路径传输，按序到达，无丢失。线路被独占——不说话别人也不能用。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>释放连接（挂断）</h4>
+                    <p>一方发出请求，节点逐段释放资源。</p>
+                </div>
+            </div>
+        </div>
+
+        <p><strong>优缺点</strong>：优点——时延小、有序、无冲突。缺点——建连耗时、线路独占利用率低、不适于突发数据。</p>
+
+        <h3>报文交换（Message Switching）——寄信的方式</h3>
+        <p><strong>WHY</strong>：电路交换独占太浪费——计算机通信是<strong>突发性</strong>（bursty）的，多数时间无数据，偶尔爆发。让多台计算机共享线路？报文交换是方案之一。</p>
+
+        <p><strong>WHAT</strong>：采用<strong>存储转发</strong>。发送方把整个数据（"报文"）交给中间节点，节点存储、检查目的地址、转发。</p>
+
+        <p><strong>缺点</strong>：报文可能很大（几百MB视频文件），节点需要大缓存，转发时延巨大。</p>
+
+        <h3>分组交换（Packet Switching）——互联网采用的方式</h3>
+        <p><strong>WHY</strong>：报文交换缓存压力大。把大报文切成小片，每片独立转发。</p>
+
+        <p><strong>WHAT</strong>：将大报文<strong>分割成较小分组</strong>（packet），每个分组包含源/目的地址等控制信息（首部），通过路由器逐跳转发。</p>
+
+        <div class="definition">
+            <h4>分组交换核心：存储转发</h4>
+            <p>路由器收到完整分组后，<strong>存储</strong>到缓冲区，查目的地址和路由表，<strong>转发</strong>到下一跳。不同分组可能走不同路径。这就是"存储转发"的精髓。</p>
+        </div>
+
+        <p><strong>优缺点</strong>：优点——共享线路利用率高、缓存压力小。缺点——分组可能乱序、需首部开销、排队时延不确定。</p>
+
+        <h3>完整计算对比：A发100MB文件给B</h3>
+
+        <p>假设A发<strong>100MB</strong>文件给B，途径<strong>3段链路</strong>，每段<strong>1Mbps</strong>。分组交换把文件分成<strong>1000个分组</strong>，每个<strong>0.1MB</strong>（忽略首部开销）。</p>
+
+        <details>
+            <summary>点击查看详细计算</summary>
+            <div class="details-content">
+                <p><strong>电路交换</strong>：</p>
+                <p>总时间 = 连接建立时间 + 发送时间</p>
+                <p>发送时间 = 100MB × 8 / 1Mbps = 800s</p>
+                <p>假设连接建立时间 = 0.5s</p>
+                <p><strong>总时间 = 800.5s</strong></p>
+                <br>
+                <p><strong>分组交换</strong>：</p>
+                <p>总时间 = (分组大小/带宽)×链路数 + (分组数-1)×(分组大小/带宽)</p>
+                <p>= (0.1×8/1)×3 + 999×(0.1×8/1)</p>
+                <p>= 2.4 + 799.2 = <strong>801.6s</strong></p>
+                <br>
+                <p><strong>报文交换</strong>：</p>
+                <p>总时间 = (报文大小/带宽)×链路数</p>
+                <p>= 800 × 3 = <strong>2400s</strong></p>
+            </div>
+        </details>
+
+        <table class="comparison">
+            <tr><th>交换方式</th><th>总时间</th><th>独占线路</th><th>适用场景</th></tr>
+            <tr><td>电路交换</td><td>800.5s</td><td class="bad">是（利用率低）</td><td>电话网</td></tr>
+            <tr><td>报文交换</td><td>2400s</td><td class="good">否</td><td>早期电报（已淘汰）</td></tr>
+            <tr><td>分组交换</td><td>801.6s</td><td class="good">否（高效共享）</td><td>Internet</td></tr>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>关键洞察</strong>：分组交换（801.6s）与电路交换（800.5s）总时间接近，但电路交换空闲时也独占线路，分组交换允许多用户共享——<strong>整体效率高得多</strong>。这就是计算机网络选择分组交换的根本原因。
+        </div>
+
+        <p><strong>理解检查</strong>：什么情况下分组交换总时间明显大于电路交换？<br>
+        <span style="color:#555;">（答案：分组非常多时，每个分组的发送和存储转发时延累积起来很大。）</span></p>
+
+        <h3>三种交换方式对比表</h3>
+        <table class="comparison">
+            <tr><th>比较项</th><th>电路交换</th><th>报文交换</th><th>分组交换</th></tr>
+            <tr><td>数据传输单位</td><td>连续比特流</td><td>完整报文</td><td>分组</td></tr>
+            <tr><td>需建立连接</td><td class="bad">需要</td><td class="good">不需要</td><td class="good">不需要</td></tr>
+            <tr><td>信道利用率</td><td class="bad">低</td><td class="good">较高</td><td class="good">高</td></tr>
+            <tr><td>实时性</td><td class="good">好</td><td class="bad">差</td><td>较好</td></tr>
+            <tr><td>时延组成</td><td>连接+传播</td><td>发送+传播+存储</td><td>发送+传播+存储+排队</td></tr>
+            <tr><td>典型应用</td><td>传统电话网</td><td>早期电报网</td><td>Internet</td></tr>
+        </table>
+
+        <!-- ==================== 1.5 ==================== -->
+        <h2 id="1-5">1.5 计算机网络的分类</h2>
+
+        <h3>按覆盖范围分类</h3>
+        <table>
+            <tr><th>类型</th><th>范围</th><th>类比</th><th>场景</th></tr>
+            <tr><td><strong>PAN</strong></td><td>~10米</td><td>个人活动范围</td><td>蓝牙耳机连手机</td></tr>
+            <tr><td><strong>LAN</strong></td><td>~1公里</td><td>一栋楼</td><td>办公室网络、WiFi</td></tr>
+            <tr><td><strong>MAN</strong></td><td>10~100公里</td><td>一座城市</td><td>城市政务网</td></tr>
+            <tr><td><strong>WAN</strong></td><td>几百~几千公里</td><td>全国/全球</td><td>Internet</td></tr>
+        </table>
+
+        <div class="sidebar-note">
+            <strong>口诀</strong>：PAN个人、LAN局部、MAN城市、WAN广域。LAN属一个组织，WAN由ISP运营。
+        </div>
+
+        <h3>按拓扑结构分类</h3>
+
+        <div class="tabs">
+            <div class="tab-buttons">
+                <button class="active">星型</button>
+                <button>总线型</button>
+                <button>环型</button>
+                <button>树型</button>
+                <button>网状型</button>
+            </div>
+
+            <div class="tab-content active">
+                <h4>星型拓扑</h4>
+                <p>节点通过独立线路连到中心节点（如交换机）。类比：车轮。</p>
+                <p><strong>优点</strong>：单节点故障不影响其他。缺点：中心是单点故障。应用：现代以太网。</p>
+            </div>
+            <div class="tab-content">
+                <h4>总线型拓扑</h4>
+                <p>节点连在一条共享总线。类比：树上的鸟。</p>
+                <p><strong>优点</strong>：简单、成本低。<strong>缺点</strong>：总线故障全瘫痪，节点越多冲突越多。应用：早期以太网。</p>
+            </div>
+            <div class="tab-content">
+                <h4>环型拓扑</h4>
+                <p>节点构成闭合环，数据沿环传输。类比：接力赛。</p>
+                <p><strong>优点</strong>：时延确定。<strong>缺点</strong>：单节点故障导致全网中断。应用：FDDI。</p>
+            </div>
+            <div class="tab-content">
+                <h4>树型拓扑</h4>
+                <p>多级星型分层。类比：公司组织架构。</p>
+                <p><strong>优点</strong>：分级管理、利于扩展。<strong>缺点</strong>：根节点依赖强。应用：校园网。</p>
+            </div>
+            <div class="tab-content">
+                <h4>网状型拓扑</h4>
+                <p>节点间有多条路径。类比：蜘蛛网。</p>
+                <p><strong>优点</strong>：极高可靠性，无单点故障。<strong>缺点</strong>：成本高、布线复杂。应用：互联网骨干网。</p>
+            </div>
+        </div>
+
+        <p><strong>理解检查</strong>：家里WiFi是哪种拓扑？<br>
+        <span style="color:#555;">（答案：星型——路由器是中心节点。）</span></p>
+
+        <!-- ==================== 1.6 ==================== -->
+        <h2 id="1-6">1.6 性能指标（必考计算！）</h2>
+
+        <div class="callout callout-danger">
+            <strong>必考计算题</strong>：性能指标计算每年期末必考，务必掌握每个公式和单位换算。
+        </div>
+
+        <h3>速率（Rate）</h3>
+        <p><strong>WHY</strong>：需要知道网络传输速度，就像买车关注最高时速。</p>
+        <p><strong>WHAT</strong>：速率（比特率）= <strong>单位时间传输的比特数</strong>。</p>
+        <p><strong>关键提醒</strong>：速率单位用<strong>10的幂次</strong>（十进制），数据量单位用<strong>2的幂次</strong>（二进制）。常搞错！</p>
+        <table>
+            <tr><th>单位</th><th>换算（十进制）</th></tr>
+            <tr><td>1 kbps</td><td>10³ bps = 1000 bps</td></tr>
+            <tr><td>1 Mbps</td><td>10⁶ bps = 1,000,000 bps</td></tr>
+            <tr><td>1 Gbps</td><td>10⁹ bps</td></tr>
+            <tr><td>1 Tbps</td><td>10¹² bps</td></tr>
+        </table>
+
+        <div class="sidebar-note">
+            <strong>注意</strong>：1 KB = 1024 B = 2¹⁰ B，但 1 kbps = 1000 bps = 10³ bps。计算时先统一单位！
+        </div>
+
+        <h3>带宽（Bandwidth）</h3>
+        <p>网络通信线路的<strong>最大传输能力</strong>，即单位时间能通过的最高数据率。<strong>带宽是上限</strong>。</p>
+        <p>例：宽带套餐"100Mbps"，理论上每秒最多传100兆比特（约12.5MB）。</p>
+
+        <h3>吞吐量（Throughput）</h3>
+        <p>带宽是<strong>理论最大值</strong>（限速），吞吐量是<strong>实际测量值</strong>（实际速度）。吞吐量通常小于带宽。</p>
+
+        <h3>时延（Delay/Latency）——核心考点</h3>
+        <p>数据从一端传到另一端的总时间由<strong>四部分</strong>组成：</p>
+
+        <div class="definition">
+            <h4>总时延 = 发送时延 + 传播时延 + 处理时延 + 排队时延</h4>
+        </div>
+
+        <table>
+            <tr><th>时延类型</th><th>类比</th><th>公式</th></tr>
+            <tr><td><strong>发送时延</strong></td><td>灌水进水管的时间</td><td>数据长度 / 发送速率</td></tr>
+            <tr><td><strong>传播时延</strong></td><td>水从一端流到另一端的时间</td><td>信道长度 / 传播速度</td></tr>
+            <tr><td><strong>处理时延</strong></td><td>检查包裹决定转寄地址</td><td>取决于路由器性能</td></tr>
+            <tr><td><strong>排队时延</strong></td><td>排队等待处理</td><td>取决于网络拥塞</td></tr>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>易错</strong>：发送时延是"放数据到线路"的时间，关心数据大小。传播时延是"数据在线路上跑"的时间，关心距离远近。<br>
+            <strong>记忆</strong>：发送时延看数据，传播时延看距离。
+        </div>
+
+        <h4>例题</h4>
+
+        <details>
+            <summary>例题1：综合时延计算</summary>
+            <div class="details-content">
+                <p><strong>题目</strong>：数据10MB，带宽100Mbps，链路1000km，光速2.0×10⁸ m/s。忽略处理时延和排队时延，求总时延。</p>
+                <p><strong>解</strong>：统一单位：10MB = 10×1024×1024×8 = 83,886,080 bit</p>
+                <p>发送时延 = 83,886,080 / 100,000,000 ≈ <strong>0.839 s</strong></p>
+                <p>传播时延 = 1000×10³ / (2.0×10⁸) = <strong>0.005 s = 5 ms</strong></p>
+                <p>总时延 ≈ <strong>0.844 s</strong>（发送时延是瓶颈）</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>例题2：传播时延占主导</summary>
+            <div class="details-content">
+                <p><strong>题目</strong>：跨洋光缆8000km，100Gbps，传64字节控制分组。光速2.0×10⁸m/s。</p>
+                <p><strong>解</strong>：发送时延 = 64×8/10¹¹ = <strong>5.12 ns</strong>（可忽略）</p>
+                <p>传播时延 = 8000×10³/(2.0×10⁸) = <strong>0.04 s = 40 ms</strong></p>
+                <p><strong>结论</strong>：带宽极大、数据极小时，传播时延（距离）是主要因素。纽约到上海40ms的传播时延无法避免。</p>
+            </div>
+        </details>
+
+        <h3>时延带宽积</h3>
+        <div class="definition">
+            <h4>时延带宽积 = 传播时延 × 带宽</h4>
+        </div>
+        <p>表示链路中<strong>已发送但未到达目的地的最大比特数</strong>。类比：水管中同时流的水量。</p>
+
+        <h3>往返时间 RTT（Round-Trip Time）</h3>
+        <p><strong>RTT = 2 × 单向传播时延 + 处理时间</strong></p>
+        <p>日常体验：游戏里的"ping值"就是RTT。ping值50ms意味着发数据到服务器再收到回复需要50ms。</p>
+
+        <h3>利用率</h3>
+        <p><strong>信道利用率</strong> = 有数据通过的时间 / 总时间</p>
+        <p>时延与利用率关系：<strong>D = D₀ / (1 - U)</strong></p>
+        <div class="callout callout-warning">
+            <strong>重要</strong>：U接近1时，D趋近无穷大。网络越拥堵时延指数级恶化。利用率控制在50%~70%较合理。
+        </div>
+
+        <!-- ==================== 1.7 ==================== -->
+        <h2 id="1-7">1.7 计算机网络体系结构（超级重点）</h2>
+
+        <div class="callout callout-danger">
+            <strong>核心考点</strong>：OSI七层模型和TCP/IP四层模型是必考内容，务必掌握各层名称、功能和对比。
+        </div>
+
+        <h3>为什么分层？——邮政系统类比</h3>
+        <table>
+            <tr><th>邮政系统</th><th>网络层次</th></tr>
+            <tr><td>写信人写内容</td><td>应用层</td></tr>
+            <tr><td>装信封写收件人</td><td>运输层</td></tr>
+            <tr><td>写地址邮政编码</td><td>网络层</td></tr>
+            <tr><td>送邮局分拣</td><td>数据链路层</td></tr>
+            <tr><td>交通运输</td><td>物理层</td></tr>
+        </table>
+
+        <p>分层的好处：每层独立功能，层间通过接口通信；一层变更不影响其他层；复杂问题分解。</p>
+
+        <h3>OSI七层模型</h3>
+        <table>
+            <tr><th>层次</th><th>功能</th><th>主要协议/设备</th></tr>
+            <tr><td>7 应用层</td><td>为应用程序提供网络服务</td><td>HTTP、FTP、SMTP、DNS</td></tr>
+            <tr><td>6 表示层</td><td>数据格式转换、加密、压缩</td><td>SSL/TLS、JPEG</td></tr>
+            <tr><td>5 会话层</td><td>建立管理终止会话</td><td>RPC</td></tr>
+            <tr><td>4 运输层</td><td>端到端可靠/不可靠传输</td><td>TCP、UDP</td></tr>
+            <tr><td>3 网络层</td><td>路由选择、分组转发</td><td>IP、路由器</td></tr>
+            <tr><td>2 数据链路层</td><td>帧封装、差错控制</td><td>以太网、交换机</td></tr>
+            <tr><td>1 物理层</td><td>传输原始比特流</td><td>集线器、网线</td></tr>
+        </table>
+
+        <details>
+            <summary>记忆口诀</summary>
+            <div class="details-content">
+                <p>中文（从低到高）：<strong>"物链网传会表应"</strong></p>
+                <p>英文（从低到高）：<strong>"Please Do Not Throw Sausage Pizza Away"</strong></p>
+            </div>
+        </details>
+
+        <h3>TCP/IP四层模型</h3>
+        <table>
+            <tr><th>层次</th><th>功能</th><th>核心协议</th></tr>
+            <tr><td>应用层</td><td>用户应用服务</td><td>HTTP、FTP、SMTP、DNS</td></tr>
+            <tr><td>运输层</td><td>端到端传输</td><td>TCP（可靠）、UDP（不可靠）</td></tr>
+            <tr><td>网际层</td><td>分组传输、路由</td><td>IP（核心）、ICMP</td></tr>
+            <tr><td>网络接口层</td><td>封装帧、物理传输</td><td>以太网、WiFi</td></tr>
+        </table>
+
+        <h3>OSI vs TCP/IP对比</h3>
+        <table class="comparison">
+            <tr><th>比较项</th><th>OSI</th><th>TCP/IP</th></tr>
+            <tr><td>层数</td><td>7层</td><td>4层</td></tr>
+            <tr><td>提出时间</td><td>1984年</td><td>1974年</td></tr>
+            <tr><td>分层原则</td><td>理论驱动，严格分层</td><td>实践驱动，允许合并</td></tr>
+            <tr><td>实际使用</td><td class="bad">理论模型，未大规模商用</td><td class="good">事实国际标准</td></tr>
+        </table>
+
+        <h3>重要概念</h3>
+        <table>
+            <tr><th>概念</th><th>定义</th></tr>
+            <tr><td><strong>实体</strong></td><td>可发送/接收信息的硬件/软件进程</td></tr>
+            <tr><td><strong>协议</strong></td><td>控制对等实体通信的规则。三要素：语法（格式）、语义（含义）、同步（顺序）</td></tr>
+            <tr><td><strong>服务</strong></td><td>下层为上层提供的功能调用</td></tr>
+            <tr><td><strong>SAP</strong></td><td>Service Access Point，相邻层交换信息的接口</td></tr>
+        </table>
+
+        <h4>面向连接 vs 无连接</h4>
+        <table class="comparison">
+            <tr><th>特性</th><th>面向连接</th><th>无连接</th></tr>
+            <tr><td>建立连接</td><td class="good">需要</td><td class="bad">不需要</td></tr>
+            <tr><td>按序到达</td><td class="good">保证</td><td class="bad">不保证</td></tr>
+            <tr><td>开销</td><td class="bad">大</td><td class="good">小</td></tr>
+            <tr><td>典型协议</td><td>TCP</td><td>UDP、IP</td></tr>
+            <tr><td>类比</td><td>打电话</td><td>寄信</td></tr>
+        </table>
+
+        <!-- ==================== 本章小结 ==================== -->
+        <h2 id="summary">本章小结</h2>
+        <div class="callout callout-info">
+            <strong>第1章核心要点</strong>
+            <ul>
+                <li>计算机网络三要素：<strong>设备 + 链路 + 协议</strong></li>
+                <li>互联网三阶段：<strong>ARPANET → 三级结构 → 多层次ISP</strong></li>
+                <li>三种交换方式对比：分组交换（Internet采用）vs 电路交换（电话）vs 报文交换</li>
+                <li>按覆盖范围：<strong>PAN、LAN、MAN、WAN</strong></li>
+                <li>拓扑：星型、总线型、环型、树型、网状型</li>
+                <li><strong>必考计算</strong>：速率单位换算、时延四部分、时延带宽积、RTT</li>
+                <li><strong>体系结构</strong>：OSI七层（物链网传会表应）、TCP/IP四层、对比</li>
+                <li>协议三要素：<strong>语法、语义、同步</strong></li>
+            </ul>
+        </div>
+
+        <!-- ==================== 练习题 ==================== -->
+        <h2 id="exercises">练习题</h2>
+
+        <h3>一、选择题</h3>
+        <ol>
+            <li>以下哪项不是计算机网络三要素？<br>A. 计算机设备 B. 通信链路 C. 操作系统 D. 网络协议</li>
+            <li>电路交换的三个阶段是？<br>A. 连接建立、数据传输、连接释放<br>B. 分组、传输、重组<br>C. 请求、确认、释放<br>D. 编码、传输、解码</li>
+            <li>OSI参考模型有几层？<br>A. 4 B. 5 C. 7 D. 6</li>
+            <li>以下哪项属于TCP/IP网际层协议？<br>A. HTTP B. TCP C. IP D. UDP</li>
+            <li>星型拓扑的缺点是？<br>A. 成本高 B. 中心是单点故障 C. 扩展困难 D. 故障排查难</li>
+            <li>时延带宽积的单位是？<br>A. bps B. 秒 C. 比特 D. 赫兹</li>
+        </ol>
+        <details>
+            <summary>答案</summary>
+            <div class="details-content">
+                <p>1. C 2. A 3. C 4. C 5. B 6. C</p>
+            </div>
+        </details>
+
+        <h3>二、计算题</h3>
+        <ol>
+            <li>10Mbps以太网传500字节数据帧，信号速度2.0×10⁸m/s，信道长1000m。求：(1)发送时延 (2)传播时延 (3)总时延 (4)时延带宽积</li>
+            <li>1Mbps链路长5km，信号速度2.0×10⁸m/s，传1000字节数据帧，求总时延。</li>
+            <li>数据长10MB，带宽100Mbps，链路长2000km，信号速度2.0×10⁸m/s，求总时延。</li>
+        </ol>
+        <details>
+            <summary>答案</summary>
+            <div class="details-content">
+                <p><strong>第1题</strong>：发送时延 = (500×8)/10×10⁶ = 0.0004s = 0.4ms；传播时延 = 1000/2.0×10⁸ = 5μs；总时延 = 0.405ms；时延带宽积 = 5×10⁶×10×10⁶ = 50bit</p>
+                <p><strong>第2题</strong>：发送时延 = (1000×8)/10⁶ = 0.008s = 8ms；传播时延 = 5000/2.0×10⁸ = 0.025ms；总时延 = 8.025ms</p>
+                <p><strong>第3题</strong>：发送时延 = 10×1024×1024×8/10⁸ = 0.839s；传播时延 = 2000×10³/2.0×10⁸ = 0.01s = 10ms；总时延 ≈ 0.849s</p>
+            </div>
+        </details>
+
+        <h3>三、简答题</h3>
+        <ol>
+            <li>简述分组交换原理，说明为什么计算机网络采用分组交换而非电路交换。</li>
+            <li>画出OSI七层模型，说明每层功能。</li>
+            <li>对比OSI和TCP/IP模型异同。</li>
+            <li>说明时延四种类型及减少每种时延的方法。</li>
+            <li>什么是协议三要素？各举一例。</li>
+        </ol>
+
+        <hr>
+        <footer class="chapter-footer">
+            <nav class="chapter-nav">
+                <a href="index.html">&larr; 回到目录</a>
+                <a href="02-physical-layer.html">下一章：物理层 &rarr;</a>
+            </nav>
+        </footer>
+
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+        <script src="assets/script.js"></script>
+    </main>
+</body>
+</html>

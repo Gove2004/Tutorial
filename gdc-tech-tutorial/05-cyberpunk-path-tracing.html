@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 - Cyberpunk 2077 — 路径追踪与优化历程 - GDC 高技术讲座深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-alanwake2-gpu-virtualization.html">&larr; 上一章</a>
+        <a href="06-baldurs-gate3-rendering.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>05 - Cyberpunk 2077 — 路径追踪与优化历程</h1>
+
+        <p class="intro">CD Projekt Red 的《赛博朋克 2077》经历了从 2020 年首发到 2025 年完全重制的漫长优化历程。其中最具革命性的变化是从传统的光栅化 + 屏幕空间 GI 转向全路径追踪渲染。本章将详细拆解这一技术转型的每一步。</p>
+
+        <div class="callout callout-info">
+            <strong>前置知识</strong>：路径追踪基础、Ray Tracing API、DLSS 原理、PBR 渲染
+        </div>
+
+        <h2>一、REDengine 5 的路径追踪改造</h2>
+
+        <p>《赛博朋克 2077》最初使用 REDengine 4，在 2020 年以传统光栅化渲染为主。2022 年的 Phantom Liberty 资料片引入了初步的光线追踪支持，而 2025 年的"路径追踪完全重制版"则将整个渲染管线迁移到了路径追踪架构上。</p>
+
+        <div class="arch-diagram">
+┌──────────────────────────────────────────────────────────┐
+│           REDengine 渲染管线演进                           │
+│                                                          │
+│  2020 (原版):                                            │
+│  ┌─────────────────────────────────────────────────┐     │
+│  │  光栅化 (Rasterization)                          │     │
+│  │  ├─ Deferred Shading (PBR)                       │     │
+│  │  ├─ Screen Space GI (SSGI)                       │     │
+│  │  ├─ Screen Space Reflections (SSR)               │     │
+│  │  └─ Shadow Maps (PCF/VSM)                        │     │
+│  └─────────────────────────────────────────────────┘     │
+│                                                          │
+│  2022 (Phantom Liberty):                                 │
+│  ┌─────────────────────────────────────────────────┐     │
+│  │  混合管线 (Hybrid)                               │     │
+│  │  ├─ 光栅化 + 光线追踪阴影 (RT Shadows)           │     │
+│  │  ├─ 光线追踪反射 (RT Reflections)               │     │
+│  │  └─ 光线追踪 GI (初步 RTGI)                     │     │
+│  └─────────────────────────────────────────────────┘     │
+│                                                          │
+│  2025 (Path Tracing):                                    │
+│  ┌─────────────────────────────────────────────────┐     │
+│  │  全路径追踪 (Full Path Tracing)                  │     │
+│  │  ├─ Unidirectional Path Tracing                  │     │
+│  │  ├─ Ray Reconstruction (DLSS 3.5)              │     │
+│  │  ├─ Ray Traced Global Illumination               │     │
+│  │  ├─ Ray Traced Reflections                       │     │
+│  │  └─ Ray Traced Shadows                           │     │
+│  └─────────────────────────────────────────────────┘     │
+└──────────────────────────────────────────────────────────┘
+        </div>
+
+        <h2>二、全路径追踪渲染器</h2>
+
+        <p>路径追踪（Path Tracing）是一种基于蒙特卡洛积分的全局光照算法。与传统的光栅化渲染不同，路径追踪通过模拟光线的物理传播来计算最终图像。</p>
+
+        <h3>单向路径追踪算法</h3>
+
+        <p>CP2077 使用的是单向路径追踪（Unidirectional Path Tracing），从相机出发追踪每条光线：</p>
+
+        <pre><code class="language-cpp">// PathTracer.cpp - REDengine 5 路径追踪核心
+struct PathTracePayload
+{
+    float3 Radiance;          // 累积的光辐射度
+    float3 Throughput;        // 光线传输率（权重衰减）
+    uint   BounceCount;       // 当前反弹次数
+    bool   bTerminated;       // 是否已终止
+    Ray    CurrentRay;        // 当前追踪射线
+};
+
+float3 PathTracePixel(float2 ScreenUV, uint PixelSeed)
+{
+    PathTracePayload Payload;
+    Payload.Radiance = float3(0, 0, 0);
+    Payload.Throughput = float3(1, 1, 1);
+    Payload.BounceCount = 0;
+    Payload.bTerminated = false;
+
+    // 初始相机射线
+    Payload.CurrentRay = GenerateCameraRay(ScreenUV, PixelSeed);
+
+    // 主路径追踪循环
+    while (Payload.BounceCount &lt; MaxPathLength && !Payload.bTerminated)
+    {
+        // 1. 射线-几何体求交
+        HitRecord Hit;
+        bool HitSomething = TraceScene(Payload.CurrentRay, Hit);
+
+        if (!HitSomething)
+        {
+            // 命中背景（天空盒）
+            Payload.Radiance += Payload.Throughput * EvaluateBackground(Payload.CurrentRay.Direction);
+            break;
+        }
+
+        // 2. 直接光照采样
+        float3 DirectLight = SampleDirectLight(Hit, PixelSeed);
+        Payload.Radiance += Payload.Throughput * DirectLight;
+
+        // 3. 间接光照采样（BRDF 重要性采样）
+        float2 BRDFSample = SampleUniform2D(PixelSeed);
+        Ray NextRay = SampleBRDF(Hit, BRDFSample);
+
+        // 4. 计算俄罗斯轮盘赌终止概率
+        float ContinueProb = max(Payload.Throughput.r,
+                                  max(Payload.Throughput.g,
+                                      Payload.Throughput.b));
+        ContinueProb = min(ContinueProb, 0.9f); // 最大 90% 继续
+
+        if (RandFloat(PixelSeed) &gt; ContinueProb)
+        {
+            Payload.bTerminated = true;
+        }
+        else
+        {
+            // 5. 更新传输率
+            float3 BRDFValue = EvaluateBRDF(Hit, Payload.CurrentRay.Direction, NextRay.Direction);
+            float PDF = EvaluatePDF(Hit, Payload.CurrentRay.Direction, NextRay.Direction);
+
+            if (PDF &gt; 0.001f)
+            {
+                Payload.Throughput *= BRDFValue / PDF;
+                Payload.CurrentRay = NextRay;
+                Payload.BounceCount++;
+            }
+            else
+            {
+                Payload.bTerminated = true;
+            }
+        }
+    }
+
+    return Payload.Radiance;
+}</code></pre>
+
+        <h3>从屏幕空间到全局光照</h3>
+
+        <p>2020 年原版 CP2077 的 GI 方案：</p>
+
+        <table>
+            <thead>
+                <tr><th>技术</th><th>覆盖范围</th><th>局限性</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>预烘焙 GI（Lightmaps）</td><td>静态物体</td><td>无法响应动态物体</td></tr>
+                <tr><td>SSGI（屏幕空间 GI）</td><td>屏幕内可见表面</td><td>屏幕外 GI 丢失、反射/折射物体不准确</td></tr>
+                <tr><td>Light Probes</td><td>稀疏采样点</td><td>插值质量差，密集场景不准确</td></tr>
+            </tbody>
+        </table>
+
+        <p>2025 年路径追踪版的 GI 方案：</p>
+
+        <table>
+            <thead>
+                <tr><th>技术</th><th>覆盖范围</th><th>优势</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>路径追踪 GI</td><td>全局（所有光线反弹）</td><td>物理准确，支持动态物体</td></tr>
+                <tr><td>Ray Reconstruction</td><td>降噪后恢复完整 GI</td><td>低采样数下仍可获得高质量结果</td></tr>
+            </tbody>
+        </table>
+
+        <h2>三、Ray Reconstruction：DLSS 3.5 的核心</h2>
+
+        <p>路径追踪的最大问题是噪声——因为使用蒙特卡洛采样，每个像素的采样数有限，导致结果充满噪点。DLSS 3.5 的 Ray Reconstruction 技术使用 AI 模型来去除路径追踪产生的噪声。</p>
+
+        <h3>传统降噪 vs Ray Reconstruction</h3>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr><th>特性</th><th>传统空间滤波器</th><th>DLSS 3.5 Ray Reconstruction</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>算法类型</td><td>HDR Spatial Filter（如 SVGF）</td><td>Deep Learning 模型（时空）</td></tr>
+                    <tr><td>输入</td><td>当前帧图像 + 历史帧</td><td>当前帧 + 历史帧 + 运动向量 + 法线图 + 深度</td></tr>
+                    <tr><td>去噪质量</td><td>容易模糊细节</td><td>保留高频细节</td></tr>
+                    <tr><td>闪烁问题</td><td>运动时容易出现</td><td>显著减少</td></tr>
+                    <tr><td>最低采样数</td><td>16-32 samples/pixel</td><td>1-4 samples/pixel</td></tr>
+                    <tr><td>GPU 耗时</td><td>~3-5ms（空间滤波）</td><td>~2-3ms（DLSS 推理）</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>Ray Reconstruction 模型架构</h3>
+
+        <p>虽然 NVIDIA 没有公开 Ray Reconstruction 模型的完整架构，但根据 GDC 讲座和技术文档，可以推断其大致结构：</p>
+
+        <div class="definition">
+            <h4>Ray Reconstruction 输入特征</h4>
+            <p>模型接收以下特征图作为输入：<br>
+            <code>L</code> - 低采样路径追踪辐射度图<br>
+            <code>V</code> - 运动向量（Optical Flow）<br>
+            <code>D</code> - 深度图<br>
+            <code>N</code> - 法线图（G-Buffer）<br>
+            <code>A</code> -  альbedo/反照率图<br>
+            <code>H</code> - 历史帧（Temporal Accumulation）</p>
+        </div>
+
+        <pre><code class="language-cpp">// RayReconstruction.h - 降噪模型接口
+class RayReconstructionModel
+{
+public:
+    // 降噪推理
+    float3 Denoise(const Texture2D&amp; LowSampleRadiance,
+                   const Texture2D&amp; MotionVectors,
+                   const Texture2D&amp; Depth,
+                   const Texture2D&amp; Normals,
+                   const Texture2D&amp; Albedo,
+                   const Texture2D&amp; HistoryFrame)
+    {
+        // 1. 特征提取（卷积层）
+        auto Features = ExtractFeatures(LowSampleRadiance,
+                                        MotionVectors,
+                                        Depth, Normals, Albedo);
+
+        // 2. 时空聚合（Temporal Accumulation）
+        auto TemporalAgg = AlignWithHistory(Features, HistoryFrame, MotionVectors);
+
+        // 3. CNN 推理（类似 UNet 的编码器-解码器结构）
+        auto Denoised = CNNInference(TemporalAgg);
+
+        // 4. 后处理（色调映射 + 限制）
+        return ApplyTonemapAndClamp(Denoised);
+    }
+
+private:
+    // 特征提取：将多通道输入合并为统一特征表示
+    Texture2D ExtractFeatures(...) { /* ... */ }
+
+    // 时空对齐：使用运动向量将历史帧对齐到当前帧
+    Texture2D AlignWithHistory(Texture2D Features, Texture2D History, ...) { /* ... */ }
+
+    // CNN 模型：轻量级 UNet，针对 Tensor Core 优化
+    Texture2D CNNInference(Texture2D Input) { /* ... */ }
+};</code></pre>
+
+        <h3>数学模型</h3>
+
+        <p>Ray Reconstruction 本质上是一个条件去噪问题：</p>
+
+        <pre><code>f_noisy(u) = (1/N) * Σ [ (f_li · pdf(ω_i)) / pdf_sample(ω_i) ] + ε
+
+其中：
+  f_noisy  - 低采样数的路径追踪结果（含噪声）
+  f_li     - 第 i 条路径的直接/间接光照贡献
+  N        - 每个像素的采样数（通常 1-4）
+  pdf      - 概率密度函数
+  ε        - 蒙特卡洛估计误差（噪声来源）
+
+目标：学习映射 g(f_noisy, context) → f_clean
+其中 context = {V, D, N, A, History}</code></pre>
+
+        <h2>四、DLSS 3.5 Frame Generation</h2>
+
+        <p>除了 Ray Reconstruction 降噪，DLSS 3.5 还包含了帧生成（Frame Generation）技术，通过 AI 生成的中间帧来提升帧率。</p>
+
+        <h3>光学流加速器（OFA）</h3>
+
+        <p>帧生成的核心是 Optical Flow Estimation——准确计算相邻帧之间的像素运动：</p>
+
+        <pre><code class="language-cpp">// OpticalFlowEstimator.cpp - OFA 核心逻辑
+struct OpticalFlowField
+{
+    float2 Velocity;  // 每个像素的运动向量 (dx, dy)
+    float  Confidence; // 运动估计的可信度 (0.0 ~ 1.0)
+};
+
+OpticalFlowField EstimateFlow(Frame PrevFrame, Frame CurrFrame)
+{
+    // 1. 特征提取
+    auto PrevFeatures = ExtractFeatures(PrevFrame.Depth, PrevFrame.Normals);
+    auto CurrFeatures = ExtractFeatures(CurrFrame.Depth, CurrFrame.Normals);
+
+    // 2. 代价体积（Cost Volume）构建
+    // 对 PrevFrame 的每个像素，在 CurrFrame 的邻域内计算匹配代价
+    auto CostVolume = BuildCostVolume(PrevFeatures, CurrFeatures, SearchRadius);
+
+    // 3. 最小化代价，找到最优匹配
+    auto Disparities = MinimizeCostVolume(CostVolume);
+
+    // 4. 后处理：一致性校验 + 置信度评估
+    return PostProcessDisparities(Disparities, PrevFrame, CurrFrame);
+}</code></pre>
+
+        <h3>帧生成管线</h3>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>渲染原始帧</h4>
+                    <p>路径追踪渲染器生成一帧低采样数的图像（1-4 samples/pixel）</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>运动向量计算</h4>
+                    <p>使用几何信息（顶点位移）计算每像素的运动向量</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>AI 帧生成</h4>
+                    <p>光学流模型估计前后帧之间的像素运动，AI 模型生成中间帧</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h4>合成输出</h4>
+                    <p>将原始帧和 AI 生成的帧合成，输出最终图像</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>五、性能优化历程</h2>
+
+        <h3>从 2020 到 2025 的迭代</h3>
+
+        <table>
+            <thead>
+                <tr><th>年份</th><th>版本</th><th>渲染方式</th><th>RTX 4090 帧率</th><th>关键技术</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>2020</td><td>首发版</td><td>光栅化 + SSR</td><td>~60 fps (4K)</td><td>传统渲染</td></tr>
+                <tr><td>2021</td><td>1.1 更新</td><td>光栅化 + 初步 RT</td><td>~45 fps (4K RT)</td><td>RT Shadows + RT Reflections</td></tr>
+                <tr><td>2022</td><td>1.3 + Phantom Liberty</td><td>混合 RT</td><td>~55 fps (4K RT)</td><td>RTGI Lite + DLSS 2</td></tr>
+                <tr><td>2023</td><td>2.0 更新</td><td>全 RT GI</td><td>~50 fps (4K RT)</td><td>Full RTGI + DLSS 3 FG</td></tr>
+                <tr><td>2025</td><td>Path Tracing Edition</td><td>全路径追踪</td><td>~60 fps (4K RT+DLSS 3.5)</td><td>Path Tracing + Ray Reconstruction</td></tr>
+            </tbody>
+        </table>
+
+        <h3>RTX 4090 上的最终配置</h3>
+
+        <table>
+            <thead>
+                <tr><th>设置</th><th>数值</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>路径追踪反弹次数</td><td>最大 6 次（1 次直接光照 + 5 次间接）</td></tr>
+                <tr><td>每像素采样数</td><td>1-4（动态调整）</td></tr>
+                <tr><td>DLSS 模式</td><td>质量 (Quality) 或 平衡 (Balanced)</td></tr>
+                <tr><td>帧生成</td><td>开启（DLSS 3.5 Frame Generation）</td></tr>
+                <tr><td>路径追踪 GI 距离</td><td>150m（远处使用预烘焙数据混合）</td></tr>
+                <tr><td>阴影质量</td><td>路径追踪阴影</td></tr>
+                <tr><td>反射质量</td><td>路径追踪反射（无限距离）</td></tr>
+            </tbody>
+        </table>
+
+        <h3>RTX 4070 的妥协方案</h3>
+
+        <p>RTX 4070（12GB VRAM）在路径追踪模式下需要做出一些妥协：</p>
+
+        <ul>
+            <li><strong>降低路径追踪距离</strong>：从 150m 降至 80m，远处使用传统 GI 混合</li>
+            <li><strong>减少采样数</strong>：从 4 samples 降至 2 samples，依赖更强的降噪</li>
+            <li><strong>关闭部分后处理</strong>：DOF（景深）和 Volumetric Fog（体积雾）降级</li>
+            <li><strong>DLSS 模式</strong>：必须使用"性能"或"平衡"模式，不能使用"质量"</li>
+        </ul>
+
+        <h2>六、路径追踪与光栅化的画质对比</h2>
+
+        <details>
+            <summary>点击查看详细画质对比分析</summary>
+            <div class="details-content">
+                <table>
+                    <thead>
+                        <tr><th>视觉效果</th><th>光栅化 + RT</th><th>全路径追踪</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>间接光照（颜色溢出）</td><td>需要预烘焙或 SSGI 近似</td><td>物理准确，自动产生</td></tr>
+                        <tr><td>软阴影</td><td>PCF/VSM 近似</td><td>基于光源面积的自然软阴影</td></tr>
+                        <tr><td>反射</td><td>SSR 限于屏幕内</td><td>全局反射，不受屏幕边界限制</td></tr>
+                        <tr><td>焦散（Caustics）</td><td>无法自然产生</td><td>玻璃/水面的焦散效果自然呈现</td></tr>
+                        <tr><td>透明物体光照</td><td>需要特殊处理</td><td>光线穿过透明物体时自然衰减</td></tr>
+                        <tr><td>性能开销</td><td>较低</td><td>极高（需要 DLSS 3.5 辅助）</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </details>
+
+        <h2>本章小结</h2>
+
+        <p>《赛博朋克 2077》的路径追踪改造是游戏行业从光栅化转向全局光照的里程碑。其核心技术组合——路径追踪 + Ray Reconstruction 降噪 + DLSS 3.5 帧生成——代表了当前实时渲染的最高水平。这个方案的关键启示是：<strong>纯路径追踪在当前硬件下不够高效，但路径追踪 + AI 辅助是当前最佳实践</strong>。</p>
+
+        <p>核心经验总结：</p>
+
+        <ol>
+            <li><strong>路径追踪是未来</strong>：物理准确的全局光照是光栅化无法企及的</li>
+            <li><strong>AI 降噪是关键使能技术</strong>：没有 Ray Reconstruction，路径追踪在实时应用中不可行</li>
+            <li><strong>渐进式迁移</strong>：从光栅化到混合 RT 再到全路径追踪，每一步都有明确的收益</li>
+            <li><strong>硬件门槛</strong>：目前路径追踪仍然需要 RTX 40 系列以上的硬件</li>
+        </ol>
+
+        <h2>下一章预告</h2>
+
+        <p>下一章我们将研究 Larian Studios 的《博德之门3》——看看他们如何在 D&D 回合制框架下实现高质量的 3D 渲染和魔法特效。</p>
+
+        <h2>延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://www.gdcvault.com/videos/1029100" target="_blank">GDC Vault - Cyberpunk 2077: Path Tracing at CDPR</a></li>
+            <li><a href="https://nvidianews.nvidia.com/news/cyberpunk-2077-now-available-with-nvidia-geforce-now-ray-tracing-and-dlss-3-5" target="_blank">NVIDIA News - Cyberpunk 2077 Path Tracing</a></li>
+            <li><a href="https://www.reddit.com/r/CyberpunkPlayStation/comments/path_tracing_technical_analysis/" target="_blank">Technical Analysis - Cyberpunk 2077 Path Tracing</a></li>
+            <li><a href="https://developer.nvidia.com/blog/upgrading-cyberpunk-2077-to-path-tracing/" target="_blank">NVIDIA Developer Blog - Upgrading to Path Tracing</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-alanwake2-gpu-virtualization.html">&larr; 上一章：Alan Wake 2 GPU 虚拟化</a>
+            <a href="06-baldurs-gate3-rendering.html">后章：Baldur's Gate 3 渲染管线 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

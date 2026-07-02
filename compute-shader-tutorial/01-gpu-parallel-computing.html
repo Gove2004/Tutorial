@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 - 初识 GPU 并行计算 - Compute Shader 入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a>← 上一章</a>
+        <a href="02-hlsl-glsl-basics.html">02 - HLSL/GLSL 基础 →</a>
+    </nav>
+
+    <main>
+        <h1>初识 GPU 并行计算</h1>
+
+        <p>在深入代码之前，我们需要回答一个根本问题：<strong>为什么 GPU 能做通用计算？</strong> Compute Shader 到底是什么？它和传统的渲染管线有什么关系？本章将从架构层面理解 GPU 并行计算的本质。</p>
+
+        <h2>从渲染到计算：GPU 角色的转变</h2>
+
+        <p>早期的 GPU 只是一个<strong>专用协处理器</strong>，唯一任务是加速三角形光栅化。它的内部管线是严格固定的：</p>
+
+        <div class="arch-diagram">
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│  Vertex  │ →  │  Raster  │ →  │  Fragment│ →  │   Frame  │
+│  Shader  │    │   Engine │    │  Shader  │    │  Buffer  │
+└──────────┘    └──────────┘    └──────────┘    └──────────┘
+  (每帧几千次)     (固定功能)      (每帧几百万次)    (输出)
+        </div>
+
+        <p>2006 年 NVIDIA 推出 <strong>G80 架构</strong>（GeForce 8800 GT），首次引入了可编程的通用着色器。这标志着 GPU 从"只能渲染"转向"也能计算"。2007 年 CUDA 的发布让程序员可以直接用 GPU 做通用计算。</p>
+
+        <p>到了 DirectCompute（DX11, 2011）和后来的 Compute Shader（DX12, 2016），GPU 获得了一条<strong>完全独立于渲染管线的计算通路</strong>——这就是 Compute Shader。</p>
+
+        <div class="definition">
+            <h4>什么是 Compute Shader？</h4>
+            <p>Compute Shader 是一种<strong>不依赖于渲染管线</strong>的可编程着色器。你可以向 GPU 发射一组线程，让它对数据执行任意计算，结果写回任意资源（纹理、缓冲区等）。它不产生顶点、不光栅化、不输出像素——它只做计算。</p>
+        </div>
+
+        <h2>CPU vs GPU：架构的本质差异</h2>
+
+        <p>理解 CPU 和 GPU 的差异是理解 Compute Shader 的前提。这不是性能数字的对比，而是<strong>设计哲学</strong>的根本不同。</p>
+
+        <table class="comparison">
+            <thead>
+                <tr><th>维度</th><th>CPU</th><th>GPU</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>目标</strong></td>
+                    <td>低延迟（尽快完成单个任务）</td>
+                    <td>高吞吐（单位时间完成大量任务）</td>
+                </tr>
+                <tr>
+                    <td><strong>核心数</strong></td>
+                    <td>少（4-128 核）</td>
+                    <td>多（数百至数千核）</td>
+                </tr>
+                <tr>
+                    <td><strong>缓存策略</strong></td>
+                    <td>巨大的智能 L1/L2/L3 缓存</td>
+                    <td>小缓存 + Shared Memory（程序员管理）</td>
+                </tr>
+                <tr>
+                    <td><strong>分支处理</strong></td>
+                    <td>复杂的分支预测、乱序执行</td>
+                    <td>SIMT，分支会导致 Warp Split（惩罚）</td>
+                </tr>
+                <tr>
+                    <td><strong>内存延迟</strong></td>
+                    <td>极低（纳秒级 L1 命中）</td>
+                    <td>极高（微秒级全局内存往返）</td>
+                </tr>
+                <tr>
+                    <td><strong>编程模型</strong></td>
+                    <td>线程/进程，每个线程独立执行</td>
+                    <td>Thread Group / Warp，SIMT 并行</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>延迟隐藏：GPU 并行的核心秘密</h3>
+
+        <p>GPU 的高吞吐不来自"更快的内存"，而来自<strong>延迟隐藏（Latency Hiding）</strong>。当一个 Warp（NVIDIA 术语，AMD 叫 Wavefront）等待内存数据返回时，GPU 立刻切换到另一个就绪的 Warp 继续执行。数千个核心 + 数十万个活跃线程 = 随时都有 Warp 可以执行，内存延迟被完全掩盖。</p>
+
+        <div class="arch-diagram">
+GPU 调度器（每时钟周期）：
+
+核心状态：
+  Warp A: [████████░░] ← 等待内存 (200 周期)
+  Warp B: [░░░░░░░███] ← 就绪！立即切换 → 执行
+  Warp C: [███░░░░░░░] ← 刚唤醒 → 执行
+  Warp D: [░░░███░░░░] ← 计算中 → 继续执行
+
+关键：只要活跃 Warp 数量 > 内存延迟所需的 Warp 数，
+      就没有空闲周期，延迟被完全隐藏。
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>常见误区</strong>："GPU 就是比 CPU 快。" 不对。对于串行任务、少量数据、复杂分支——GPU 可能比 CPU 慢几个数量级。GPU 的优势只在<strong>大规模数据并行</strong>场景下才能体现。核心问题是：<strong>你的问题能否拆分成 N 个独立的相同操作？</strong>
+        </div>
+
+        <h2>SIMT 模型：GPU 如何执行并行</h2>
+
+        <p>GPU 使用 <strong>SIMT（Single Instruction, Multiple Threads）</strong> 模型。一条指令同时作用于多个线程，但每个线程有自己的寄存器状态和标量值。</p>
+
+        <p>举个具体例子。假设你要对两个数组做逐元素相加：</p>
+
+<pre><code class="language-hlsl">// HLSL Compute Shader 伪代码
+[numthreads(128, 1, 1)]
+void CSMain(uint3 threadID : SV_DispatchThreadID)
+{
+    float a[1024];  // 每个线程有自己独立的 1024 个 float
+    float b[1024];
+    float c[1024];
+
+    // 所有 1024 个线程同时执行这一行
+    c[threadID.x] = a[threadID.x] + b[threadID.x];
+}</code></pre>
+
+        <p>这里 Dispatch 了 1024 个线程，分为 8 个 Thread Group（每组 128 线程）。每个 Group 内的 128 个线程被进一步划分为 Warp（NVIDIA 上每个 Warp 32 线程，所以 128 线程 = 4 个 Warp）。同一时刻，GPU 发出一条"ADD"指令，4 个 Warp 各自在自己的 32 个线程上执行加法。</p>
+
+        <h3>Warp 一致性：SIMT 的关键约束</h3>
+
+        <p>同一个 Warp 内的 32 个线程<strong>总是一起执行</strong>。这意味着：</p>
+
+        <ul>
+            <li>如果 32 个线程走的是同一条代码路径，一条指令搞定</li>
+            <li>如果 32 个线程走了不同分支（分支发散/Branch Divergence），GPU 会序列化执行每个分支路径，屏蔽掉不走该路径的线程</li>
+            <li>Warp 级别的同步（<code>__syncwarp()</code>）比 Group 级别的同步（<code>GroupMemoryBarrier()</code>）便宜得多</li>
+        </ul>
+
+        <div class="callout callout-danger">
+            <strong>性能杀手</strong>：Warp 内分支发散是最常见的性能陷阱。如果一个条件判断在 Warp 内一半线程走 <code>if</code>、一半走 <code>else</code>，你的"并行"代码实际上变成了串行执行。<strong>尽量让同一个 Warp 内的线程走相同路径。</strong>
+        </div>
+
+        <h2>Compute Shader 的执行模型</h2>
+
+        <p>当你调用 <code>Dispatch(nx, ny, nz)</code> 时，GPU 创建了 <code>nx * ny * nz * numthreads</code> 个线程。这些线程的组织结构如下：</p>
+
+<pre><code class="language-text">Dispatch(8, 1, 1) + numthreads(128, 1, 1)
+    │
+    ├─ Thread Group 0: 线程 0-127
+    ├─ Thread Group 1: 线程 128-255
+    ├─ Thread Group 2: 线程 256-383
+    ├─ Thread Group 3: 线程 384-511
+    ├─ Thread Group 4: 线程 512-639
+    ├─ Thread Group 5: 线程 640-767
+    ├─ Thread Group 6: 线程 768-895
+    └─ Thread Group 7: 线程 896-1023
+
+每个 Thread Group 内部：
+  Warp 0: 线程 0-31
+  Warp 1: 线程 32-63
+  Warp 2: 线程 64-95
+  Warp 3: 线程 96-127</code></pre>
+
+        <h3>线程 ID：每个线程的身份标识</h3>
+
+        <p>每个线程通过内置变量获取自己的身份：</p>
+
+<pre><code class="language-hlsl">// SV_DispatchThreadID: 全局线程 ID，范围 = Dispatch × numthreads
+// SV_GroupThreadID: 组内线程 ID，范围 = numthreads
+// SV_GroupID: 组 ID，范围 = Dispatch
+// SV_GroupIndex: 组内线性索引 (0 到 numthreads-1)
+
+[numthreads(256, 1, 1)]
+void CSMain(uint3 dispatchID : SV_DispatchThreadID,
+            uint3 groupID    : SV_GroupID,
+            uint3 groupThreadID : SV_GroupThreadID,
+            uint groupIndex   : SV_GroupIndex)
+{
+    // dispatchID.x == groupID.x * 256 + groupThreadID.x
+    // dispatchID.x == groupIndex （当 numthreads 在 x 方向 = 256 时）
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>设计直觉</strong>：<code>SV_DispatchThreadID</code> 是你最常用的 ID。它直接映射到你的数据索引。比如你要处理一张 1024x1024 的纹理，Dispatch(1024, 1024, 1)，每个线程处理一个像素，<code>dispatchID.xy</code> 就是这个像素的坐标。
+        </div>
+
+        <h2>为什么不用传统渲染管线做通用计算？</h2>
+
+        <p>在 Compute Shader 出现之前，开发者用各种 hack 在 GPU 上做通用计算：</p>
+
+        <table>
+            <thead>
+                <tr><th>Hack 方案</th><th>原理</th><th>缺点</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Geometry Shader</td>
+                    <td>用 GS 修改/生成顶点</td>
+                    <td>带宽浪费极大（输入输出都是顶点），没有内存持久化</td>
+                </tr>
+                <tr>
+                    <td>Feedback Buffer (DX11)</td>
+                    <td>GS 输出写回缓冲区</td>
+                    <td>仍需走光栅化管线，无法随机读写</td>
+                </tr>
+                <tr>
+                    <td>Render to Texture + Ping-Pong</td>
+                    <td>把数据存在纹理里，用 PS 读写</td>
+                    <td>纹理格式限制（RGBA 整数/浮点），带宽效率低，无法做通用缓冲</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p>Compute Shader 的优势在于：</p>
+
+        <ol>
+            <li><strong>无渲染开销</strong>：不经过顶点着色、光栅化、混合等阶段</li>
+            <li><strong>灵活的资源绑定</strong>：Structured Buffer、RWTexture、AppendBuffer 等通用存储</li>
+            <li><strong>组内共享内存</strong>：Thread Group 内的线程可以通过 Shared Memory 高速通信</li>
+            <li><strong>精确的同步</strong>：Barrier 机制保证内存可见性</li>
+            <li><strong>可编程的线程组织</strong>：numthreads 自由指定，不限于固定粒度</li>
+        </ol>
+
+        <h2>Compute Shader 的典型应用场景</h2>
+
+        <div class="definition">
+            <h4>什么时候该用 Compute Shader？</h4>
+            <p>如果你的问题满足以下条件，Compute Shader 是理想选择：</p>
+            <ul>
+                <li><strong>数据并行</strong>：大量数据上执行相同的操作</li>
+                <li><strong>内存密集</strong>：操作主要是数据搬运和简单计算</li>
+                <li><strong>迭代式</strong>：需要多轮计算，中间结果需要存储和复用</li>
+                <li><strong>动态数据量</strong>：数据规模在运行时确定，不是固定的</li>
+            </ul>
+        </div>
+
+        <p>典型场景包括：</p>
+
+        <ul>
+            <li><strong>图像处理</strong>：滤镜、缩放、色调映射、后处理效果</li>
+            <li><strong>物理模拟</strong>：粒子系统、流体模拟、布料/刚体动力学</li>
+            <li><strong>数据科学</strong>：排序、搜索、矩阵运算、机器学习推理</li>
+            <li><strong>游戏 AI</strong>：群体模拟（ flocking / steering behaviors）、路径查找（GPU A*）</li>
+            <li><strong>几何处理</strong>：网格细分、置换贴图、LOD 生成</li>
+            <li><strong>光线追踪</strong>：DXR 的光线生成和遍历也依赖 Compute Shader</li>
+        </ul>
+
+        <h2>线程生命周期：从 Dispatch 到完成</h2>
+
+        <p>理解线程的生命周期对后续学习同步和内存屏障至关重要：</p>
+
+<pre><code class="language-text">1. 主机端调用 cmdDispatch(device, 8, 8, 1)
+   │
+   ▼
+2. GPU 调度器将 8×8×1 = 64 个 Group 分配到 SM (Streaming Multiprocessor)
+   │   每个 SM 同时驻留多个 Group
+   │   每个 Group 被拆分为 Warps
+   │
+   ▼
+3. 每个 Warp 从指令缓存中取指、解码、发射
+   │   32 个线程同步执行同一条指令
+   │   每个线程有不同的标量操作数
+   │
+   ▼
+4. 线程执行过程中：
+   │   - 读 Shared Memory：1-3 周期延迟
+   │   - 读全局内存：200-800 周期延迟 ← 触发延迟隐藏
+   │   - 分支发散：Warp 序列化执行
+   │
+   ▼
+5. 写入结果到 UAV / SRV / CBV
+   │
+   ▼
+6. Group 结束 → 隐式 Rendezvous（所有线程必须到达）
+   │
+   ▼
+7. Group 完成 → 下一个 Group 被调度到 SM
+   │
+   ▼
+8. 所有 Group 完成 → cmdExecuteIndirect / QueueFlush → 结果对主机可见</code></pre>
+
+        <div class="callout callout-info">
+            <strong>关键概念预热</strong>：上面提到的 <strong>SM（流式多处理器）</strong> 是 GPU 上实际执行指令的物理单元。每个 SM 包含多个 CUDA Core（NVIDIA）或 Stream Processor（AMD）、Shared Memory 寄存器文件、指令缓存。一个 GPU 有多个 SM。Dispatch 的 Group 会被调度器分配到各个 SM 上执行。<strong>Occupancy（占用率）</strong> 指的是一个 SM 上实际驻留的 Warp 数量，它直接影响延迟隐藏能力——这是第 9 章性能优化的核心话题。
+        </div>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>概念题</h4>
+                    <p>假设有 100 万个浮点数需要求和。如果每个线程处理一个数，你需要 Dispatch 多少？numthreads 设为多少合适？为什么？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>分析题</h4>
+                    <p>一段 Compute Shader 中有如下代码：<br>
+                    <code>if (threadID.x % 2 == 0) { x += 1; } else { x *= 2; }</code><br>
+                    分析这段代码在 Warp 级别的执行效率。有多少比例的周期是浪费的？如何重写以提高效率？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>思考题</h4>
+                    <p>为什么 GPU 要做"高吞吐"而非"低延迟"的设计？这和 Moore 定律的演变有什么关系？（提示：考虑晶体管增加时，放在缓存上还是放在核心上，对性能的影响不同）</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>Compute Shader 是独立于渲染管线的通用 GPU 计算通道</li>
+            <li>CPU 追求低延迟，GPU 追求高吞吐——这是架构设计的根本分歧</li>
+            <li>SIMT 模型下，Warp 内的 32 个线程同步执行同一条指令</li>
+            <li>分支发散是 GPU 性能的主要杀手之一</li>
+            <li>Dispatch + numthreads 定义了线程的组织结构</li>
+            <li>延迟隐藏通过大量活跃 Warp 实现，是 GPU 高吞吐的秘密</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章预告</strong>：理解了架构之后，我们需要学会 GPU 的编程语言——HLSL/GLSL。Chapter 02 将介绍 Shader 语言的类型系统、内置函数和精度修饰符。
+        </div>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://developer.nvidia.com/blog/using-cuda-to-speed-up-your-custom-gpu-kernels/" target="_blank">NVIDIA: Using CUDA to Speed Up Your Custom GPU Kernels</a></li>
+                <li><a href="https://www.intel.com/content/www/us/en/develop/documentation/oneapi-dpcpp-cpp-developer-guide/top/compiler-reference/simt-execution-model.html" target="_blank">Intel: SIMT Execution Model</a></li>
+                <li><a href="https://learn.microsoft.com/en-us/windows/win32/direct3dverbs/d3d12-programming-guide" target="_blank">DX12 Programming Guide (Microsoft)</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a>← 上一章</a>
+            <a href="02-hlsl-glsl-basics.html">02 - HLSL/GLSL 基础 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hlsl.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

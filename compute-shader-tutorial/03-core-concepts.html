@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 - Compute Shader 核心概念 - Compute Shader 入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-hlsl-glsl-basics.html">← 上一章</a>
+        <a href="04-dx12-compute-pipeline.html">04 - DX12 Compute Pipeline →</a>
+    </nav>
+
+    <main>
+        <h1>Compute Shader 核心概念</h1>
+
+        <p>本章是整本教程的理论核心。Thread Group、Dispatch、Shared Memory、Barrier 这四个概念构成了理解一切 Compute Shader 的基础。如果你能透彻理解本章，后面的实战和优化章节会轻松很多。</p>
+
+        <h2>Thread Group：GPU 调度的最小单位</h2>
+
+        <p>GPU 不会单独调度一个线程。它调度的最小单位是 <strong>Thread Group（线程组）</strong>。这是理解 Compute Shader 的第一步，也是最关键的一步。</p>
+
+        <div class="definition">
+            <h4>Thread Group</h4>
+            <p>Thread Group 是一组线程的集合，它们：</p>
+            <ul>
+                <li>被分配<strong>到同一个物理 SM（流式多处理器）</strong>上执行</li>
+                <li>可以<strong>共享 Shared Memory</strong>（组内高速内存）</li>
+                <li>可以<strong>相互同步</strong>（Barrier）</li>
+                <li>在 <strong>Rendezvous（汇合点）</strong> 隐式同步——所有线程必须到达组尾，组才能结束</li>
+            </ul>
+        </div>
+
+        <p>一个 Thread Group 的大小由 <code>[numthreads(x, y, z)]</code> 指定，常见的大小有：</p>
+
+        <table>
+            <thead>
+                <tr><th>大小</th><th>线程数</th><th>适用场景</th><th>备注</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>(8, 8, 1)</td><td>64</td><td>图像处理、2D 数据并行</td><td>2 个 Warp (NVIDIA)，对齐完美</td></tr>
+                <tr><td>(16, 8, 1)</td><td>128</td><td>中等并行度，Shared Memory 较大</td><td>4 个 Warp</td></tr>
+                <tr><td>(256, 1, 1)</td><td>256</td><td>1D 数据流、粒子系统</td><td>8 个 Warp，Warp 内数据局部性好</td></tr>
+                <tr><td>(512, 1, 1)</td><td>512</td><td>大规模 1D 并行</td><td>16 个 Warp，最大化 Occupancy</td></tr>
+                <tr><td>(8, 8, 8)</td><td>512</td><td>3D 体积数据、3D 网格</td><td>3D 空间局部性</td></tr>
+            </tbody>
+        </table>
+
+        <h3>为什么 256 和 512 是最常用的 1D 大小？</h3>
+
+        <p>因为这些大小是 32（Warp Size）的整数倍：</p>
+
+<pre><code class="language-text">256 / 32 = 8 个 Warp per Group
+512 / 32 = 16 个 Warp per Group
+
+NVIDIA GPU 一个 SM 最多驻留约 32 个 Warp。
+如果用 numthreads(256, 1, 1)，一个 SM 可以同时驻留 32/8 = 4 个 Group。
+如果用 numthreads(512, 1, 1)，一个 SM 同时驻留 32/16 = 2 个 Group。
+
+更大的 Group 数 = 更好的延迟隐藏，但更少的 Occupancy。</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>不要随意选 numthreads</strong>：很多人随便选个 64 或 128，但这会导致 Warp 碎片化。比如 numthreads(64, 1, 1) = 2 个 Warp，一个 SM 驻留 16 个 Group。但如果 numthreads(96, 1, 1) = 3 个 Warp，16 个 Warp / 3 = 5 个 Group（余 1 个 Warp 浪费），Occupancy 很差。<strong>首选 32 的倍数。</strong>
+        </div>
+
+        <h2>Dispatch：从主机端发射计算</h2>
+
+        <p>Dispatch 告诉 GPU 要创建多少个 Thread Group：</p>
+
+<pre><code class="language-cpp">// DX12
+commandList->Dispatch(groupCountX, groupCountY, groupCountZ);
+
+// Vulkan
+vkCmdDispatch(commandBuffer, groupCountX, groupCountY, groupCountZ);</code></pre>
+
+        <p>总线程数 = <code>groupCountX × groupCountY × groupCountZ × numthreadsX × numthreadsY × numthreadsZ</code></p>
+
+        <p>举例：一张 1024×1024 的图像，用 <code>[numthreads(8, 8, 1)]</code>：</p>
+
+<pre><code class="language-text">每组处理 8×8 = 64 个像素
+需要 1024/8 = 128 组（x 方向）× 128 组（y 方向）
+Dispatch(128, 128, 1) → 16384 个 Group → 1,048,576 个线程</code></pre>
+
+        <h3>边界检查：线程数可能超过数据尺寸</h3>
+
+        <p>如果图像是 1020×1020，Dispatch(128, 128, 1) 会产生 1024×1024 = 1,048,576 个线程，但只有 1,040,400 个有效像素。多出来的 8176 个线程需要做边界检查：</p>
+
+<pre><code class="language-hlsl">RWTexture2D&lt;float4&gt; output : register(u0);
+Texture2D&lt;float4&gt; input : register(t0);
+SamplerState samp : register(s0);
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 tid : SV_DispatchThreadID)
+{
+    // 边界检查——每个 Compute Shader 都必须做
+    if (tid.x &gt;= 1020 || tid.y &gt;= 1020)
+        return;
+
+    output[tid.xy] = input.Sample(samp, tid.xy / 1020.0);
+}</code></pre>
+
+        <div class="callout callout-info">
+            <strong>边界检查的性能影响</strong>：在组内如果部分线程越过边界提前返回，而另一部分还在计算，会导致 Warp 发散。缓解方法：让超出边界的线程也执行一个"空操作"（比如写入相同的值），保持所有线程同步执行。
+        </div>
+
+        <h2>Shared Memory：组内线程的高速通道</h2>
+
+        <p>Shared Memory 是每个 Thread Group 私有的高速内存区域。它的特点：</p>
+
+        <table>
+            <thead>
+                <tr><th>属性</th><th>值</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>容量</td><td>每 SM 48KB-164KB（取决于 GPU 型号）</td></tr>
+                <tr><td>延迟</td><td>1-3 个时钟周期（vs 全局内存 200-800 周期）</td></tr>
+                <tr><td>带宽</td><td>约等于寄存器文件带宽，远高于全局内存</td></tr>
+                <tr><td>生命周期</td><td>Group 存续期间，Group 结束后销毁</td></tr>
+                <tr><td>可见性</td><td>仅同组线程可见，不同组之间隔离</td></tr>
+            </tbody>
+        </table>
+
+        <h3>Shared Memory 的典型用法：Tile-based 算法</h3>
+
+        <p>最常见的 Shared Memory 使用模式是 <strong>Tile（瓦片）处理</strong>。以图像卷积为例：</p>
+
+<pre><code class="language-hlsl">// 5×5 高斯卷积：每个像素需要周围 2 个像素的值
+// 如果每个线程直接读全局内存，一个像素需要 25 次全局读取
+
+// 优化方案：用 Shared Memory 做 Tile 预取
+#define KERNEL_SIZE 5
+#define HALF_KERNEL 2
+
+[numthreads(16, 16, 1)]
+void CSMain(uint3 tid : SV_DispatchThreadID)
+{
+    // 1. 声明 Shared Memory（运行时分配）
+    SharedMemory float4 sharedTile[32][32];       // 输入 Tile
+    SharedMemory float4 sharedOutput[16][16];     // 输出 Tile
+
+    // 2. 每个线程加载自己的全局像素到 Shared Memory
+    int2 globalPos = tid.xy;
+    if (globalPos.x &lt; screenWidth && globalPos.y &lt; screenHeight)
+    {
+        sharedTile[tid.xy] = inputTexture[globalPos];
+    }
+    else
+    {
+        sharedTile[tid.xy] = float4(0, 0, 0, 0);  // 边界填充
+    }
+
+    // 3. 加载 Halo 区域（相邻 Tile 的重叠部分）
+    // 左 halo
+    if (tid.x &gt; 0)
+    {
+        sharedTile[tid.xy - int2(HALF_KERNEL, 0)] = inputTexture[globalPos - int2(HALF_KERNEL, 0)];
+    }
+    // 右 halo
+    if (tid.x &lt; 15)
+    {
+        sharedTile[tid.xy + int2(16 - HALF_KERNEL, 0)] = inputTexture[globalPos + int2(16 - HALF_KERNEL, 0)];
+    }
+    // 上 halo... 下 halo...（同理）
+
+    // 4. ★ 关键：等所有线程都写完 Shared Memory 再读
+    GroupMemoryBarrierWithGroupSync();
+
+    // 5. 从 Shared Memory 做卷积计算（快 100x+）
+    float4 result = float4(0, 0, 0, 0);
+    for (int dy = -HALF_KERNEL; dy &lt;= HALF_KERNEL; dy++)
+    {
+        for (int dx = -HALF_KERNEL; dx &lt;= HALF_KERNEL; dx++)
+        {
+            int2 offset = int2(dx, dy);
+            float weight = gaussianWeight(dx, dy);
+            result += sharedTile[tid.xy + offset] * weight;
+        }
+    }
+
+    // 6. 写回全局
+    outputTexture[globalPos] = result;
+}</code></pre>
+
+        <h3>Shared Memory 的 Bank Conflict</h3>
+
+        <p>Shared Memory 被划分为若干个 <strong>Bank（存储体）</strong>。NVIDIA GPU 通常有 32 个 Banks，每个 Bank 每次服务一个线程请求。如果同一个 Warp 内的多个线程同时访问同一个 Bank 的不同地址，就会发生 <strong>Bank Conflict</strong>——这些访问被序列化执行。</p>
+
+<pre><code class="language-text">32 Banks，每 Bank 4 字节（uint）：
+
+Bank 0: [addr_0] [addr_32] [addr_64] ...
+Bank 1: [addr_1] [addr_33] [addr_65] ...
+Bank 2: [addr_2] [addr_34] [addr_66] ...
+...
+Bank 31: [addr_31] [addr_63] [addr_95] ...
+
+无冲突：Warp 的 32 个线程分别访问 addr_0 到 addr_31
+  → 每个线程访问不同的 Bank → 32 个访问同时完成
+
+16 路冲突：Warp 的 32 个线程都访问 Bank 0
+  → addr_0, addr_32, addr_64, ... 都在 Bank 0
+  → 32 次访问被分成 2 次完成（每 2 个线程一组）
+  → 性能下降 16x</code></pre>
+
+        <p>避免 Bank Conflict 的方法：</p>
+
+<pre><code class="language-hlsl">// ❌ 有冲突：float3 导致偏移错开，32 个线程访问同一列时会冲突
+SharedMemory float3 shared[32][32];
+
+// ✅ 无冲突：加 padding 使每行对齐到 32 的倍数
+SharedMemory float shared[32][33];  // 每行 33 个 float，跳过第 32 个
+
+// ✅ 或者直接用 float4（4 × 32 = 128 字节 = 32 Banks × 4 字节，完美对齐）
+SharedMemory float4 shared[32][32];  // 每个线程访问不同 Bank，无冲突</code></pre>
+
+        <h2>Barrier 与同步</h2>
+
+        <p>Compute Shader 中有三种层次的同步机制：</p>
+
+        <h3>2.1 Warp-level 同步</h3>
+
+<pre><code class="language-hlsl">// 等待同一 Warp 内的所有线程到达
+__syncthreads();  // CUDA 风格
+// HLSL 中没有 warp-level barrier，但 __syncwarp() 可用（SM 6.0+）
+// 或 waveBarrier()（SM 6.2+）</code></pre>
+
+        <h3>2.2 Group-level 同步（最常用）</h3>
+
+<pre><code class="language-hlsl">// 等待同组所有线程完成对 Shared Memory 的写入
+GroupMemoryBarrierWithGroupSync();
+// 等价于：
+//   GroupMemoryBarrier();  // 确保 Shared Memory 写入可见
+//   barrier();             // 所有线程汇合
+
+// 仅确保可见性，不等所有线程到达
+GroupMemoryBarrier();
+// 注意：后续代码可能在某些线程还没写完时就执行了！</code></pre>
+
+        <h3>2.3 全局同步（跨 Group）</h3>
+
+<pre><code class="language-hlsl">// 所有 Group 的所有线程都到达此处
+// 用于跨 Group 的数据依赖
+// 在 DX12 中通过 Command List 的 Signal/Wait 实现
+// 在 Vulkan 中通过 Fence/Semaphore 实现</code></pre>
+
+        <h3>Barrier 的语义分解</h3>
+
+        <p>理解 Barrier 需要把它拆成两个正交的概念：</p>
+
+        <table>
+            <thead>
+                <tr><th></th><th>Memory Visibility（可见性）</th><th>Synchronization（同步/汇合）</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>仅有可见性</strong></td>
+                    <td><code>GroupMemoryBarrier()</code></td>
+                    <td>不等待其他线程，继续执行</td>
+                </tr>
+                <tr>
+                    <td><strong>可见性 + 同步</strong></td>
+                    <td><code>GroupMemoryBarrierWithGroupSync()</code></td>
+                    <td>所有线程必须到达后才继续</td>
+                </tr>
+                <tr>
+                    <td><strong>全局可见性</strong></td>
+                    <td><code>DeviceMemoryBarrier()</code></td>
+                    <td>确保所有设备内存操作完成</td>
+                </tr>
+                <tr>
+                    <td><strong>全局可见性 + 同步</strong></td>
+                    <td><code>DeviceMemoryBarrierWithGroupSync()</code></td>
+                    <td>所有线程 + 所有内存操作完成</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-danger">
+            <strong>经典 Bug</strong>：写了 Shared Memory 后用了 <code>GroupMemoryBarrier()</code>（无 Sync）而不是 <code>GroupMemoryBarrierWithGroupSync()</code>。如果后续代码不依赖所有线程的数据，这没问题；但如果后续代码需要所有数据就绪，就会出 Bug。<strong>不确定就用 WithGroupSync。</strong>
+        </div>
+
+        <h2>Resource Binding：Shader 如何访问数据</h2>
+
+        <p>Compute Shader 通过 <strong>Descriptor Heap</strong>（DX12）或 <strong>Descriptor Set</strong>（Vulkan）绑定资源。核心资源类型：</p>
+
+        <table>
+            <thead>
+                <tr><th>资源类型</th><th>读</th><th>写</th><th>随机访问</th><th>原子操作</th><th>示例</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>Constant Buffer</strong></td><td>SRV</td><td>✗</td><td>任意</td><td>✗</td><td>相机矩阵、场景参数</td></tr>
+                <tr><td><strong>Structured Buffer</strong></td><td>SRV</td><td>✗</td><td>任意</td><td>✗</td><td>顶点数据、粒子属性</td></tr>
+                <tr><td><strong>RWStructured Buffer</strong></td><td>✓</td><td>✓</td><td>任意</td><td>✓</td><td>输出缓冲区、计数器</td></tr>
+                <tr><td><strong>Texture2D</strong></td><td>SRV + Sample</td><td>✗</td><td>任意</td><td>✗</td><td>输入图像</td></tr>
+                <tr><td><strong>RWTexture2D</strong></td><td>✓ (直接索引)</td><td>✓</td><td>任意</td><td>部分</td><td>输出图像、累加器</td></tr>
+                <tr><td><strong>AppendBuffer</strong></td><td>✗</td><td>✓ (追加)</td><td>✗</td><td>✓</td><td>粒子生成、结果收集</td></tr>
+                <tr><td><strong>ConsumeBuffer</strong></td><td>✓+✗ (原子弹出)</td><td>✓ (删除)</td><td>✗</td><td>✓</td><td>工作队列、任务分发</td></tr>
+            </tbody>
+        </table>
+
+        <h3>SRV vs UAV 的本质区别</h3>
+
+        <p>这是 DX12 中最容易混淆的概念之一：</p>
+
+        <div class="definition">
+            <h4>SRV (Shader Resource View)</h4>
+            <p>只读视图。GPU 可以用 <strong>任意缓存策略</strong>读取（L1/L2 缓存命中率高）。绑定为 SRV 的资源，Shader 不能写入。</p>
+        </div>
+
+        <div class="definition">
+            <h4>UAV (Unordered Access View)</h4>
+            <p>读写视图。GPU 可以读和写。绑定为 UAV 的资源<strong>不使用缓存</strong>（uncached），因为写入需要同步保证可见性。UAV 还支持原子操作。</p>
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>缓存策略的影响</strong>：SRV 走缓存，UAV 不走缓存。这意味着 <strong>读同一个位置多次</strong>，SRV 第二次命中 L1 缓存（~1 周期），UAV 要走全局内存（~200 周期）。所以<strong>只读资源一定要绑 SRV 而不是 UAV</strong>。
+        </div>
+
+        <h2>内存层级全景</h2>
+
+        <p>理解 GPU 内存层级是编写高性能 Compute Shader 的关键。从快到慢：</p>
+
+        <table class="memory-hierarchy">
+            <thead>
+                <tr><th>层级</th><th>延迟</th><th>带宽</th><th>容量/Group</th><th>可见性</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>寄存器</strong></td><td>1 周期</td><td>∞</td><td>每线程 ~255 个</td><td>私有</td></tr>
+                <tr><td><strong>Shared Memory</strong></td><td>1-3 周期</td><td>极高</td><td>~48-164 KB/SM</td><td>组内</td></tr>
+                <tr><td><strong>L1 缓存</strong></td><td>~10 周期</td><td>高</td><td>~12-64 KB/SM</td><td>SM 内</td></tr>
+                <tr><td><strong>Texture Cache</strong></td><td>~10-20 周期</td><td>高（空间局部性好时）</td><td>~48 KB/SM</td><td>SM 内</td></tr>
+                <tr><td><strong>L2 缓存</strong></td><td>~50 周期</td><td>中高</td><td>~2-6 MB (全 GPU)</td><td>全局</td></tr>
+                <tr><td><strong>Global Memory</strong></td><td>200-800 周期</td><td>~500 GB/s (RTX 4090)</td><td>~24 GB (RTX 4090)</td><td>全局</td></tr>
+            </tbody>
+        </table>
+
+        <h3>优化策略：尽量减少全局内存访问</h3>
+
+        <p>一个简单的规则：</p>
+
+<pre><code class="language-text">每次全局内存读 ≈ 200-800 周期
+每次 Shared Memory 读 ≈ 1-3 周期
+一次浮点加法 ≈ 1 周期
+
+所以：把数据从全局内存搬到 Shared Memory，
+      然后在 Shared Memory 中做 100+ 次计算，
+      总体上是划算的。</code></pre>
+
+        <h2>Root Signature：DX12 的资源绑定契约</h2>
+
+        <p>Root Signature 是 DX12 中 Shader 和资源之间的"契约"，它声明了 Shader 需要哪些资源、在哪里可以找到它们：</p>
+
+<pre><code class="language-cpp">// DX12 Root Signature 构建
+CD3DX12_DESCRIPTOR_RANGE srvTable({ D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0 });
+CD3DX12_DESCRIPTOR_RANGE uavTable({ D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0 });
+
+CD3DX12_ROOT_PARAMETER rootParams[2];
+rootParams[0].InitAsDescriptorTable(1, &srvTable, D3D12_SHADER_VISIBILITY_COMPUTE);
+rootParams[1].InitAsDescriptorTable(1, &uavTable, D3D12_SHADER_VISIBILITY_COMPUTE);
+
+CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(2, rootParams, 0, nullptr,
+    D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);</code></pre>
+
+        <p>在 HLSL 中对应：</p>
+
+<pre><code class="language-hlsl">// rootParams[0] → descriptor table 0, slot 0 = SRV
+StructuredBuffer&lt;float&gt; input : register(t0);
+
+// rootParams[1] → descriptor table 0, slot 0 = UAV
+RWStructuredBuffer&lt;float&gt; output : register(u0);</code></pre>
+
+        <h2>执行流全景：从 Dispatch 到结果</h2>
+
+        <p>把所有概念串起来，一个完整的 Compute Shader 执行流程：</p>
+
+<pre><code class="language-text">主机端 (CPU):
+  1. 创建 Descriptor Heap（存放 SRV/UAV 描述符）
+  2. 写入描述符（把 GPU 虚拟地址填入 Descriptor）
+  3. 设置 Root Signature 和 Pipeline State
+  4. 绑定 Descriptor Table 到 Pipeline
+  5. cmdDispatch(128, 128, 1)
+
+GPU 端 (硬件):
+  6. 调度器将 16384 个 Group 分配到所有 SM
+  7. 每个 SM 取 1-2 个 Group 驻留
+  8. Group 拆分为 Warps (每组 16,16,1 → 4 Warps)
+  9. Warps 从指令缓存取指执行
+  10. 线程读取全局内存 → 写入 Shared Memory
+  11. GroupMemoryBarrierWithGroupSync() — 所有线程汇合
+  12. 从 Shared Memory 计算 → 写回全局内存
+  13. 隐式 Rendezvous — 组尾同步
+  14. Group 完成，释放 SM 资源
+  15. 下一个 Group 被调度
+
+主机端:
+  16. cmdCopyResource（将 GPU 结果拷回 CPU 可读的 Readback Buffer）
+  17. Map/Unmap 读取结果</code></pre>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>概念题</h4>
+                    <p>为什么 Thread Group 必须在同一个 SM 上执行？如果允许跨 SM，Shared Memory 和 Barrier 还能工作吗？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>分析题</h4>
+                    <p>一个 [numthreads(256, 1, 1)] 的 Shader 中，SharedMemory float shared[256]。Warp 0（线程 0-31）同时读取 shared[0..31]，会发生 Bank Conflict 吗？如果改成 SharedMemory float shared[32][8]，Warp 0 读取 shared[0..31][0] 呢？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>代码题</h4>
+                    <p>写一个求数组最大值的 Compute Shader。提示：用 Shared Memory 做组内 Reduce（树形归约），最后每个 Group 输出一个局部最大值，主机端再做一轮归约。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>Thread Group 是 GPU 调度的最小单位，必须在同一个 SM 上执行</li>
+            <li>numthreads 首选 32 的倍数（256/512 最常用）</li>
+            <li>Shared Memory 比全局内存快 100x+，但要注意 Bank Conflict</li>
+            <li>Barrier 分两个正交概念：可见性 vs 同步</li>
+            <li>SRV 走缓存（读），UAV 不走缓存（读写+原子）</li>
+            <li>内存层级决定了优化方向：尽量在 Shared Memory 中计算</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章预告</strong>：Chapter 04 将带你从零搭建 DX12 Compute Pipeline，包括 Root Signature、Pipeline State、Descriptor Heap、Command Queue 的完整创建流程。
+        </div>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://developer.nvidia.com/blog/using-shared-memory-cuda-c-cpp/" target="_blank">NVIDIA: Using Shared Memory in CUDA</a></li>
+                <li><a href="https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-12-programming-guide" target="_blank">DX12 Programming Guide</a></li>
+                <li><a href="https://gpuopen.com/learn/compute_shader_tutorial/" target="_blank">GPUOpen Compute Shader Tutorial</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="02-hlsl-glsl-basics.html">← HLSL/GLSL 基础</a>
+            <a href="04-dx12-compute-pipeline.html">04 - DX12 Compute Pipeline →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hlsl.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

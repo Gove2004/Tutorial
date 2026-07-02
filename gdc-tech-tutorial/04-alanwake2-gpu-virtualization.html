@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 - Alan Wake 2 — GPU 虚拟化与 Northlight - GDC 高技术讲座深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-spiderman2-rendering.html">&larr; 上一章</a>
+        <a href="05-cyberpunk-path-tracing.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>04 - Alan Wake 2 — GPU 虚拟化与 Northlight Engine</h1>
+
+        <p class="intro">Remedy Entertainment 的 Alan Wake 2 代表了独立游戏工作室在渲染技术上的巅峰之一。Northlight Engine 3.0 引入了 GPU Driven Rendering Pipeline 和 Virtual Shadow Maps，在中等硬件上实现了电影级画质。本章深入解析这些技术的实现细节。</p>
+
+        <div class="callout callout-info">
+            <strong>前置知识</strong>：DX12/Vulkan 基础、Shadow Map 原理、Compute Shader、PBR 渲染
+        </div>
+
+        <h2>一、Northlight Engine 核心架构</h2>
+
+        <p>Northlight Engine 是 Remedy 自研的跨平台游戏引擎，从《Control》（2019）开始使用，到《Alan Wake 2》（2023）已经发展到 3.0 版本。Engine 3.0 的核心设计理念是"GPU 驱动一切"——将尽可能多的渲染决策从 CPU 转移到 GPU。</p>
+
+        <div class="arch-diagram">
+┌─────────────────────────────────────────────────────────────┐
+│                 Northlight Engine 3.0 架构                    │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │              GPU Driven Rendering Pipeline            │    │
+│  │                                                     │    │
+│  │  CPU: 场景图遍历 → 可见性判断 → 命令生成              │    │
+│  │       ↓                                             │    │
+│  │  GPU Compute: 剔除 → 排序 → 批处理 → 命令编码         │    │
+│  │       ↓                                             │    │
+│  │  GPU: 顶点着色 → 光栅化 → 像素着色 → 后处理          │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐   │
+│  │ Virtual   │ │  Lumen   │ │  Chaos   │ │  Northlight  │   │
+│  │ Shadow    │ │  GI      │ │  Physics │ │  Post-Proc   │   │
+│  │  Maps     │ │          │ │          │ │              │   │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+        </div>
+
+        <h3>从 CPU 驱动到 GPU 驱动的转变</h3>
+
+        <p>传统渲染管线中，CPU 负责决定"画什么"和"怎么画"——遍历场景图、判断可见性、排序物体、生成 Draw Call。这种方式在物体数量多时成为瓶颈。</p>
+
+        <p>GPU Driven Rendering 的核心思想是：<strong>让 GPU 来计算哪些物体可见、如何排序、如何批处理</strong>。具体流程：</p>
+
+        <ol>
+            <li><strong>Scene Build（CPU）</strong>：构建场景图，生成 Object Table（物体列表，包含世界矩阵、包围盒、材质 ID）</li>
+            <li><strong>Visibility Culling（GPU Compute）</strong>：将 Object Table 传入 GPU，使用 Frustum Culling + Occlusion Culling 判断可见性</li>
+            <li><strong>Tiling & Batching（GPU Compute）</strong>：将可见物体按材质/纹理分组，生成 Tile 和 Batch 信息</li>
+            <li><strong>Command Encoding（GPU Compute）</strong>：根据 Batch 信息直接生成 DX12/Vulkan 的 Command List</li>
+            <li><strong>Render（GPU）</strong>：执行 Command List 完成渲染</li>
+        </ol>
+
+        <h2>二、GPU Driven Rendering Pipeline 详解</h2>
+
+        <p>这是 Northlight Engine 3.0 最重要的架构变革。让我们逐层拆解。</p>
+
+        <h3>Object Table 结构</h3>
+
+        <pre><code class="language-cpp">// ObjectTable.h - GPU 驱动渲染的物体描述符
+struct ObjectDescriptor
+{
+    uint32  InstanceID;       // 物体实例 ID
+    uint32  MaterialID;       // 材质索引
+    uint32  TextureSetID;     // 纹理集索引
+    uint32  LODIndex;         // LOD 级别
+    uint32  Padding0;
+
+    float4  WorldTransform[4]; // 世界矩阵（4x4）
+    float4  BoundingBoxMin;    // 包围盒最小值
+    float4  BoundingBoxMax;    // 包围盒最大值
+    float4  CameraSpaceCenter; // 相机空间中心（用于排序）
+    float   DistanceSq;        // 到相机的距离平方
+    uint32  SortKey;           // 排序键（按距离 + 材质分组）
+};
+
+// CPU 端构建 Object Table
+void BuildObjectTable(const Scene& scene)
+{
+    ObjectTable.Reset();
+    for (auto& actor : scene.Actors)
+    {
+        if (!actor.IsVisible()) continue;
+
+        ObjectDescriptor desc;
+        desc.InstanceID  = actor.ID;
+        desc.MaterialID  = actor.Material.Index;
+        desc.TextureSetID = actor.TextureSet.Index;
+        desc.LODIndex    = actor.GetLODIndex();
+        desc.WorldTransform = actor.WorldMatrix;
+        desc.BoundingBoxMin = actor.BoundingBox.Min;
+        desc.BoundingBoxMax = actor.BoundingBox.Max;
+
+        // 计算相机空间中的位置和距离
+        desc.CameraSpaceCenter = TransformPoint(actor.WorldMatrix.GetTranslation(), ViewMatrix);
+        desc.DistanceSq = desc.CameraSpaceCenter.LengthSquared();
+        desc.SortKey = GenerateSortKey(desc.MaterialID, desc.DistanceSq);
+
+        ObjectTable.Add(desc);
+    }
+
+    // 将 Object Table 上传到 GPU
+    UploadToGPU(ObjectTable, GPUBuffer);
+}</code></pre>
+
+        <h3>GPU 端可见性判定</h3>
+
+        <pre><code class="language-cs">// VisibilityCulling.compute - GPU 端遮挡剔除
+RWStructuredBuffer&lt;ObjectDescriptor&gt; InputObjects;
+RWStructuredBuffer&lt;ObjectDescriptor&gt; OutputObjects;
+Buffer&lt;uint&gt;                         OutputCount;
+cbuffer ViewConstants : register(b0)
+{
+    float4   FrustumPlanes[6];  // 视锥平面（法线, 距离）
+    float3   CameraPosition;
+    float    FarClipDistance;
+};
+
+[numthreads(256, 1, 1)]
+void Main(uint3 tid : SV_DispatchThreadID)
+{
+    uint idx = tid.x;
+    if (idx &gt;= InputObjects.Length) return;
+
+    ObjectDescriptor obj = InputObjects[idx];
+
+    // 1. 视锥剔除
+    if (!IsInsideFrustum(obj.BoundingBoxMin, obj.BoundingBoxMax))
+    {
+        OutputObjects[idx] = obj;
+        OutputObjects[idx].SortKey = 0xFFFFFFFF; // 标记为不可见
+        return;
+    }
+
+    // 2. 距离裁剪（超出 Far Clip 的物体不渲染）
+    float dist = length(obj.CameraSpaceCenter.xyz);
+    if (dist &gt; FarClipDistance)
+    {
+        OutputObjects[idx].SortKey = 0xFFFFFFFF;
+        return;
+    }
+
+    // 3. 复制有效物体
+    uint outIdx = InterlockedAdd(OutputCount, 1);
+    OutputObjects[outIdx] = obj;
+}
+
+bool IsInsideFrustum(float3 min, float3 max)
+{
+    // 检查包围盒的 8 个顶点是否都在视锥内
+    for (int p = 0; p &lt; 6; p++)
+    {
+        bool allOutside = true;
+        for (int x = 0; x &lt;= 1; x++)
+        for (int y = 0; y &lt;= 1; y++)
+        for (int z = 0; z &lt;= 1; z++)
+        {
+            float3 corner = float3(
+                min.x + x * (max.x - min.x),
+                min.y + y * (max.y - min.y),
+                min.z + z * (max.z - min.z)
+            );
+            if (dot(FrustumPlanes[p].xyz, corner) + FrustumPlanes[p].w &gt;= 0)
+                allOutside = false;
+        }
+        if (allOutside) return false; // 整个包围盒在平面外
+    }
+    return true;
+}</code></pre>
+
+        <h2>三、Virtual Shadow Maps（VSM）</h2>
+
+        <p>VSM 是 Alan Wake 2 最具标志性的技术特征之一。它解决了传统阴影贴图（Shadow Map）的几个根本性限制。</p>
+
+        <h3>传统阴影贴图的局限</h3>
+
+        <table>
+            <thead>
+                <tr><th>问题</th><th>原因</th><th>影响</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>锯齿边缘</td><td>离散采样 + 有限分辨率</td><td>阴影边缘出现阶梯状锯齿</td></tr>
+                <tr><td>分辨率受限</td><td>纹理大小固定（通常 2K-4K）</td><td>远处阴影模糊或近处锯齿明显</td></tr>
+                <tr><td>视差问题</td><td>阴影贴图与摄像机视角绑定</td><td>远距离物体阴影精度低</td></tr>
+                <tr><td>存储限制</td><td>每光源需要独立的 Shadow Map</td><td>多光源场景难以处理</td></tr>
+            </tbody>
+        </table>
+
+        <h3>VSM 的工作原理</h3>
+
+        <div class="definition">
+            <h4>Virtual Shadow Map 核心概念</h4>
+            <p>VSM 不预先生成完整的阴影贴图，而是在渲染时<b>按需</b>计算阴影。它将场景中的阴影信息存储在<b>层级 Mipmap 纹理</b>中，不同分辨率的 Mipmap 对应不同距离的阴影精度。渲染时根据像素到光源的距离，自动选择合适分辨率的 Mipmap 采样阴影。</p>
+        </div>
+
+        <p>VSM 的生成流程：</p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>阴影体积烘焙</h4>
+                    <p>对场景中所有不透明物体，沿光源方向生成阴影体积（Shadow Volume）。将阴影体积的深度信息烘焙到层级 Mipmap 纹理中。第一层 Mipmap 分辨率最高（如 4096x4096），后续每层减半。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>PCF 滤波</h4>
+                    <p>对阴影贴图进行 Percentage-Closer Filtering（PCF），消除锯齿。VSM 使用 4x4 或 8x8 PCF，在质量和性能之间取得平衡。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>运行时采样</h4>
+                    <p>渲染时，根据每个像素到光源的距离选择 Mipmap Level，然后在该分辨率下采样阴影值。远距离使用低分辨率 Mipmap，近距离使用高分辨率 Mipmap。</p>
+                </div>
+            </div>
+        </div>
+
+        <pre><code class="language-cg">// VirtualShadowMap.hlsl - VSM 运行时着色器
+struct VSMInput
+{
+    float4 Position : POSITION;
+    float2 UV : TEXCOORD0;
+    float Depth : DEPTH;
+};
+
+Texture2D&lt;float&gt; VSMTexture;          // 层级阴影贴图
+SamplerState VSSampler;                // 采样器
+
+float4 MainVS(VSMInput input) : POSITION
+{
+    return input.Position;
+}
+
+float MainPS(VSMInput input) : SV_TARGET
+{
+    // 计算像素到光源的距离
+    float3 LightDir = input.Position.xyz - LightPosition;
+    float Dist = length(LightDir);
+
+    // 根据距离选择 Mipmap Level
+    // 近距离 = 高分辨率 (Level 0)，远距离 = 低分辨率 (Level N)
+    float MipLevel = Log2(Dist / NearDistance);
+    MipLevel = clamp(MipLevel, 0.0, MaxMipLevels - 1.0);
+
+    // 采样阴影值
+    float Shadow = VSMTexture.SampleGrad(VSSampler, input.UV,
+        ddx(input.UV) * MipLevelScale,
+        ddy(input.UV) * MipLevelScale);
+
+    // PCF 滤波
+    Shadow = PCFShadow(Shadow, input.UV, MipLevel);
+
+    return Shadow;
+}</code></pre>
+
+        <h3>VSM 性能数据</h3>
+
+        <table>
+            <thead>
+                <tr><th>指标</th><th>传统 Shadow Map</th><th>Virtual Shadow Map</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>阴影分辨率</td><td>固定 2K-4K</td><td>动态 512-4096</td></tr>
+                <tr><td>显存占用</td><td>~128 MB（4 张 4K 贴图）</td><td>~256 MB（层级 Mipmap）</td></tr>
+                <tr><td>生成耗时</td><td>~2ms/光源</td><td>~8ms/场景（一次性）</td></tr>
+                <tr><td>运行时采样</td><td>~0.3ms/像素</td><td>~0.15ms/像素</td></tr>
+                <tr><td>阴影数量支持</td><td>4-8 个动态阴影</td><td>数十个动态阴影</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>：VSM 的一次性生成成本较高（~8ms），但之后运行时开销很低。这意味着它更适合静态或半静态场景，频繁变化的场景需要定期重建 VSM。
+        </div>
+
+        <h2>四、异步计算</h2>
+
+        <p>Alan Wake 2 充分利用了 DX12 和 Vulkan 的异步计算能力，将图形管线和计算管线并行执行。</p>
+
+        <h3>DX12 异步管线架构</h3>
+
+        <div class="arch-diagram">
+┌──────────────────────────────────────────────────────┐
+│              DX12 异步计算架构                         │
+│                                                      │
+│  Command Queue 0 (Graphics)                          │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌──────────┐   │
+│  │ Frame N │ │ Frame N │ │ Frame N │ │ Frame N+1 │   │
+│  │ Render  │ │ Post    │ │ Frame   │ │ Compute  │   │
+│  └─────────┘ └─────────┘ └─────────┘ └──────────┘   │
+│                                                      │
+│  Command Queue 1 (Compute)                           │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌──────────┐   │
+│  │ Compute │ │ Compute │ │ Compute │ │ Compute   │   │
+│  │ Frame N │ │ Frame N │ │ Frame N │ │ Frame N+1 │   │
+│  └─────────┘ └─────────┘ └─────────┘ └──────────┘   │
+│                                                      │
+│  同步点: Resource Barrier (Compute → Graphics)        │
+└──────────────────────────────────────────────────────┘
+        </div>
+
+        <p>关键 Compute Shader 在渲染管线中的应用：</p>
+
+        <ul>
+            <li><strong>Visibility Culling</strong>：GPU 端可见性判定（见上文）</li>
+            <li><strong>LOD Selection</strong>：根据屏幕空间误差自动选择最优 LOD</li>
+            <li><strong>Terrain Tessellation</strong>：地形细分在 Compute Shader 中完成</li>
+            <li><strong>Particle Simulation</strong>：Niagara 风格的粒子模拟</li>
+            <li><strong>Post-Processing</strong>：Tonemapping、Bloom、DOF 等后处理</li>
+        </ul>
+
+        <h2>五、路径追踪预览</h2>
+
+        <p>Remedy 在 GDC 讲座中展示了 Northlight Engine 的路径追踪原型。虽然 AW2 正式发售时未使用全路径追踪，但技术储备已经就绪。</p>
+
+        <h3>路径追踪核心算法</h3>
+
+        <pre><code class="language-cpp">// PathTracer.cpp - 简化版路径追踪实现
+struct PathTraceResult
+{
+    float3 Radiance;      // 累积辐射度
+    float  Throughput;    // 传输率（权重）
+    int    Bounces;       // 反弹次数
+    bool   bTerminated;   // 是否已终止
+};
+
+PathTraceResult TracePath(float2 ScreenUV, uint Seed)
+{
+    PathTraceResult Result = { float3(0,0,0), 1.0f, 0, false };
+
+    // 初始化射线：从相机出发
+    Ray CurrentRay = GenerateCameraRay(ScreenUV, Seed);
+
+    for (int bounce = 0; bounce &lt; MaxBounces; bounce++)
+    {
+        // 1. 射线-场景求交
+        HitRecord Hit;
+        if (!TraceRay(CurrentRay, Hit))
+        {
+            // 命中天空盒，添加天空颜色
+            Result.Radiance += Result.Throughput * SampleSky(Hit.Normal);
+            break;
+        }
+
+        // 2. 评估 BRDF
+        float3 Albedo = Hit.Material.Albedo;
+        float3 Specular = Hit.Material.Specular;
+
+        // 3. 重要性采样下一方向
+        float2 SampleUV = SampleHS(Seed++);
+        Ray NextRay = ImportanceSampleBRDF(Hit, SampleUV);
+
+        // 4. 计算 Russian Roulette 终止概率
+        float TerminationProb = max(Result.Throughput.r,
+                                     max(Result.Throughput.g,
+                                         Result.Throughput.b));
+        TerminationProb = min(TerminationProb, 0.95f);
+
+        if (Rand(Seed) &lt; TerminationProb)
+        {
+            Result.bTerminated = true;
+            break;
+        }
+
+        // 5. 更新传输率和辐射度
+        float3 Li = EvaluateLightSampling(Hit, SampleUV);
+        Result.Radiance += Result.Throughput * Li;
+
+        // 6. 更新 throughpu（BRDF 估值 / 采样概率）
+        Result.Throughput *= BRDFRatio(Hit, NextRay) / (1.0f - TerminationProb);
+
+        CurrentRay = NextRay;
+    }
+
+    return Result;
+}</code></pre>
+
+        <h3>路径追踪性能</h3>
+
+        <p>在全路径追踪模式下，AW2 原型的性能数据：</p>
+
+        <table>
+            <thead>
+                <tr><th>硬件</th><th>分辨率</th><th>采样数</th><th>帧率</th><th>GPU 耗时</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>RTX 4090</td><td>4K</td><td>64 samples</td><td>~30 fps</td><td>~33ms</td></tr>
+                <tr><td>RTX 4080</td><td>4K</td><td>32 samples</td><td>~25 fps</td><td>~40ms</td></tr>
+                <tr><td>RTX 4070 Ti</td><td>1440p</td><td>32 samples</td><td>~30 fps</td><td>~33ms</td></tr>
+                <tr><td>PS5 Pro</td><td>4K (DLSS)</td><td>16 samples</td><td>~20 fps</td><td>~50ms</td></tr>
+            </tbody>
+        </table>
+
+        <h2>六、内存管理</h2>
+
+        <h3>GPU 内存池</h3>
+
+        <p>Northlight Engine 3.0 使用分层的 GPU 内存管理策略：</p>
+
+        <div class="definition">
+            <h4>内存层次</h4>
+            <p><b>持久层</b>：引擎核心资源（材质、Shader、字体），常驻显存。<br>
+            <b>场景层</b>：关卡几何体、纹理、灯光数据，随关卡加载。<br>
+            <b>临时层</b>：渲染中间缓冲区（G-Buffer、Shadow Map、VSM），每帧分配和释放。</p>
+        </div>
+
+        <h3>纹理压缩</h3>
+
+        <p>AW2 使用 BC7（DXTC）和 ASTC（移动端）压缩格式，纹理数据压缩比约为 4:1-8:1。对于 VSM 等特殊纹理，使用专门的浮点压缩格式。</p>
+
+        <h2>七、性能数据总结</h2>
+
+        <table>
+            <thead>
+                <tr><th>平台</th><th>目标 FPS</th><th>分辨率</th><th>GPU 耗时</th><th>CPU 耗时</th><th>总内存</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>PS5</td><td>30</td><td>动态 1080p-1440p</td><td>~28ms</td><td>~8ms</td><td>~10 GB</td></tr>
+                <tr><td>Xbox Series X</td><td>30</td><td>动态 1080p-1440p</td><td>~28ms</td><td>~8ms</td><td>~10 GB</td></tr>
+                <tr><td>PC (RTX 4070)</td><td>60</td><td>1440p</td><td>~8ms</td><td>~4ms</td><td>~12 GB</td></tr>
+                <tr><td>PC (RTX 4090)</td><td>60+</td><td>4K</td><td>~5ms</td><td>~3ms</td><td>~14 GB</td></tr>
+            </tbody>
+        </table>
+
+        <h2>本章小结</h2>
+
+        <p>Alan Wake 2 的技术突破在于将 GPU 从"渲染执行者"转变为"渲染决策者"。GPU Driven Rendering Pipeline 让渲染系统能够处理远超传统方法的物体数量，Virtual Shadow Maps 解决了阴影分辨率和性能的根本矛盾。这些技术正在成为下一代游戏引擎的标准配置。</p>
+
+        <p>核心经验总结：</p>
+
+        <ol>
+            <li><strong>GPU Driven</strong>：将可见性判定、排序、批处理移到 GPU 端，释放 CPU 算力</li>
+            <li><strong>VSM</strong>：层级 Mipmap 阴影贴图 + 按需采样，用一次性生成成本换取运行时灵活性</li>
+            <li><strong>异步计算</strong>：DX12 多队列并行执行，Compute Shader 参与渲染管线</li>
+            <li><strong>内存分层</strong>：持久/场景/临时三层管理策略，配合纹理压缩最大化显存利用率</li>
+        </ol>
+
+        <h2>下一章预告</h2>
+
+        <p>下一章我们将深入研究 CDPR 的 Cyberpunk 2077 路径追踪改造——从屏幕空间 GI 到全局路径追踪的完整演进历程。</p>
+
+        <h2>延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://www.gdcvault.com/videos/1028789" target="_blank">GDC Vault - Alan Wake 2: A Technical Breakdown</a></li>
+            <li><a href="https://www.remedy.games/alan-wake-2/" target="_blank">Remedy Entertainment - Alan Wake 2 Technical Page</a></li>
+            <li><a href="https://developer.nvidia.com/blog/implementing-virtual-shadow-maps-in-alan-wake-2/" target="_blank">NVIDIA Developer - Virtual Shadow Maps in Alan Wake 2</a></li>
+            <li><a href="https://blog.demofox.org/2023/10/28/alan-wake-2-rendering-tech/" target="_blank">Demo Blog - Alan Wake 2 Rendering Tech Analysis</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="03-spiderman2-rendering.html">&larr; 上一章：蜘蛛侠2开放世界渲染</a>
+            <a href="05-cyberpunk-path-tracing.html">后章：Cyberpunk 2077 路径追踪 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

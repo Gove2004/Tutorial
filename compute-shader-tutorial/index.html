@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compute Shader 入门到精通</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <h1>Compute Shader 入门到精通</h1>
+        <p class="intro">从零开始系统掌握 GPU 并行计算编程，涵盖 DirectX 12 和 Vulkan 两种 API，通过三个完整实战项目（图像滤镜、粒子系统、GPU 加速算法）深入理解 Compute Shader 的核心机制与性能优化。</p>
+
+        <div class="callout callout-info">
+            <strong>关于本教程</strong>：
+            <ul>
+                <li><strong>前置知识</strong>：C++ 基础、线性代数（矩阵/向量运算）、基本的图形学概念（坐标系、纹理）</li>
+                <li><strong>学习深度</strong>：系统掌握 — 核心概念 + 实战项目 + 性能优化 + 最佳实践</li>
+                <li><strong>支持 API</strong>：DirectX 12（主要）、Vulkan（对比）、OpenGL Compute Shader（附录）</li>
+                <li><strong>主题风格</strong>：技术蓝（适合编程/图形类教程）</li>
+            </ul>
+        </div>
+
+        <div class="version-info">
+            <p><strong>版本：</strong>v1.0 | <strong>更新日期：</strong>2026-07-02</p>
+            <p><strong>适用环境：</strong>DX12 (SDK 2021+) / Vulkan 1.3 / HLSL 6.x</p>
+        </div>
+
+        <h2>课程目录</h2>
+
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-gpu-parallel-computing.html">01 - 初识 GPU 并行计算</a></h3>
+                <p>为什么需要 GPU 计算？CPU 与 GPU 架构的本质差异，SIMT 模型，以及 Compute Shader 相比传统渲染管线的革命性意义。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-hlsl-glsl-basics.html">02 - HLSL/GLSL 语言基础</a></h3>
+                <p>Shader 编程语言入门：数据类型、内置函数、精度修饰符。HLSL 与 GLSL 的异同对比，Shader Model 版本演进。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-core-concepts.html">03 - Compute Shader 核心概念</a></h3>
+                <p>Thread Group、Dispatch、Rendezvous Barrier 三大核心概念。全局线程模型、内存层级结构、Resource Binding 机制。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-dx12-compute-pipeline.html">04 - DX12 Compute Pipeline 搭建</a></h3>
+                <p>从零创建 DX12 Compute Pipeline：Descriptor Heap、Root Signature、Pipeline State、Command Queue 完整流程。附可运行的最小示例。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-memory-and-synchronization.html">05 - 内存模型与同步机制</a></h3>
+                <p>Shared Memory、Texture SRV/UAV、Constant Buffer 的延迟与一致性。Barrier 语义、Memory Model 限定符、Sync Group 的精确含义。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-image-filters.html">06 - 实战一：GPU 图像滤镜</a></h3>
+                <p>实现高斯模糊、Sobel 边缘检测、色调映射。Texture UAV 读写、采样器状态、像素坐标映射。从单通道到 HDR 管线。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="07-particle-system.html">07 - 实战二：百万级粒子系统</a></h3>
+                <p>Compute Shader 驱动粒子模拟：Velocity Verlet 积分、碰撞检测、GPU Instancing 渲染。Structured Buffer 与 Append/Consume Buffer。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="08-gpu-algorithms.html">08 - 实战三：GPU 加速算法</a></h3>
+                <p>Prefix Sum（扫描算法）、Radix Sort、并行 Reduce。算法映射到 SIMT 模型的思维转换，Work Reduction 范式。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="09-performance-optimization.html">09 - 性能优化实战</a></h3>
+                <p>Warp/Wavefront 分析、Bank Conflict 消除、指令级优化、Occupancy 调优。使用 PIX / RenderDoc / Nsight 进行 Profiling。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="10-advanced-topics.html">10 - 进阶：Ray Tracing 与 Mesh Shader</a></h3>
+                <p>DXR 光线追踪管线、Acceleration Structure、Mesh Shader (SM5.0)。Compute Shader 在现代图形管线中的角色演变。</p>
+            </div>
+        </div>
+
+        <h2>学习路线建议</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>第一阶段：打基础（第 1-3 章）</h4>
+                    <p>理解 GPU 架构本质和 Compute Shader 的核心抽象。不需要写代码，但要能解释清楚 Thread Group、Dispatch、Shared Memory 的概念。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>第二阶段：动手实践（第 4-7 章）</h4>
+                    <p>搭建 DX12 环境，完成三个实战项目。每个项目都应该是可运行的独立程序，建议配合 Git 管理版本。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>第三阶段：深入优化（第 8-10 章）</h4>
+                    <p>掌握算法级优化和硬件级优化。学会使用 Profiler 定位瓶颈，理解每条指令在 GPU 上的实际代价。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>开发环境推荐</h2>
+
+        <ul>
+            <li><strong>操作系统</strong>：Windows 10/11（DX12 最佳支持）</li>
+            <li><strong>GPU</strong>：NVIDIA / AMD / Intel Arc 均可，不同厂商的 Warp Size 可能不同（NVIDIA 32，AMD 64）</li>
+            <li><strong>SDK</strong>：Windows SDK 10.0.19041+（DX12）、Vulkan SDK 1.3+</li>
+            <li><strong>IDE</strong>：Visual Studio 2022（推荐）或 VS Code + CMake</li>
+            <li><strong>调试工具</strong>：PIX in Windows（DX12）、RenderDoc（跨平台）、Nsight Graphics（NVIDIA）</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://learn.microsoft.com/en-us/windows/win32/direct3dverbs/d3d12-programming-guide" target="_blank">Microsoft DX12 官方文档</a></li>
+                <li><a href="https://gpuopen.com/learn/compute_shader_tutorial/" target="_blank">GPUOpen Compute Shader 教程</a></li>
+                <li><a href="https://developer.nvidia.com/blog/parallel-computation-graphic-compute-shaders/" target="_blank">NVIDIA GTC: Compute Shaders 白皮书</a></li>
+                <li><a href="https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-reference" target="_blank">HLSL 语言参考</a></li>
+            </ul>
+        </div>
+    </main>
+</body>
+</html>

@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 - 进阶：JIT 编译与性能优化 - 编译器与解释器入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-lisp-interpreter.html">&larr; 上一章</a>
+        <a href="index.html">目录 ↑</a>
+    </nav>
+    <main>
+        <h1>JIT 编译与性能优化</h1>
+
+        <p class="intro">JIT（Just-In-Time）编译是连接解释器和静态编译器的桥梁：它在程序运行时将热点代码编译为机器码，兼顾了解释器的灵活性和编译器的速度。本章将深入 JIT 编译的原理、LLVM 的 JIT 引擎、Cranelift 轻量级编译器，以及 Profile-Guided Optimization 和 Speculative Compilation 等前沿技术。</p>
+
+        <div class="definition">
+            <h4>什么是 JIT 编译？</h4>
+            <p>JIT（Just-In-Time）编译，也称为动态编译，是在程序运行期间将字节码或 AST 编译为机器码的技术。与 AOT（Ahead-Of-Time）编译不同，JIT 编译器拥有运行时信息：它可以知道哪些代码是热点、变量的实际类型、分支的实际走向。这些信息让 JIT 可以做 AOT 编译器无法做的激进优化。</p>
+        </div>
+
+        <h2>1. JIT 编译的原理</h2>
+
+        <h3>1.1 编译时机：何时触发 JIT？</h3>
+
+        <p>JIT 编译器的核心挑战是决定"什么时候编译"。太早编译浪费时间和内存，太晚编译则失去加速效果。</p>
+
+        <pre class="arch-diagram"><code>JIT 编译管线:
+
+源代码/字节码
+  │
+  ▼
+解释器 (Interpreter)
+  ├── 执行所有代码
+  ├── 收集运行时信息 ( profiling )
+  └── 检测热点代码
+  │
+  ▼
+JIT Compiler (热点触发)
+  ├── 编译热点方法
+  ├── 插入类型检查桩 (type guard)
+  └── 替换解释执行 → 编译执行
+  │
+  ▼
+已编译代码缓存
+  ├── 缓存编译结果
+  ├── 去优化 (deoptimization) 支持
+  └── 重新编译 (recompilation) 支持</code></pre>
+
+        <h3>1.2 编译层级（Compilation Tiering）</h3>
+
+        <p>现代 JIT 编译器通常采用多层编译策略，在编译速度和代码质量之间取得平衡：</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>层级</th>
+                    <th>编译器</th>
+                    <th>触发条件</th>
+                    <th>编译时间</th>
+                    <th>代码质量</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Tier 0</strong></td>
+                    <td>解释器</td>
+                    <td>首次执行</td>
+                    <td>0ms</td>
+                    <td>低</td>
+                </tr>
+                <tr>
+                    <td><strong>Tier 1</strong></td>
+                    <td>C1 / LCG / Mojit</td>
+                    <td>方法调用 1500 次</td>
+                    <td>~1ms</td>
+                    <td>中 (快速编译)</td>
+                </tr>
+                <tr>
+                    <td><strong>Tier 2</strong></td>
+                    <td>C2 / Graal / LLVM</td>
+                    <td>方法调用 10000 次</td>
+                    <td>~100ms</td>
+                    <td>高 (深度优化)</td>
+                </tr>
+                <tr>
+                    <td><strong>Tier 3</strong></td>
+                    <td>Re-optimizing Compiler</td>
+                    <td>类型信息变化</td>
+                    <td>~50ms</td>
+                    <td>更高 (激进优化)</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>关键洞察</strong>：多层编译的核心思想是"渐进优化"。解释器立即执行所有代码，Tier 1 编译器快速编译热点代码（牺牲代码质量换取编译速度），Tier 2 编译器在充分收集信息后重新编译（牺牲编译速度换取代码质量）。V8 JavaScript 引擎、HotSpot JVM 和 LuaJIT 都采用了类似的策略。
+        </div>
+
+        <h3>1.3 代码缓存（Code Cache）</h3>
+
+        <p>JIT 编译后的机器码需要缓存起来供后续调用。代码缓存的设计至关重要：</p>
+
+        <pre><code class="language-cpp">// 简化的代码缓存
+class CodeCache {
+    // 编译后的机器码缓存
+    std::unordered_map&lt;MethodID, CompiledCode&gt; cache;
+
+    CompiledCode* lookup(MethodID id) {
+        auto it = cache.find(id);
+        if (it != cache.end()) return &amp;it-&gt;second;
+        return nullptr;
+    }
+
+    void store(MethodID id, CompiledCode code) {
+        // 检查缓存容量
+        if (cache.size() &gt; MAX_ENTRIES) {
+            evict_lru();  // 驱逐最近最少使用的条目
+        }
+        cache[id] = std::move(code);
+    }
+
+    // 去优化支持: 缓存编译时的元信息
+    struct CompiledCode {
+        void* code_ptr;       // 机器码指针
+        size_t code_size;     // 机器码大小
+        ProfilingInfo prof;   // 编译时的 profiling 信息
+        DeoptimizationTable deopt_table;  // 去优化映射表
+    };
+};</code></pre>
+
+        <h2>2. LLVM JIT：MCJIT 与 ExecutionEngine</h2>
+
+        <p>LLVM 提供了完整的 JIT 编译基础设施。从 LLVM 3.0 开始，推荐使用 MCJIT（Minimal Context JIT）而非旧的 ExecutionEngine。</p>
+
+        <h3>2.1 MCJIT 基本用法</h3>
+
+        <pre><code class="language-cpp">#include "llvm/ExecutionEngine/MCJIT.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Target/TargetMachine.h"
+
+// 简化的 JIT 编译器
+class SimpleJIT {
+    llvm::LLVMContext context;
+    std::unique_ptr&lt;llvm::Module&gt; module;
+    std::unique_ptr&lt;llvm::ExecutionEngine&gt; engine;
+
+public:
+    SimpleJIT() {
+        // 1. 初始化目标
+        llvm::InitializeNativeTarget();
+        llvm::InitializeNativeTargetAsmPrinter();
+        llvm::InitializeNativeTargetDisassembler();
+
+        // 2. 创建目标机器
+        std::string Error;
+        auto target = llvm::TargetRegistry::lookupTarget(
+            llvm::Triple(llvm::sys::getProcessTriple()).getArchName(), Error);
+        auto cpu = "default";
+        auto features = "";
+        auto tm = target-&gt;createTargetMachine(
+            llvm::Triple(llvm::sys::getProcessTriple()),
+            cpu, features,
+            llvm::TargetOptions{}, llvm::Optional&lt;llvm::Reloc::Model&gt;{});
+
+        // 3. 创建 MCJIT ExecutionEngine
+        module = std::make_unique&lt;llvm::Module&gt;("jit-module", context);
+        engine = llvm::EngineBuilder(std::move(module))
+            .setEngineKind(llvm::EngineKind::JIT)
+            .setTargetMachine(tm.get())
+            .create();
+    }
+
+    // 编译并执行函数
+    template&lt;typename FnT&gt;
+    FnT getFunctionPointer(const std::string& name) {
+        auto ptr = engine-&gt;getFunctionAddress(name);
+        return reinterpret_cast&lt;FnT&gt;(ptr);
+    }
+
+    // 设置优化级别
+    void setOptLevel(llvm::CodeGenOptLevel level) {
+        // 配置优化 pass
+    }
+};
+
+// 使用示例:
+int main() {
+    SimpleJIT jit;
+
+    // 创建 LLVM IR: int add(int a, int b) { return a + b; }
+    auto fn = jit.compile(R"(
+        define i32 @add(i32 %a, i32 %b) {
+        entry:
+            %sum = add i32 %a, %b
+            ret i32 %sum
+        }
+    )");
+
+    // 获取函数指针并调用
+    auto add = jit.getFunctionPointer&lt;int(*)(int, int)&gt;("add");
+    std::cout &lt;&lt; "add(3, 4) = " &lt;&lt; add(3, 4) &lt;&lt; std::endl;  // 输出 7
+
+    return 0;
+}</code></pre>
+
+        <h3>2.2 LLVM JIT 的工作流程</h3>
+
+        <pre class="arch-diagram"><code>LLVM JIT 编译流程:
+
+源码/AST
+  │
+  ▼
+LLVM IR 生成
+  ├── IRBuilder 构建指令
+  └── Module 管理
+  │
+  ▼
+优化 Pass Manager
+  ├── FunctionPassManager (函数级)
+  ├── ModulePassManager (模块级)
+  └── 按优化级别选择 pass
+  │
+  ▼
+MCJIT ExecutionEngine
+  ├── TargetMachine 配置目标架构
+  ├── CodeGen 生成机器码
+  ├── SectionMemoryManager 分配可执行内存
+  └── JIT 代码缓存
+  │
+  ▼
+可执行机器码
+  └── 通过 dlsym / getFunctionAddress 获取</code></pre>
+
+        <h2>3. Cranelift：轻量级 JIT 编译器</h3>
+
+        <p>Cranelift 是 WebAssembly 社区开发的 JIT 编译器，专注于编译速度快、集成简单。</p>
+
+        <h3>3.1 Cranelift vs LLVM JIT</h3>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>特性</th>
+                    <th>LLVM JIT</th>
+                    <th>Cranelift</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>编译速度</td>
+                    <td>慢 (深度优化)</td>
+                    <td>快 (轻量级优化)</td>
+                </tr>
+                <tr>
+                    <td>代码质量</td>
+                    <td>高 (-O3 级别)</td>
+                    <td>中 (C1 级别)</td>
+                </tr>
+                <tr>
+                    <td>集成复杂度</td>
+                    <td>高 (大量依赖)</td>
+                    <td>低 (单 crate)</td>
+                </tr>
+                <tr>
+                    <td>增量编译</td>
+                    <td>差 (全量重编译)</td>
+                    <td>好 (函数级独立编译)</td>
+                </tr>
+                <tr>
+                    <td>适用场景</td>
+                    <td>离线编译、高性能</td>
+                    <td>JIT、热更新、插件系统</td>
+                </tr>
+                <tr>
+                    <td>语言绑定</td>
+                    <td>C/C++</td>
+                    <td>Rust (也有 C API)</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>3.2 Cranelift 基本用法</h3>
+
+        <pre><code class="language-rust">// Cranelift JIT 示例 (Rust)
+use cranelift_jit::{JITBuilder, JITModule};
+use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+use cranelift_codegen::ir::{AbiParam, InstLoc, Opcode, Signature, Type};
+
+fn compile_add() -&gt; BoxedExternRef {
+    // 1. 创建 JIT 构建器
+    let mut builder = JITBuilder::new(cranelift_codegen::isa::host::get()).unwrap();
+    let mut module = JITModule::new(builder);
+
+    // 2. 创建函数签名
+    let mut sig = Signature::new(cranelift_codegen::unstable_isas::host().config.call_conv);
+    sig.params.push(Abparam::new(
+        CallingConvention::Native,
+        Type::int(64).unwrap(),
+        AbiParam::Special {
+            kind: ArgumentPurpose::Normal,
+            ty: Type::int(64).unwrap(),
+        },
+    ));
+    sig.returns.push(Abparam::new(
+        Type::int(64).unwrap(),
+        AbiParam::Special {
+            kind: ArgumentPurpose::Normal,
+            ty: Type::int(64).unwrap(),
+        },
+    ));
+
+    // 3. 编译函数
+    let func = module.make_function(sig);
+    let mut ctx = module.func_context(func);
+    let mut fbuilder = FunctionBuilder::new(&mut ctx);
+
+    let block = fbuilder.create_block();
+    fbuilder.switch_to_block(block);
+    fbuilder.seal_block(block);
+
+    // %0 = iadd %p0, %p1
+    let zero = fbuilder.ins().arguments()[0];
+    let one = fbuilder.ins().arguments()[1];
+    let result = fbuilder.ins().iadd(zero, one);
+
+    fbuilder.ins().return_(&[result]);
+    fbuilder.finalize();
+
+    module.declare_function(func, Linkage::Export).unwrap();
+    module.clear_func_context(func);
+
+    module.get_exported_function(func).unwrap().get_value() as usize
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>💡 为什么选择 Cranelift？</strong>：如果你需要一个可以快速编译、快速更新的 JIT 编译器（比如热代码更新、插件系统），Cranelift 是更好的选择。它的编译速度比 LLVM JIT 快 3-5 倍，虽然生成的代码质量略低，但对于解释器中的热点代码来说绰绰有余。
+        </div>
+
+        <h2>4. Profile-Guided Optimization（PGO）</h2>
+
+        <p>PGO 的核心思想：<strong>用运行时的真实数据指导编译优化</strong>。编译器不再猜测哪段代码是热点，而是直接从 profiling 数据中读取。</p>
+
+        <h3>4.1 PGO 工作流程</h3>
+
+        <pre><code class="language-text">两阶段 PGO:
+
+阶段 1: 插桩编译 + 运行
+  1. clang -fprofile-instr-generate myapp.c -o myapp_profiled
+  2. 运行程序: ./myapp_profiled
+  3. 生成覆盖率文件: myapp.profdata
+
+阶段 2: 优化编译
+  1. clang -fprofile-instr-use=myapp.profdata myapp.c -o myapp_optimized
+  2. 编译器读取 profdata，知道:
+     - 哪些函数被调用最多
+     - 哪些分支总是走 true
+     - 哪些循环执行了 100 万次
+  3. 基于这些数据做激进优化</code></pre>
+
+        <h3>4.2 采样式 PGO（Sample PGO）</h3>
+
+        <p>采样式 PGO 不需要插桩，而是通过 perf 等工具收集硬件计数器数据：</p>
+
+        <pre><code class="language-bash"># Sample PGO 流程
+1. 编译带采样信息的二进制文件:
+   clang -fprofile-sample-accurate myapp.c -o myapp
+
+2. 运行并用 perf 收集数据:
+   perf record -e cycles:u ./myapp
+
+3. 生成采样数据:
+   perf2llvm myapp.perf -o myapp.prof
+
+4. 用采样数据优化编译:
+   clang -fprofile-sample-use=myapp.prof myapp.c -o myapp_pgo</code></pre>
+
+        <h3>4.3 PGO 的性能数据</h3>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>程序</th>
+                    <th>-O2</th>
+                    <th>-O2 + PGO</th>
+                    <th>提升</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>GCC (编译 GCC)</td>
+                    <td>基准 100</td>
+                    <td>107-113</td>
+                    <td><span class="perf-metric">+7% ~ +13%</span></td>
+                </tr>
+                <tr>
+                    <td>Clang (编译 Clang)</td>
+                    <td>基准 100</td>
+                    <td>104-111</td>
+                    <td><span class="perf-metric">+4% ~ +11%</span></td>
+                </tr>
+                <tr>
+                    <td>Nginx (HTTP 请求)</td>
+                    <td>基准 100</td>
+                    <td>103-108</td>
+                    <td><span class="perf-metric">+3% ~ +8%</span></td>
+                </tr>
+                <tr>
+                    <td>SQLite (数据库查询)</td>
+                    <td>基准 100</td>
+                    <td>105-115</td>
+                    <td><span class="perf-metric">+5% ~ +15%</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p>PGO 的平均提升是 <strong>5-10%</strong>，但对于特定的工作负载（如编译器自身），提升可以达到 13% 以上。更重要的是，PGO 不需要修改源代码——它完全基于运行时数据自动优化。</p>
+
+        <h2>5. Speculative Compilation（推测编译）</h2>
+
+        <p>Speculative Compilation 是 JIT 编译器的高级优化技术：基于运行时收集的假设做激进优化，如果假设被打破则回退。</p>
+
+        <h3>5.1 类型专一化（Type Specialization）</h3>
+
+        <p>最常见的推测优化：假设某个函数只接收某种类型的参数，专门化生成对应类型的代码。</p>
+
+        <pre><code class="language-text">泛型函数:
+    def add(a, b):
+        return a + b
+
+解释器版本 (泛型):
+    1. 检查 a 的类型
+    2. 检查 b 的类型
+    3. 根据类型选择操作
+    4. 包装/解包值
+    → 每次调用都有类型检查开销
+
+推测编译 (假设 a, b 都是 int):
+    1. 插入类型检查桩: if not isinstance(a, int): goto deopt
+    2. 生成专门化代码: add_i64(a, b)
+    3. 如果假设始终成立 → 跳过类型检查
+    → 速度提升 3-5 倍
+
+去优化 (Deoptimization):
+    如果假设被打破 (有人传了 float):
+    1. 跳转到去优化点
+    2. 丢弃专门化代码
+    3. 回退到泛型解释执行
+    4. 记录类型信息，未来不再做同样假设</code></pre>
+
+        <h3>5.2 内联推测（Inlining Speculation）</h3>
+
+        <p>JIT 编译器可以根据调用频率决定内联策略：</p>
+
+        <pre><code class="language-text">监控调用模式:
+    foo() 被调用 100 万次
+    → 每次都内联 (100% 内联率)
+    → 生成专门化内联代码 (无函数调用开销)
+
+    bar() 被调用 100 万次
+    → 前 99 万次内联
+    → 第 100 万次时 bar() 被重新定义
+    → 去优化: 撤销内联，恢复函数调用
+    → 重新编译为非内联版本
+
+V8 的 IC (Inline Cache) 机制:
+    第一次调用 obj.method():
+        → 检查 prototype chain
+        → 找到方法地址
+        → 记录到 IC 表
+    第二次调用 obj.method():
+        → 检查 IC 表 (fast path)
+        → 如果匹配 → 直接跳转 (无 prototype 检查)
+        → 如果不匹配 → 去优化，重新查找
+    → 99% 的调用走 fast path</code></pre>
+
+        <h3>5.3 循环推测优化</h3>
+
+        <p>JIT 编译器可以对循环做激进推测：</p>
+
+        <pre><code class="language-text">推测: 循环边界是固定的
+
+原始代码:
+    for (int i = 0; i < arr.length; i++) {
+        sum += arr[i];
+    }
+
+推测编译 (假设 arr.length == 100):
+    // 展开 + 向量化
+    for (int i = 0; i < 100; i += 4) {
+        sum += _mm256_load_ps(&arr[i]);
+        // ... AVX2 向量化累加
+    }
+
+如果 arr.length 变为 200:
+    → IC miss → 去优化
+    → 回退到泛型循环
+    → 重新编译为 length=200 的版本</code></pre>
+
+        <h2>6. 性能数据：JIT 编译延迟 vs 执行加速</h2>
+
+        <p>JIT 编译的代价是编译延迟。以下是不同 JIT 编译器的延迟和加速对比：</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>JIT 引擎</th>
+                    <th>首次编译延迟</th>
+                    <th>热点编译延迟</th>
+                    <th>加速比</th>
+                    <th>适用场景</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>V8 (JS)</td>
+                    <td>~5ms</td>
+                    <td>~50us</td>
+                    <td><span class="perf-metric">×50-100</span></td>
+                    <td>浏览器 JS</td>
+                </tr>
+                <tr>
+                    <td>HotSpot JVM</td>
+                    <td>~10ms</td>
+                    <td>~100us</td>
+                    <td><span class="perf-metric">×10-30</span></td>
+                    <td>Java 应用</td>
+                </tr>
+                <tr>
+                    <td>LLVM JIT</td>
+                    <td>~20ms</td>
+                    <td>~200us</td>
+                    <td><span class="perf-metric">×100-1000</span></td>
+                    <td>科学计算</td>
+                </tr>
+                <tr>
+                    <td>Cranelift</td>
+                    <td>~2ms</td>
+                    <td>~20us</td>
+                    <td><span class="perf-metric">×30-100</span></td>
+                    <td>WebAssembly</td>
+                </tr>
+                <tr>
+                    <td>LuaJIT</td>
+                    <td>~1ms</td>
+                    <td>~10us</td>
+                    <td><span class="perf-metric">×20-50</span></td>
+                    <td>游戏脚本</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p>关键权衡：</p>
+
+        <ul>
+            <li><strong>编译延迟</strong>：Cranelift 最快（~2ms），LLVM 最慢（~20ms）。这是因为 LLVM 做了更多优化。</li>
+            <li><strong>执行加速</strong>：LLVM 加速比最大（×100-1000），因为它的优化最激进。</li>
+            <li><strong>最佳性价比</strong>：LuaJIT 在 1ms 延迟下提供 20-50 倍加速，是游戏脚本的理想选择。</li>
+        </ul>
+
+        <h2>7. JIT 编译的最佳实践</h2>
+
+        <h3>7.1 何时使用 JIT？</h3>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>场景</th>
+                    <th>推荐</th>
+                    <th>理由</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>服务器后端 API</td>
+                    <td>AOT 编译</td>
+                    <td>启动速度快，编译一次到处运行</td>
+                </tr>
+                <tr>
+                    <td>游戏脚本</td>
+                    <td>JIT (LuaJIT)</td>
+                    <td>热代码更新，运行时优化</td>
+                </tr>
+                <tr>
+                    <td>浏览器 JavaScript</td>
+                    <td>JIT (V8)</td>
+                    <td>代码无法预编译，需要运行时优化</td>
+                </tr>
+                <tr>
+                    <td>科学计算</td>
+                    <td>JIT (LLVM)</td>
+                    <td>数学公式运行时生成，需要深度优化</td>
+                </tr>
+                <tr>
+                    <td>插件系统</td>
+                    <td>Cranelift</td>
+                    <td>插件随时加载，需要快速编译</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>7.2 JIT 编译的陷阱</h3>
+
+        <div class="callout callout-danger">
+            <strong>⚠ 常见陷阱</strong>：
+            <ul>
+                <li><strong>内存泄漏</strong>：JIT 编译的机器码需要可执行内存页，如果缓存管理不当会导致内存持续增长。</li>
+                <li><strong>去优化风暴</strong>：如果推测假设频繁被打破，频繁的 deopt 会抵消 JIT 带来的加速。</li>
+                <li><strong>编译停顿</strong>：Tier 2 编译可能需要 100ms，在此期间程序会卡顿。需要异步编译或多线程编译。</li>
+                <li><strong>安全限制</strong>：现代操作系统要求内存页的 W^X 属性（可写或可执行，不能同时）。JIT 需要在 WX 页面和 X 页面之间切换，处理不当可能导致段错误。</li>
+            </ul>
+        </div>
+
+        <h2>8. 本章小结</h2>
+
+        <p>本章我们探讨了 JIT 编译的方方面面：</p>
+
+        <ul>
+            <li><strong>JIT 原理</strong>：在运行时编译热点代码，利用运行时信息做 AOT 无法做的优化。多层编译策略在编译速度和代码质量之间取得平衡。</li>
+            <li><strong>LLVM JIT</strong>：MCJIT 是推荐的 JIT 后端，提供完整的编译管线。编译延迟 ~20ms，但代码质量最高。</li>
+            <li><strong>Cranelift</strong>：轻量级 JIT 编译器，编译速度比 LLVM 快 3-5 倍，适合需要快速编译的场景。</li>
+            <li><strong>PGO</strong>：用运行时数据指导编译优化，平均提升 5-10%，对编译器自身可达 13%。</li>
+            <li><strong>Speculative Compilation</strong>：基于假设做激进优化，配合去回退机制。V8 的 Inline Cache 是经典案例。</li>
+            <li><strong>性能权衡</strong>：JIT 编译延迟 1-20ms，但可以获得 20-1000 倍执行加速。选择合适的 JIT 引擎是关键。</li>
+        </ul>
+
+        <h2>总结：编译器全栈回顾</h2>
+
+        <p>至此，我们完成了编译器与解释器的完整学习之旅。让我们回顾整个知识体系：</p>
+
+        <pre class="arch-diagram"><code>编译器全栈架构:
+
+┌─────────────────────────────────────────────────────┐
+│  第 1 层: 前端                                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
+│  │ 词法分析  │→│ 语法分析  │→│ 语义分析  │          │
+│  │ (Token)  │  │ (AST)    │  │ (TypeCheck)│         │
+│  └──────────┘  └──────────┘  └──────────┘          │
+├─────────────────────────────────────────────────────┤
+│  第 2 层: 中间表示                                   │
+│  ┌──────────────────────────────────────────┐       │
+│  │  LLVM IR / 三地址码 (SSA 形式)            │       │
+│  └──────────────────────────────────────────┘       │
+├─────────────────────────────────────────────────────┤
+│  第 3 层: 优化器                                     │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
+│  │ 常量传播  │→│ DCE      │→│ 循环优化  │          │
+│  └──────────┘  └──────────┘  └──────────┘          │
+├─────────────────────────────────────────────────────┤
+│  第 4 层: 代码生成                                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
+│  │ 指令选择  │→│ 寄存器分配│→│ 指令调度  │          │
+│  └──────────┘  └──────────┘  └──────────┘          │
+├─────────────────────────────────────────────────────┤
+│  第 5 层: 运行时系统                                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
+│  │ 栈帧管理  │→│ 内存管理  │→│ 垃圾回收  │          │
+│  └──────────┘  └──────────┘  └──────────┘          │
+├─────────────────────────────────────────────────────┤
+│  第 6 层: 执行引擎                                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
+│  │ 解释器   │→│ JIT 编译  │→│ AOT 编译  │          │
+│  └──────────┘  └──────────┘  └──────────┘          │
+└─────────────────────────────────────────────────────┘</code></pre>
+
+        <h2>延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://llvm.org/docs/GettingStarted.html#target-jit" target="_blank">LLVM JIT Engine Documentation</a></li>
+            <li><a href="https://cranelift.dev/" target="_blank">Cranelift JIT Compiler</a></li>
+            <li><a href="https://v8.dev/blog/tracing-v8-profile-based-optimizations" target="_blank">Tracing V8: Profile-Based Optimizations (V8 Blog)</a></li>
+            <li><a href="https://llvm.org/docs/ProfileGuide.html" target="_blank">LLVM Profile-Guided Optimization Guide</a></li>
+            <li><a href="https://research.google/pubs/pub41684/" target="_blank">The Java HotSpot(TM) Server Compiler (Singham et al., 2011)</a></li>
+            <li><a href="https://luajit.org/demo.html" target="_blank">LuaJIT - Trace Compiler Demo</a></li>
+            <li><a href="https://www.cs.cornell.edu/courses/cs6120/2022fa/blog/jit/" target="_blank">CS 6120: JIT Compilation - Cornell</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="09-lisp-interpreter.html">&larr; 09 - 实战：Lisp 解释器</a>
+            <a href="index.html">↑ 返回目录</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

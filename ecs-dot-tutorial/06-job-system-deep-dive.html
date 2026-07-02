@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 - Job System 深入 - ECS 与 Unity DOTS 入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="05-burst-compiler-deep-dive.html">&larr; 上一章</a>
+        <a href="07-ecs-implementation.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>06 - Job System 深入</h1>
+        <p class="intro">Job System 是 Unity 提供的线程安全并行框架。它不只是"开几个线程跑循环"那么简单——依赖图管理、工作窃取、容器安全检查、Barrier 机制共同构成了一个完整的并行计算基础设施。本章逐层拆解它的工作原理。</p>
+
+        <h2>6.1 JobHandle 依赖图</h2>
+
+        <p>JobHandle 是 Job System 的核心抽象。它不仅仅是一个"作业句柄"，更是一个<strong>有向无环图（DAG）的节点</strong>。每个 JobHandle 代表一个（或多个）已调度但尚未完成的 Job，多个 JobHandle 之间通过依赖关系构成一个图。</p>
+
+        <h3>6.1.1 依赖关系的构建</h3>
+
+        <pre><code class="language-cs">// 简单的线性依赖链
+[BurstCompile]
+public struct JobA : IJob
+{
+    public NativeArray&lt;float&gt; output;
+    public void Execute()
+    {
+        for (int i = 0; i &lt; output.Length; i++)
+            output[i] = i * 2f;
+    }
+}
+
+[BurstCompile]
+public struct JobB : IJob
+{
+    public NativeArray&lt;float&gt; input;
+    public NativeArray&lt;float&gt; output;
+    public void Execute()
+    {
+        for (int i = 0; i &lt; input.Length; i++)
+            output[i] = input[i] * input[i];  // 平方
+    }
+}
+
+[BurstCompile]
+public struct JobC : IJob
+{
+    public NativeArray&lt;float&gt; input;
+    public NativeArray&lt;float&gt; output;
+    public void Execute()
+    {
+        for (int i = 0; i &lt; input.Length; i++)
+            output[i] = math.sqrt(input[i]);  // 开方
+    }
+}
+
+// 构建依赖链
+JobHandle handleA = new JobA { output = dataA }.Schedule();
+JobHandle handleB = new JobB { input = dataA, output = dataB }.Schedule(handleA);
+JobHandle handleC = new JobC { input = dataB, output = dataC }.Schedule(handleB);
+
+// 最终等待
+handleC.Complete();
+
+// 等价于：
+// JobA → JobB → JobC
+// 每个 Job 等待前一个 Job 完成后才能开始
+// 这就是 DAG：有向无环图</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>6.1.2 依赖图的内部表示</h3>
+
+        <p>JobHandle 在内部维护了一个依赖计数（Dependency Count）。当你调用 <code>.Schedule(dependency)</code> 时，Job System 会将 dependency 的所有未完成 Job 计数加 1。只有当所有依赖的计数都归零时，该 Job 才能真正开始执行。</p>
+
+        <div class="arch-diagram">
+JobHandle 内部结构（简化）：
+
+JobHandle
+├── JobIndex: uint          ← Job 在线程池中的索引
+├── JobId: uint             ← 全局唯一的 Job ID
+├── DependencyCount: int    ← 未完成依赖的数量
+├── Dependencies[]          ← 依赖的 JobHandle 列表
+└── IsCompleted: bool       ← 是否已完成
+        </div>
+
+        <h3>6.1.3 合并依赖（Merge）</h3>
+
+        <p>当多个 Job 需要等待多个上游 Job 时，JobHandle 会自动合并依赖：</p>
+
+        <pre><code class="language-cs">// 分支-汇聚模式的依赖图
+//
+//   JobA    JobB
+//     \      /
+//      \    /
+//     JobC (依赖 A 和 B)
+//       |
+//     JobD
+
+JobHandle handleA = new JobA { output = tempA }.Schedule();
+JobHandle handleB = new JobB { output = tempB }.Schedule();
+
+// JobC 等待 A 和 B 都完成
+JobHandle handleC = new JobC { inputA = tempA, inputB = tempB, output = tempC }
+    .Schedule(handleA, handleB);
+
+// JobD 只等待 C
+JobHandle handleD = new JobD { input = tempC, output = finalResult }
+    .Schedule(handleC);
+
+// 最终的依赖图：
+//   ┌──→ A ──┐
+//   │        ▼
+//   │       C ──→ D
+//   │        ▲
+//   └──→ B ──┘
+//
+// A 和 B 可以并行执行
+// C 必须等 A 和 B 都完成后才能开始
+// D 必须等 C 完成后才能开始</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>6.1.4 隐式依赖</h3>
+
+        <p>即使你没有显式传递 JobHandle，Job System 也会根据 NativeContainer 的使用情况推断隐式依赖：</p>
+
+        <pre><code class="language-cs">// 隐式依赖：Job 读取了某个 NativeArray，而该数组上一次被 Job 写入过
+// Job System 会自动建立依赖关系
+
+var data = new NativeArray&lt;float&gt;(1000, Allocator.Persistent);
+
+// 第一次写入
+var writeJob = new WriteJob { data = data }.Schedule();
+writeJob.Complete();
+
+// 第二次读取——即使没有显式传递 handle，Job System 也知道
+// 这次读取必须在上次写入完成后才能开始
+var readJob = new ReadJob { data = data }.Schedule();
+readJob.Complete();
+
+// 但最好还是显式传递依赖，提高代码可读性
+var writeJob2 = new WriteJob { data = data }.Schedule();
+var readJob2 = new ReadJob { data = data }.Schedule(writeJob2);
+readJob2.Complete();</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>6.2 NativeArray 生命周期</h2>
+
+        <h3>6.2.1 分配与释放</h3>
+
+        <pre><code class="language-cs">// Allocator 类型决定了 NativeArray 的生命周期
+using Unity.Collections;
+
+// Temp：分配到当前帧结束时自动释放（推荐用于临时数据）
+var tempArray = new NativeArray&lt;float&gt;(100, Allocator.Temp);
+// ⚠️ 不能在 Job 中使用 Allocator.Temp！
+// Job 可能在下一帧才执行，此时 Temp 已经被释放了
+
+// TempJob：分配到当前 Job 完成时释放（Job 最常用）
+var tempJobArray = new NativeArray&lt;float&gt;(100, Allocator.TempJob);
+var job = new MyJob { data = tempJobArray }.Schedule();
+job.Complete();
+// 此时 tempJobArray 自动释放（或在 Dispose() 时释放）
+
+// Persistent：手动控制释放（长期数据）
+var persistentArray = new NativeArray&lt;float&gt;(100, Allocator.Persistent);
+// ... 在多个帧和 Job 中使用
+persistentArray.Dispose();  // 必须手动释放
+
+// AtomicSafetyHandle：每个 NativeArray 都有安全句柄
+// 用于追踪引用计数和生命周期
+var array = new NativeArray&lt;int&gt;(10, Allocator.TempJob);
+// 当最后一个引用被 Dispose 时，内存真正释放
+array.Dispose();</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>6.2.2 Job 安全性检查</h3>
+
+        <p>NativeContainer 内置了多层安全检查，防止数据竞争：</p>
+
+        <table>
+            <thead>
+                <tr><th>检查类型</th><th>何时触发</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>AlreadyDisposedException</td><td>访问已释放的容器</td><td>在 Editor 中抛出异常，在 Release 中可能崩溃</td></tr>
+                <tr><td>InvalidWriteException</td><td>Job 写入正在被其他 Job 读取的数据</td><td>需要 [ReadOnly] 标记来消除</td></tr>
+                <tr><td>AccessIndexOutOfRangeException</td><td>数组越界访问</td><td>与 C# 原生越界检查类似</td></tr>
+                <tr><td>SafetyExtensions</td><td>额外的调试检查</td><td>在 Editor 中可开启，追踪所有读写操作</td></tr>
+            </tbody>
+        </table>
+
+        <pre><code class="language-cs">// [ReadOnly] 是关键——告诉 Job System 这个 Job 只读不写
+[BurstCompile]
+public struct ReadWriteJob : IJobParallelFor
+{
+    public NativeArray&lt;float&gt; readWriteData;  // 可读可写
+    public NativeArray&lt;float&gt; readOnlyData;   // 只读
+    public NativeArray&lt;float&gt; output;
+
+    public void Execute(int index)
+    {
+        // 读取只读数据——安全
+        float val = readOnlyData[index];
+
+        // 写入输出——安全（output 只被当前 Job 写入）
+        output[index] = val * 2f;
+
+        // 读取可读写数据——安全
+        float rwVal = readWriteData[index];
+
+        // 写入可读写数据——安全（只有一个 Job 写入）
+        readWriteData[index] = rwVal + 1f;
+    }
+}
+
+// 如果两个 Job 同时写入同一个 NativeArray，会抛出 InvalidWriteException
+[BurstCompile]
+public struct JobWriter1 : IJobParallelFor
+{
+    public NativeArray&lt;float&gt; data;
+    public void Execute(int i) { data[i] = i; }
+}
+
+[BurstCompile]
+public struct JobWriter2 : IJobParallelFor
+{
+    public NativeArray&lt;float&gt; data;
+    public void Execute(int i) { data[i] = i * 2; }  // 与 Writer1 竞争！
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>6.3 Barrier 类型</h2>
+
+        <p>Barrier 是一种特殊的 Job，它不执行实际的工作，而是作为<strong>同步点</strong>，确保某些 Job 在它之前完成，另一些 Job 在它之后才能开始。</p>
+
+        <h3>6.3.1 WorkerBarrier（工作屏障）</h3>
+
+        <p>WorkerBarrier 是最常用的 Barrier，它在每个 System 执行之前自动插入，确保所有上一帧的 Job 都已完成：</p>
+
+        <pre><code class="language-cs">// EntityCommandBuffer.System 就是一个 WorkerBarrier
+// 它确保 ECB 中缓冲的所有实体操作在当前 System 执行前完成
+
+public partial struct MovementSystem : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        // ECB 自动在 System 开始时插入 Barrier
+        // 确保上一帧的 ECB 操作全部完成
+        var ecb = EntityCommandBuffer.System.CreateCommandBuffer();
+
+        // 在这个 System 中创建的 Entity 会被缓冲
+        // 直到 Barrier 触发时才真正创建
+        foreach (var entity in SystemAPI.Query&lt;SingleEntity&gt;())
+        {
+            ecb.AddComponent(entity, new NewComponent { Value = 42f });
+        }
+
+        // Barrier 在这里自动触发
+        // 所有 ecb.AddComponent 操作在此刻生效
+    }
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>6.3.2 InitializationBarrier（初始化屏障）</h3>
+
+        <p>InitializationBarrier 在 World 初始化时执行一次，用于设置初始数据：</p>
+
+        <pre><code class="language-cs">// 初始化屏障——在 World 启动时只执行一次
+public partial struct InitializationBarrier : ISystem
+{
+    [BurstCompile]
+    public void OnCreate(ref SystemState state)
+    {
+        // 在 OnCreate 中执行一次性初始化
+        // 这里可以创建 Entity、设置初始数据等
+        var em = state.EntityManager;
+        var archetype = em.CreateArchetype(typeof(Position), typeof(Velocity));
+
+        var entities = em.CreateEntity(archetype, 1000);
+
+        // 设置初始数据
+        var positions = em.GetBuffer&lt;Position&gt;(entities);
+        for (int i = 0; i &lt; 1000; i++)
+        {
+            positions[i] = new Position { Value = new float3(i, 0, 0) };
+        }
+    }
+
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        // 初始化完成后，OnUpdate 不再需要做什么
+        // 可以通过 OnCreate 标记来跳过后续执行
+    }
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>6.3.3 CompletionBarrier（完成屏障）</h3>
+
+        <p>CompletionBarrier 确保所有之前调度的 Job 在继续之前都已完成。通常在帧结束时使用：</p>
+
+        <pre><code class="language-cs">// 帧结束时的完成屏障
+public partial struct FrameEndBarrier : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        // 所有之前的 Job 必须在此处完成
+        // ECB 的 Playback 也是一个隐式的 CompletionBarrier
+        var ecb = EntityCommandBuffer.System.CreateCommandBuffer();
+        ecb.Playback(state.EntityManager);
+
+        // 此时可以安全地将结果从 NativeArray 复制到托管数组
+        // 因为所有 Job 都已经完成了
+        var result = myNativeArray.ToArray();  // 安全！
+    }
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>6.4 Scheduled vs Execute</h2>
+
+        <p>Job 有两种执行方式：<code>Schedule</code>（异步并行）和 <code>Execute</code>（同步串行）。选择哪种取决于你的需求：</p>
+
+        <table>
+            <thead>
+                <tr><th>特性</th><th>Schedule</th><th>Execute</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>执行方式</td><td>异步，提交后立即返回</td><td>同步，阻塞直到完成</td></tr>
+                <tr><td>并行</td><td>多线程并行执行</td><td>单线程顺序执行</td></tr>
+                <tr><td>依赖管理</td><td>需要 JobHandle 管理</td><td>不需要</td></tr>
+                <tr><td>性能</td><td>大数据集时极快</td><td>小数据集时更快（无调度开销）</td></tr>
+                <tr><td>适用场景</td><td>&gt; 1000 元素</td><td>&lt; 100 元素</td></tr>
+            </tbody>
+        </table>
+
+        <pre><code class="language-cs">// Execute：同步执行，无并行
+var simpleJob = new SimpleJob { data = myArray }.Execute();
+// 立即完成，不返回 JobHandle
+
+// Schedule：异步执行，多线程
+var scheduledJob = new ParallelJob { data = myArray }.Schedule(10000, 64);
+// 立即返回，Job 在后台执行
+scheduledJob.Complete();  // 等待完成
+
+// ScheduleParallel：显式指定并行粒度
+var parallelJob = new ParallelJob { data = myArray }
+    .Schedule(10000, 256);  // 每 256 个元素为一个 Chunk
+// Chunk 大小影响负载均衡：太小则调度开销大，太大则负载不均</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>6.5 Work Stealing（工作窃取）</h2>
+
+        <p>Work Stealing 是 Job System 负载均衡的核心机制。它的目标是：让所有核心都保持忙碌，不会出现某个核心空闲而其他核心还在工作的情况。</p>
+
+        <h3>6.5.1 工作原理</h3>
+
+        <p>每个工作线程拥有一个双端队列（Deque）。Job System 将工作分配时，将 Chunk 推入线程自己的 Deque 尾部。当一个线程完成自己的所有任务后，它会从<strong>其他线程的 Deque 头部</strong>"窃取"任务：</p>
+
+        <div class="arch-diagram">
+Work Stealing 工作流程：
+
+线程 0 的 Deque: [Chunk0, Chunk1, Chunk2]  ← 正在处理 Chunk0
+线程 1 的 Deque: [Chunk3, Chunk4]           ← 正在处理 Chunk3
+线程 2 的 Deque: [Chunk5]                    ← 已完成！开始偷取
+
+步骤：
+1. 线程 2 完成 Chunk5，自己的 Deque 为空
+2. 线程 2 随机选择一个其他线程（比如线程 0）
+3. 线程 2 从线程 0 的 Deque 头部偷走 Chunk0
+4. 线程 2 开始处理 Chunk0
+5. 线程 0 下次需要工作时，从自己的 Deque 尾部取 Chunk1
+
+关键：头尾分离避免了锁竞争
+- 线程自己从尾部取（Pop Back）
+- 其他线程从头部偷（Pop Front）
+- 不需要锁！
+        </div>
+
+        <h3>6.5.2 为什么 Work Stealing 高效</h3>
+
+        <ol>
+            <li><strong>无锁设计</strong>：每个线程只从自己的 Deque 尾部取任务，从别人的 Deque 头部偷任务。头尾操作互不冲突，不需要加锁。</li>
+            <li><strong>局部性好</strong>：线程优先处理自己的任务，数据已经在缓存中。</li>
+            <li><strong>自适应</strong>：不需要预先知道每个任务的工作量。即使某些 Chunk 比其他 Chunk 更重，Work Stealing 也能自动平衡。</li>
+        </ol>
+
+        <h2>6.6 NativeContainer 安全系统</h2>
+
+        <p>NativeContainer 的安全系统是整个 Job System 的基石。它通过 AtomicSafetyHandle 实现多层保护：</p>
+
+        <h3>6.6.1 AtomicSafetyHandle</h3>
+
+        <p>AtomicSafetyHandle 是每个 NativeContainer 内部的引用计数和状态管理器：</p>
+
+        <pre><code class="language-cs">// AtomicSafetyHandle 内部状态
+public struct AtomicSafetyHandle
+{
+    private int m_ReferenceCount;      // 引用计数
+    private bool m_IsDisposing;        // 是否正在释放
+    private bool m_IsUsedFromJob;      // 是否在 Job 中使用
+    private int m_IncrementBurstCheck; // Burst 安全检查计数器
+    // ... 更多内部字段
+}
+
+// 当 NativeArray 被 Job 使用时：
+// 1. Increment 引用计数
+// 2. 标记 m_IsUsedFromJob = true
+// 3. 将 SafetyHandle 复制到 Job 结构体中
+// 4. Job 执行时检查 SafetyHandle 的状态
+// 5. Job 完成后 Decrement 引用计数
+
+// 如果尝试在 Job 完成前访问数据：
+// 1. Job 尝试读取 NativeArray
+// 2. 检查 m_IsUsedFromJob
+// 3. 发现数据正在被 Job 使用
+// 4. 抛出 InvalidWriteException（如果是写入）
+// 5. 或返回空/默认值（如果是读取）</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>6.6.2 安全模式的配置</h3>
+
+        <p>NativeContainer 的安全检查可以在不同模式下配置：</p>
+
+        <table>
+            <thead>
+                <tr><th>模式</th><th>检查级别</th><th>性能影响</th><th>适用场景</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>None</td><td>无检查</td><td>零开销</td><td>Release 构建，已充分测试的代码</td></tr>
+                <tr><td>Basic</td><td>基础检查（Dispose 状态）</td><td>极低</td><td>默认模式</td></tr>
+                <tr><td>Enhanced</td><td>增强检查（读写竞争）</td><td>低-中</td><td>Editor 调试</td></tr>
+                <tr><td>SafetyExtensions</td><td>完整检查（含调用栈追踪）</td><td>高</td><td>排查数据竞争问题</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>⚠️ 安全模式的选择</strong>：在 Editor 中使用 Enhanced 或 SafetyExtensions 模式可以帮助你发现数据竞争问题。但在 Release 构建中，务必使用 None 或 Basic 模式——过高的安全检查级别会显著降低性能。
+        </div>
+
+        <h2>6.7 性能调优：Job System 最佳实践</h2>
+
+        <h3>6.7.1 Chunk 大小调优</h3>
+
+        <p>Job 的 Chunk 大小直接影响负载均衡和调度开销：</p>
+
+        <pre><code class="language-cs">// Chunk 大小的经验法则
+// 每个 Chunk 应该有足够的任务量来摊销调度开销
+// 但也不能太大，否则负载不均时无法有效 Work Stealing
+
+// 推荐：每个 Chunk 处理 64-256 个元素
+var job = new MyJob { data = myArray }.Schedule(myArray.Length, 128);
+
+// 如果每个元素的处理时间差异很大（比如 AI 决策），使用更大的 Chunk
+var aiJob = new AIUpdateJob { entities = entityArray }.Schedule(entityArray.Length, 1024);
+
+// 如果每个元素的处理时间几乎相同（比如位置更新），使用较小的 Chunk
+var moveJob = new MoveJob { positions = posArray }.Schedule(posArray.Length, 64);</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>6.7.2 Job 依赖最小化</h3>
+
+        <p>尽量减少 Job 之间的依赖，最大化并行度：</p>
+
+        <pre><code class="language-cs">// ❌ 串行依赖链（最差）
+JobA → JobB → JobC → JobD → JobE
+// 所有 Job 必须依次执行，无法并行
+
+// ✅ 独立 Job 并行（最佳）
+JobA    JobB    JobC
+  │       │       │
+  └───→ JobD ←───┘
+         │
+       JobE
+// A、B、C 可以完全并行执行
+// D 等 A、B、C 都完成后执行
+// E 等 D 完成后执行</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>6.7.3 避免 Job 中的 GC</h3>
+
+        <p>Job 中绝对不能有任何 GC 分配：</p>
+
+        <pre><code class="language-cs">// ❌ Job 中的 GC 分配（会导致性能灾难）
+[BurstCompile]
+public struct BadJob : IJobParallelFor
+{
+    public NativeArray&lt;float&gt; data;
+    public void Execute(int i)
+    {
+        var list = new List&lt;float&gt;();     // GC 分配！
+        var arr = new float[10];           // GC 分配！
+        var str = data[i].ToString();      // GC 分配！
+        var obj = new object();            // GC 分配！
+    }
+}
+
+// ✅ 正确的 Job 写法
+[BurstCompile]
+public struct GoodJob : IJobParallelFor
+{
+    public NativeArray&lt;float&gt; data;
+    public NativeList&lt;float&gt; tempLists;  // NativeList 无 GC
+    public void Execute(int i)
+    {
+        // 所有操作都在 NativeArray 上，零 GC
+        data[i] *= 2f;
+    }
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>本章小结</h2>
+        <p>Job System 不仅是"并行运行循环"的工具，而是一个完整的并行计算基础设施。JobHandle 依赖图让你可以精确控制执行顺序，NativeContainer 安全系统防止数据竞争，Work Stealing 实现自适应负载均衡，Barrier 机制协调帧间同步。掌握这些机制的原理，才能在编写高性能 ECS 代码时做出正确的架构决策。</p>
+
+        <h2>下一章预告</h2>
+        <p><a href="07-ecs-implementation.html">第 07 章 - ECS 源码级实现</a>：Archetype 的内部结构、Chunk 的 64KB 固定块布局、Entity 的 Generation ID 防复用机制、EntityManager 如何通过 Query 定位到正确的 Chunk。</p>
+
+        <h2>延伸阅读</h2>
+        <ul>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.jobs@latest" target="_blank">Unity.Jobs 官方文档</a></li>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.collections@latest" target="_blank">Unity.Collections 官方文档</a></li>
+            <li><a href="https://www.cs.cmu.edu/~gaertner/pubs/Disc@ISCA.pdf" target="_blank">Work-Stealing Deques: Pop Stacks and All That (Lea, 2000)</a></li>
+            <li><a href="https://blog.unity.com/engine-platform/parallelizing-game-logic-with-the-jobs-system" target="_blank">Parallelizing Game Logic with the Jobs System — Unity Blog</a></li>
+            <li><a href="https://www.youtube.com/watch?v=weJ3RD3Szm4" target="_blank">GDC 2020 - Parallelizing Game Logic with the Unity Job System</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="05-burst-compiler-deep-dive.html">&larr; 第 05 章 - Burst Compiler 深入</a>
+            <a href="07-ecs-implementation.html">第 07 章 - ECS 源码级实现 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cs.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+    function copyCode(btn) {
+        const code = btn.parentElement.querySelector('code');
+        navigator.clipboard.writeText(code.textContent).then(() => {
+            btn.textContent = '已复制!';
+            setTimeout(() => btn.textContent = '复制', 1500);
+        });
+    }
+    </script>
+</body>
+</html>

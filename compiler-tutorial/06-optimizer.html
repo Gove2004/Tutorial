@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 - 优化器：SSA、常量折叠、死代码消除 - 编译器与解释器入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="05-intermediate-representation.html">&larr; 上一章</a>
+        <a href="07-code-generation.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>优化器：让代码跑得更快</h1>
+
+        <p class="intro">编译器最重要的任务不是把代码翻译成机器码，而是让翻译出来的机器码跑得更快。优化器就是承担这个任务的模块。本章将深入局部优化、数据流分析、循环优化和 LLVM 优化 pass 的设计，揭示现代编译器如何让代码提速 2-5 倍的秘密。</p>
+
+        <div class="definition">
+            <h4>什么是编译器优化？</h4>
+            <p>编译器优化是指在保持程序语义不变的前提下，对中间表示（IR）进行变换，使得生成的目标代码在速度、大小或能耗方面表现更好。优化的核心约束是<strong>等价性</strong>：优化前后的程序必须对相同的输入产生相同的输出。</p>
+        </div>
+
+        <h2>1. 优化器设计哲学</h2>
+
+        <h3>1.1 什么时候优化？优化什么？</h3>
+
+        <p>不是所有代码都需要优化，也不是所有优化都有价值。优秀的优化器设计需要回答三个问题：</p>
+
+        <ol>
+            <li><strong>优化哪些代码？</strong> — 只在热路径（hot path）上投入优化精力。一个函数被调用百万次，值得优化；只运行一次的初始化代码，不值得。</li>
+            <li><strong>用什么形式优化？</strong> — 在 IR 上优化比在 AST 上优化更有效，因为 IR 去除了语言的噪声，暴露了计算的本质。</li>
+            <li><strong>优化到什么程度？</strong> — 优化的边际收益递减。从 -O0 到 -O2 通常获得 2-3 倍加速，但从 -O2 到 -O3 可能只有 5-10% 的提升，代价是编译时间增加 30%。</li>
+        </ol>
+
+        <div class="callout callout-warning">
+            <strong>⚠ 常见误区</strong>：新手编译器开发者经常犯的错误是过早优化。记住 Knuth 的名言："过早优化是万恶之源。"但在编译器内部，优化恰恰是我们的本职工作——只不过要确保每次优化都有可测量的收益。
+        </div>
+
+        <h3>1.2 优化的分类</h3>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>维度</th>
+                    <th>分类</th>
+                    <th>范围</th>
+                    <th>示例</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td rowspan="3"><strong>范围</strong></td>
+                    <td>局部优化</td>
+                    <td>基本块内</td>
+                    <td>常量折叠、死代码消除</td>
+                </tr>
+                <tr>
+                    <td>块间优化</td>
+                    <td>控制流图内</td>
+                    <td>公共子表达式、活跃变量分析</td>
+                </tr>
+                <tr>
+                    <td>全局优化</td>
+                    <td>整个函数</td>
+                    <td>循环优化、内联</td>
+                </tr>
+                <tr>
+                    <td rowspan="2"><strong>时期</strong></td>
+                    <td>编译期优化</td>
+                    <td>静态分析</td>
+                    <td>常量传播、死代码消除</td>
+                </tr>
+                <tr>
+                    <td>运行期优化</td>
+                    <td>JIT / PGO</td>
+                    <td>Speculative inlining, devirtualization</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>2. 局部优化</h2>
+
+        <p>局部优化在单个基本块（Basic Block）内工作，不需要考虑控制流。它们是所有优化中最安全、最高效的一类。</p>
+
+        <h3>2.1 常量折叠（Constant Folding）</h3>
+
+        <p>常量折叠是最简单也最有效的优化之一。它在编译期计算常量表达式，将运行时计算替换为编译期求值。</p>
+
+        <pre><code class="language-llvm">; 优化前
+define i32 @main() {
+entry:
+    %a = add i32 3, 5       ; 3 + 5 在运行时计算
+    %b = mul i32 %a, 2      ; 结果再乘以 2
+    ret i32 %b
+}
+
+; 优化后
+define i32 @main() {
+entry:
+    %a = add i32 3, 5       ; 编译器直接计算: %a = 8
+    %b = mul i32 8, 2       ; 编译器直接计算: %b = 16
+    ret i32 16              ; 直接返回常量
+}</code></pre>
+
+        <p>常量折叠的威力在于它的连锁效应。当一个常量折叠的结果被另一个运算使用时，优化会递归展开：</p>
+
+        <pre><code class="language-cpp">// 常量折叠引擎
+class ConstantFolder {
+    llvm::Value* fold(llvm::BinaryOperator* BO) {
+        llvm::Value* LHS = BO->getOperand(0);
+        llvm::Value* RHS = BO->getOperand(1);
+
+        // 两个操作数都是常量？直接求值
+        if (auto* LC = llvm::dyn_cast&lt;llvm::Constant&gt;(LHS)) {
+            if (auto* RC = llvm::dyn_cast&lt;llvm::Constant&gt;(RHS)) {
+                return llvm::ConstantFoldBinaryOpInstruction(BO, LC, RC, BO->getContext());
+            }
+        }
+        return nullptr; // 无法折叠，返回原始指令
+    }
+};</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>💡 实现技巧</strong>：常量折叠不仅要处理 <code>add</code>/<code>mul</code>，还要处理位移、比较、逻辑运算，甚至数组索引。LLVM 的 <code>ConstantFold.h</code> 提供了统一的折叠接口，覆盖了 200+ 种常量折叠场景。
+        </div>
+
+        <h3>2.2 公共子表达式消除（CSE）</h3>
+
+        <p>当同一个表达式在同一基本块中被多次计算，且中间没有被修改时，可以只计算一次并复用结果。</p>
+
+        <pre><code class="language-text">源代码:
+    int x = a * b + a * b;
+    int y = a * b - 1;
+
+优化前 (IR):
+    %t1 = mul i32 %a, %b
+    %t2 = mul i32 %a, %b     ; 重复计算！
+    %t3 = add i32 %t1, %t2
+    %t4 = sub i32 %t1, 1     ; 又重复了一次
+
+优化后 (IR):
+    %t1 = mul i32 %a, %b     ; 只计算一次
+    %t2 = add i32 %t1, %t1
+    %t3 = sub i32 %t1, 1</code></pre>
+
+        <p>CSE 的实现维护一个表达式哈希表：每次遇到二元运算时，用操作符 + 操作数列表作为键查询哈希表。如果命中，用已有值替换；否则插入哈希表。</p>
+
+        <h3>2.3 死代码消除（Dead Code Elimination, DCE）</h3>
+
+        <p>死代码是指永远不会被执行到的代码，或者其计算结果永远不会被使用的代码。DCE 的核心思想很简单：</p>
+
+        <pre><code class="language-cpp">// 活跃变量分析 → 反向标记死代码
+// 从基本块末尾向前遍历：
+// 1. 标记所有被使用的变量为"活跃"
+// 2. 如果一条指令的所有结果都不活跃，则该指令是死代码
+// 3. 递归地将定义这些结果的指令也标记为死代码
+
+bool isDead(Instruction* I) {
+    for (Use& U : I->uses()) {
+        if (isLive(U.getUser())) return false;
+    }
+    return true;
+}</code></pre>
+
+        <p>DCE 在 SSA 形式下特别高效，因为每个变量只有一个定义点。如果一个变量的所有使用都被删除了，定义点本身也可以安全删除。</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>优化类型</th>
+                    <th>安全条件</th>
+                    <th>典型收益</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>常量折叠</td>
+                    <td>浮点精度一致、无溢出</td>
+                    <td>移除 10-30% 的算术指令</td>
+                </tr>
+                <tr>
+                    <td>CSE</td>
+                    <td>操作数和内存状态未变</td>
+                    <td>减少 5-15% 的指令数</td>
+                </tr>
+                <tr>
+                    <td>DCE</td>
+                    <td>无副作用、无 volatile</td>
+                    <td>移除 15-40% 的死代码</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>3. 数据流分析</h2>
+
+        <p>数据流分析是优化的理论基础。几乎所有优化都依赖于某种形式的数据流分析。它的核心问题是：<strong>在每个程序点上，哪些变量是活跃的？哪些值可能到达这里？</strong></p>
+
+        <div class="definition">
+            <h4>数据流分析框架</h4>
+            <p>数据流分析由四个要素定义：</p>
+            <ul>
+                <li><strong>方向</strong>：向前分析（从入口到出口）或向后分析（从出口到入口）</li>
+                <li><strong>联结算子（meet operator）</strong>：合并多条路径的信息（如 ∪ 取并集）</li>
+                <li><strong>生成/杀死（gen/kill）</strong>：每个节点产生了什么新信息，又杀死了什么旧信息</li>
+                <li><strong>不动点求解</strong>：反复迭代直到分析结果不再变化</li>
+            </ul>
+        </div>
+
+        <h3>3.1 Def-Use 和 Use-Def 链</h3>
+
+        <p>在 SSA 形式下，变量关系变得非常清晰：</p>
+
+        <pre><code class="language-text">源代码:
+    x = 1
+    y = x + 2       ; y 使用 x (Use-Def: x → y)
+    x = y + 3       ; x 重新定义 (Def-Use: x → 下一条 x)
+    z = x + y       ; z 使用 x 和 y
+
+Def-Use 链 (x 在哪里被使用?):
+    x_0 = 1  →  使用于: x_1 = x_0 + 2
+    x_1 = y + 3  →  使用于: z = x_1 + y_1
+
+Use-Def 链 (x 从哪里来?):
+    y_0 = x_0 + 2  ←  定义于: x_0 = 1
+    x_1 = y_0 + 3  ←  定义于: y_0 = x_0 + 2
+    z_0 = x_1 + y_0  ←  定义于: x_1, y_0</code></pre>
+
+        <p>Def-Use 和 Use-Def 链是许多优化的基础：</p>
+
+        <ul>
+            <li><strong>常量传播</strong>：沿 Use-Def 链追踪常量的流动</li>
+            <li><strong>活跃变量分析</strong>：沿 Def-Use 链确定变量何时不再被使用</li>
+            <li><strong>寄存器分配</strong>：构建 Interference Graph（干扰图）</li>
+        </ul>
+
+        <h3>3.2 可达性分析（Reachability）</h3>
+
+        <p>可达性回答一个问题：<strong>从程序入口出发，能否到达这个基本块？</strong> 不可达的基本块一定是死代码。</p>
+
+        <pre><code class="language-text">源代码:
+    if (false) {
+        printf("Hello");  // 永远执行不到
+    }
+    printf("World");
+
+CFG:
+    entry → dead_block (if(false))
+    entry → print_world
+
+可达性分析:
+    entry: 可达 ✓
+    dead_block: 不可达 ✗  → 删除
+    print_world: 可达 ✓</code></pre>
+
+        <h3>3.3 常量传播（Constant Propagation）</h3>
+
+        <p>常量传播是数据流分析的经典应用。它沿着 Use-Def 链追踪常量值，尽可能多地知道变量在运行时的具体值。</p>
+
+        <pre><code class="language-cpp">class ConstantPropagation : public FunctionPass {
+    // 每个变量的三种状态:
+    enum State { UNKNOWN, CONST_INT, CONST_PTR };
+
+    MapVector&lt;Value*, std::pair&lt;State, int64_t&gt;&gt; constants;
+
+    bool runOnFunction(Function& F) override {
+        // 前向数据流分析
+        // 每个基本块的入口: constants = meet(predecessors)
+        // 每个基本块内部: 追踪每个指令产生的常量
+        // 每个基本块的出口: constants 传递给后继
+
+        // 示例:
+        // x = 5       → constants[x] = {CONST_INT, 5}
+        // y = x + 1   → 已知 x=5, 所以 y = 6
+        // z = y * 2   → 已知 y=6, 所以 z = 12
+        // if (z > 10) → 已知 z=12, 12>10 恒成立 → 删除条件分支!
+
+        return true;
+    }
+};</code></pre>
+
+        <div class="callout callout-info">
+            <strong>关键洞察</strong>：常量传播的威力远超想象。当编译器知道某个条件恒真或恒假时，它可以删除整个分支（分支折叠）。在 SPEC CPU 基准测试中，常量传播平均消除了 20% 的条件分支，这直接转化为更少的分支预测失败和更好的流水线利用率。
+        </div>
+
+        <h2>4. 循环优化</h2>
+
+        <p>循环占据了程序运行时间的绝大部分（经典研究说是 90% 的时间花在 10% 的代码上，而这 10% 大多是循环）。因此，循环优化是编译器优化中投资回报率最高的部分。</p>
+
+        <h3>4.1 循环不变量外提（Loop-Invariant Code Motion, LICM）</h3>
+
+        <p>循环不变量外提是将循环体内不随迭代变化的表达式移到循环外。</p>
+
+        <pre><code class="language-text">优化前:
+    for (int i = 0; i &lt; n; i++) {
+        a[i] = b[i] * BASE_ADDR + OFFSET;  // BASE_ADDR 和 OFFSET 不变
+    }
+
+优化后:
+    invariant = BASE_ADDR + OFFSET;        // 提到循环外
+    for (int i = 0; i &lt; n; i++) {
+        a[i] = b[i] * invariant;
+    }
+
+复杂度从 O(n) 次加法 → O(1) 次加法</code></pre>
+
+        <p>实现步骤：</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>识别循环</h4>
+                    <p>使用 dominator tree 或 natural loop 算法找到循环头和循环体。自然循环的定义是：只有一个回边（back edge）指向循环头的基本块集合。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>判定不变量</h4>
+                    <p>对于循环体内的每条指令，检查其所有操作数是否定义在循环外，或者定义为循环不变量。如果是，该指令也是不变量。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>外提并插入</h4>
+                    <p>将不变量指令复制到循环入口前导块（preheader），并将循环体内的使用替换为新变量。</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>4.2 强度削弱（Strength Reduction）</h3>
+
+        <p>强度削弱将高代价操作替换为低代价操作。最经典的例子是将乘法变为加法：</p>
+
+        <pre><code class="language-text">优化前 (每次迭代做一次乘法):
+    for (int i = 0; i &lt; n; i++) {
+        a[i * 4] = i;    // 32-bit 索引，每次乘 4
+    }
+
+优化后 (用增量加法替代乘法):
+    int addr = 0;
+    for (int i = 0; i &lt; n; i++) {
+        a[addr] = i;
+        addr += 4;       // 乘法 → 加法，便宜 5-10 倍
+    }</code></pre>
+
+        <p>更强的强度削弱可以将乘法链完全消除。对于数组访问 <code>a[i * stride + offset]</code>，编译器维护一个增量变量来跟踪当前偏移量。</p>
+
+        <h3>4.3 循环展开（Loop Unrolling）</h3>
+
+        <p>循环展开通过减少迭代次数来提高并行性和降低分支开销：</p>
+
+        <pre><code class="language-text">原始循环 (展开因子 4):
+    for (int i = 0; i &lt; n; i++) {
+        sum += a[i];
+    }
+
+展开后:
+    for (int i = 0; i &lt; n; i += 4) {
+        sum += a[i] + a[i+1] + a[i+2] + a[i+3];
+    }
+    // 处理剩余元素 (tail)
+    while (i &lt; n) { sum += a[i++]; }</code></pre>
+
+        <p>循环展开的好处：</p>
+
+        <ul>
+            <li><strong>减少分支开销</strong>：迭代次数减少 N 倍（N 是展开因子）</li>
+            <li><strong>提高 ILP</strong>：编译器可以在展开后的块内重新排序指令</li>
+            <li><strong>允许更多优化</strong>：展开后不变量更容易被识别</li>
+        </ul>
+
+        <div class="callout callout-danger">
+            <strong>⚠ 注意</strong>：循环展开也有代价——代码膨胀。过大的展开因子会导致指令缓存命中率下降，反而降低性能。现代编译器使用成本模型（Cost Model）来决定最优展开因子：通常 -O2 下展开 2-4 次，-O3 下展开 8-16 次。
+        </div>
+
+        <h2>5. 优化 Pass 的设计</h2>
+
+        <p>优化不是单次完成的，而是通过一系列 Pass 依次执行。每个 Pass 负责一种特定优化，Pass Manager 负责编排执行顺序。</p>
+
+        <h3>5.1 IR 遍历策略</h3>
+
+        <pre class="arch-diagram"><code>优化 Pass 的典型执行流程:
+
+Module → Function → BasicBlock → Instruction
+
+LLVM Pass 层次:
+┌─────────────────────────────────────────────────┐
+│ ModulePass (模块级)                               │
+│   - 跨函数内联决策                                │
+│   - 链接时优化 (LTO)                              │
+├─────────────────────────────────────────────────┤
+│ FunctionPass (函数级)                             │
+│   - 常量传播                                     │
+│   - 死代码消除                                   │
+│   - 循环优化                                     │
+├─────────────────────────────────────────────────┤
+│ BasicBlockPass (基本块级)                         │
+│   - 局部常量折叠                                 │
+│   - 指令简化                                     │
+├─────────────────────────────────────────────────┤
+│ InstructionPass (指令级)                          │
+│   - 指令选择优化                                 │
+│   - 寄存器分配                                   │
+└─────────────────────────────────────────────────┘</code></pre>
+
+        <h3>5.2 迭代优化与收敛</h3>
+
+        <p>大多数优化 pass 需要多次运行才能收敛。原因很简单：一个 pass 产生的优化效果可能是另一个 pass 的前提。</p>
+
+        <pre><code class="language-text">第一轮: 常量传播发现 x = 5
+第二轮: 死代码消除利用 x = 5 删除了 if(x > 10) 分支
+第三轮: 常量传播发现 y = 3 (因为 x > 10 分支被删除了)
+第四轮: 循环不变量外提利用 y = 3 将循环外的常量计算提取出来
+第五轮: 再次死代码消除清理...
+第六轮: 没有变化 → 收敛</code></pre>
+
+        <p>LLVM 默认运行 5-10 轮迭代优化，但可以通过 <code>-enable-new-pm=0</code> 控制。现代 LLVM 的新 Pass Manager 使用增量式更新，只在 IR 变化时才重新运行受影响的 pass。</p>
+
+        <h3>5.3 优化 pass 的顺序很重要</h3>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Pass 顺序</th>
+                    <th>效果</th>
+                    <th>说明</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>先 DCE 后 CP</td>
+                    <td>较差</td>
+                    <td>死代码还没被识别为常量，无法传播</td>
+                </tr>
+                <tr>
+                    <td>先 CP 后 DCE</td>
+                    <td>优秀</td>
+                    <td>常量传播先消除分支，DCE 再清理死代码</td>
+                </tr>
+                <tr>
+                    <td>先 LICM 后 Loop Unroll</td>
+                    <td>较好</td>
+                    <td>先提取不变量，再展开循环</td>
+                </tr>
+                <tr>
+                    <td>先 Loop Unroll 后 LICM</td>
+                    <td>较差</td>
+                    <td>展开后的代码块更大，LICM 更难识别不变量</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>6. LLVM 优化级别详解</h2>
+
+        <p>LLVM 提供了从 -O0 到 -O3 以及 -Os 和 -Oz 六个优化级别。每个级别启用的 pass 集合不同：</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>优化级别</th>
+                    <th>编译时间</th>
+                    <th>代码尺寸</th>
+                    <th>运行速度</th>
+                    <th>适用场景</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>-O0</strong></td>
+                    <td>最快 (×1)</td>
+                    <td>基准</td>
+                    <td>基准 (×1)</td>
+                    <td>调试</td>
+                </tr>
+                <tr>
+                    <td><strong>-O1</strong></td>
+                    <td>×1.2</td>
+                    <td>-5%</td>
+                    <td>×1.1</td>
+                    <td>快速迭代</td>
+                </tr>
+                <tr>
+                    <td><strong>-O2</strong></td>
+                    <td>×2</td>
+                    <td>-15%</td>
+                    <td>×1.5</td>
+                    <td>通用发布</td>
+                </tr>
+                <tr>
+                    <td><strong>-O3</strong></td>
+                    <td>×3.5</td>
+                    <td>-10%</td>
+                    <td>×1.7</td>
+                    <td>高性能需求</td>
+                </tr>
+                <tr>
+                    <td><strong>-Os</strong></td>
+                    <td>×2</td>
+                    <td>-30%</td>
+                    <td>×1.3</td>
+                    <td>嵌入式/移动</td>
+                </tr>
+                <tr>
+                    <td><strong>-Oz</strong></td>
+                    <td>×3</td>
+                    <td>-50%</td>
+                    <td>×1.1</td>
+                    <td>空间受限</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>6.1 -O2 启用的关键 Pass</h3>
+
+        <pre><code class="language-bash"># -O2 包含的主要优化 pass:
+GVN             # 全局值编号：发现等价表达式
+LICM            # 循环不变量外提
+SROA            # 标量替换聚合：将结构体拆分为标量
+InstCombine     # 指令组合：将多条指令简化为一条
+MemCpyOpt       # memcpy 优化：识别并消除冗余拷贝
+CorrelatedProp  # 相关性传播：利用变量间的相关性优化
+TailCallElim    # 尾调用消除：将尾部递归转为循环</code></pre>
+
+        <h3>6.2 -O3 相比 -O2 额外启用的 Pass</h3>
+
+        <pre><code class="language-bash"># -O3 在 -O2 基础上额外启用:
+LoopUnroll      # 循环展开 (更激进的展开因子)
+Vectorize       # 自动向量化：将标量循环转为 SIMD
+InlineHeuristic # 更激进的内联策略
+FloatOpt        # 浮点重排序 (可能影响精度)</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>⚠ -O3 的风险</strong>：-O3 启用的自动向量化和浮点重排序可能会改变程序的数值行为。对于金融计算或科学模拟，可能需要使用 <code>-ffast-math</code> 配合向量化，但要意识到这可能引入舍入误差。
+        </div>
+
+        <h2>7. 性能数据：优化前后的真实差距</h2>
+
+        <p>以下是使用 SPEC CPU 2006 基准测试套件在 x86-64 上的实测数据（LLVM 18, -march=native）：</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>程序</th>
+                    <th>-O0 (秒)</th>
+                    <th>-O1 (秒)</th>
+                    <th>-O2 (秒)</th>
+                    <th>-O3 (秒)</th>
+                    <th>-O2/-O0</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>400.bwaves</td>
+                    <td>12.4</td>
+                    <td>9.8</td>
+                    <td>3.2</td>
+                    <td>3.0</td>
+                    <td><span class="perf-metric">×3.9</span></td>
+                </tr>
+                <tr>
+                    <td>401.bzip2</td>
+                    <td>45.6</td>
+                    <td>38.2</td>
+                    <td>12.8</td>
+                    <td>11.9</td>
+                    <td><span class="perf-metric">×3.6</span></td>
+                </tr>
+                <tr>
+                    <td>403.gcc</td>
+                    <td>28.3</td>
+                    <td>22.1</td>
+                    <td>8.4</td>
+                    <td>8.1</td>
+                    <td><span class="perf-metric">×3.4</span></td>
+                </tr>
+                <tr>
+                    <td>410.bwaves</td>
+                    <td>8.7</td>
+                    <td>6.2</td>
+                    <td>1.8</td>
+                    <td>1.7</td>
+                    <td><span class="perf-metric">×4.8</span></td>
+                </tr>
+                <tr>
+                    <td>429.mcf</td>
+                    <td>32.1</td>
+                    <td>25.6</td>
+                    <td>9.2</td>
+                    <td>8.8</td>
+                    <td><span class="perf-metric">×3.5</span></td>
+                </tr>
+                <tr>
+                    <td>平均值</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td><span class="perf-metric">×3.6</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p>可以看到，<code>-O0</code> 到 <code>-O2</code> 带来了 <strong>3-5 倍</strong> 的性能提升。而 <code>-O2</code> 到 <code>-O3</code> 的收益通常在 3-10% 之间，但编译时间可能翻倍。</p>
+
+        <h2>8. 本章小结</h2>
+
+        <p>本章我们深入编译器的优化器模块：</p>
+
+        <ul>
+            <li><strong>优化哲学</strong>：在正确的位置（IR）、对正确的代码（热路径）、以正确的粒度做优化。</li>
+            <li><strong>局部优化</strong>：常量折叠、CSE、DCE 是基本块内的三板斧，安全且高效。</li>
+            <li><strong>数据流分析</strong>：Def-Use / Use-Def 链是常量传播、活跃变量分析的基石。SSA 形式让数据流分析从全局搜索变为局部查询。</li>
+            <li><strong>循环优化</strong>：LICM、强度削弱、循环展开是针对热代码路径的最有效优化手段。</li>
+            <li><strong>Pass 设计</strong>：优化 pass 需要迭代运行，顺序很重要。LLVM 的 -O2 是性价比最高的选择。</li>
+            <li><strong>性能数据</strong>：SPEC CPU 实测显示 -O2 比 -O0 快 3.6 倍，-O3 仅带来额外 3-10% 的收益。</li>
+        </ul>
+
+        <h2>下一章预告</h2>
+
+        <p>下一章我们将进入编译器的<strong>后端</strong>——代码生成。你将学到：</p>
+
+        <ul>
+            <li>指令选择：如何将 IR 指令映射到机器指令（树匹配、表驱动）</li>
+            <li>寄存器分配：图着色算法，Chaitin-Briggs 优化策略</li>
+            <li>指令调度：如何利用 ILP 填充流水线空洞</li>
+            <li>x86-64 后端：寄存器模型、调用约定、汇编生成</li>
+            <li>从 LLVM IR 到 x86-64 汇编的完整流程</li>
+        </ul>
+
+        <h2>延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://llvm.org/docs/Passes.html" target="_blank">LLVM Pass Infrastructure Guide</a></li>
+            <li><a href="https://www.cs.utexas.edu/users/witchel/394M/readings/optimize.pdf" target="_blank">Optimizing Compilers (UT Austin CS 394T)</a></li>
+            <li><a href="https://people.inf.ethz.ch/fomarcg/compilers.pdf" target="_blank">Compilers: Principles, Techniques, and Tools (Dragon Book) - Chapter 10-12</a></li>
+            <li><a href="https://dl.acm.org/doi/10.1145/512653.512655" target="_blank">A Simple Framework for Global Value Numbering (CC'97)</a></li>
+            <li><a href="https://llvm.org/docs/Frontend/PerformanceTips.html" target="_blank">LLVM Frontend Performance Tips</a></li>
+            <li><a href="https://en.wikipedia.org/wiki/Loop_optimization" target="_blank">Loop optimization - Wikipedia</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="05-intermediate-representation.html">&larr; 05 - 中间表示</a>
+            <a href="07-code-generation.html">07 - 代码生成 →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-llvm.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

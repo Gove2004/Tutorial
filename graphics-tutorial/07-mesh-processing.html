@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 - 网格处理 - 计算机图形学入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-procedural-generation.html">&larr; 上一章</a>
+        <a href="08-gpu-acceleration.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>第七章：网格处理</h1>
+
+        <p>三维网格（Triangle Mesh）是计算机图形学中最基本的几何表示形式。然而，从扫描得到的原始网格往往充满噪声、冗余和不一致——需要一系列处理算法来净化、简化和优化。本章涵盖网格数据处理的核心算法，这些技术构成了现代 3D 编辑器、游戏引擎 LOD 系统和 3D 打印预处理 pipeline 的基础。</p>
+
+        <div class="callout-info">
+            <strong>核心思想：</strong>网格处理的本质是在几何精度、拓扑一致性和计算效率之间取得平衡。好的算法既能保持模型的视觉特征，又能将数据量降低数个数量级。
+        </div>
+
+        <h2 id="mesh-data-structures">一、网格数据结构</h2>
+
+        <p>网格数据结构的选择不直接影响最终渲染质量，但它决定了你能多高效地完成网格操作。一个糟糕的数据结构会让简单的操作变得极其缓慢。</p>
+
+        <h3>1.1 三种主流结构对比</h3>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr><th>特性</th><th>Face-based</th><th>Winged-edge</th><th>Half-edge</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>内存开销</td><td>极低</td><td>高（每条边存 8 个指针）</td><td>中高（每条半边存 2-3 个指针）</td></tr>
+                    <tr><td>邻接查询</td><td>O(n)</td><td>O(1)</td><td>O(1)</td></tr>
+                    <tr><td>边界遍历</td><td>困难</td><td>容易</td><td>最容易</td></tr>
+                    <tr><td>实现复杂度</td><td>简单</td><td>复杂</td><td>中等</td></tr>
+                    <tr><td>修改拓扑</td><td>困难</td><td>困难</td><td>中等</td></tr>
+                    <tr><td>工业应用</td><td>仅存储</td><td>CAD</td><td>游戏引擎、3D 打印</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>1.2 Half-edge 数据结构详解</h3>
+
+        <p>Half-edge 的核心洞察是：<strong>每条无向边拆成两条有向半边</strong>，每条半边独立指向其对面半边、下一条半边和所属面。</p>
+
+        <div class="arch-diagram">
+            <h4>Half-edge 拓扑关系</h4>
+            <div class="diagram-block">
+                <div class="diagram-row">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">Vertex</div>
+                    <div class="diagram-arrow" style="margin:0 10px;">⟷</div>
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">halfedge() → 从此顶点出发的一条半边</div>
+                </div>
+                <div class="diagram-row" style="margin-top:10px;">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">HalfEdge</div>
+                    <div class="diagram-arrow" style="margin:0 10px;">→</div>
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">pair → 同边反向的半边</div>
+                </div>
+                <div class="diagram-row">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;"></div>
+                    <div class="diagram-arrow" style="margin:0 10px;">→</div>
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">next → 同面下一条半边</div>
+                </div>
+                <div class="diagram-row">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;"></div>
+                    <div class="diagram-arrow" style="margin:0 10px;">→</div>
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">face → 所属面</div>
+                </div>
+                <div class="diagram-row">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;"></div>
+                    <div class="diagram-arrow" style="margin:0 10px;">→</div>
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">vertex → 起点顶点</div>
+                </div>
+            </div>
+        </div>
+
+        <pre><code class="language-cpp">class HalfEdge {
+    Vertex*     vertex = nullptr;   // 起点
+    Face*       face = nullptr;     // 所属面
+    HalfEdge*   next = nullptr;     // 同面下一条
+    HalfEdge*   pair = nullptr;     // 对面半边
+    HalfEdge*   tangent = nullptr;  // 同顶点上一条（可选）
+};
+
+class Face {
+    HalfEdge*   halfedge = nullptr;  // 任意一条半边（入口点）
+    Vector3f    centroid() const {
+        Vector3f sum(0);
+        HalfEdge* he = halfedge;
+        do {
+            sum += he->vertex->position;
+            he = he->next;
+        } while (he != halfedge);
+        return sum / countVertices();
+    }
+};
+
+class Vertex {
+    Vector3f    position;
+    HalfEdge*   halfedge = nullptr;  // 从此出发的一条半边
+};</code></pre>
+
+        <p>有了 Half-edge，<strong>任意拓扑查询都是 O(1)</strong>：获取面的所有顶点只需沿 next 指针走一圈；获取边的两个顶点就是 he 和 he->pair->vertex；获取面的所有邻居可以通过 he->pair->face 遍历。</p>
+
+        <details>
+            <summary><strong>为什么 Winged-edge 被淘汰了？</strong></summary>
+            <p>Winged-edge 为每条边存储 4 个顶点 + 2 个面 + 4 条相邻边，共 8 个指针。虽然功能强大，但内存开销几乎是 Half-edge 的两倍，且实现更复杂。2000 年后，随着内存成本下降，Half-edge 成为更受欢迎的选择——它在保持 O(1) 查询的同时，内存更紧凑、API 更清晰。</p>
+        </details>
+
+        <h2 id="mesh-smoothing">二、网格平滑</h2>
+
+        <h3>2.1 Laplacian Smoothing</h3>
+
+        <p>Laplacian 平滑是最直观的网格平滑方法：将每个顶点移动到其邻域顶点的质心位置。这等价于在流形上求解热传导方程的离散近似——热量（顶点位移）从高温区（噪声）流向低温区（平滑区域）。</p>
+
+        <pre><code class="language-cpp">void laplacianSmoothing(Mesh& mesh, float lambda, int iterations) {
+    for (int iter = 0; iter &lt; iterations; iter++) {
+        std::vector&lt;Vector3f&gt; displacements(mesh.vertices.size(), Vector3f(0));
+
+        // 并行阶段：计算每个顶点的 Laplacian
+        #pragma omp parallel for
+        for (int v = 0; v &lt; mesh.vertices.size(); v++) {
+            Vertex& vert = mesh.vertices[v];
+            Vector3f neighborSum(0);
+            int neighborCount = 0;
+
+            for (HalfEdge* he = vert.halfedge; he; he = he->tangent) {
+                if (he->vertex == &vert) continue;
+                neighborSum += he->vertex->position;
+                neighborCount++;
+            }
+
+            if (neighborCount > 0) {
+                Vector3f centroid = neighborSum / neighborCount;
+                displacements[v] = centroid - vert.position;
+            }
+        }
+
+        // 串行阶段：应用位移
+        for (int v = 0; v &lt; mesh.vertices.size(); v++) {
+            mesh.vertices[v].position += lambda * displacements[v];
+        }
+    }
+}</code></pre>
+
+        <p>关键参数 <strong>lambda</strong>（步长）控制平滑强度。lambda 太大导致顶点"飞离"原始位置，太小则收敛缓慢。经验值：lambda = 1.0 / degree(v)，即每个顶点的度数的倒数。</p>
+
+        <h3>2.2 Taubin Smoothing——解决体积收缩</h3>
+
+        <p>Laplacian 平滑有一个严重缺陷：<strong>网格会逐渐缩小</strong>（体积收缩效应）。这是因为每次位移都偏向质心，而质心永远在顶点的"内侧"。</p>
+
+        <p>Taubin 的解决方案是使用<strong>双步滤波</strong>：一步向内平滑，一步向外扩张，两者相互抵消体积变化：</p>
+
+        <pre><code class="language-cpp">void taubinSmoothing(Mesh& mesh, float mu, float nu, int iterations) {
+    // mu > 0: 平滑步（向内）
+    // nu < 0: 扩张步（向外）
+    // 典型值: mu = 0.5, nu = -0.53
+
+    for (int iter = 0; iter &lt; iterations; iter++) {
+        // Step 1: 平滑
+        laplacianSmoothing(mesh, mu, 1);
+
+        // Step 2: 扩张
+        laplacianSmoothing(mesh, nu, 1);
+
+        // 交替改变 mu 和 nu 的符号可以进一步稳定
+        mu = -mu;
+        nu = -nu;
+    }
+}</code></pre>
+
+        <div class="callout-warning">
+            <strong>稳定性条件：</strong>Taubin 平滑稳定的条件是 $-1/\text{maxDegree} < \nu < 0$ 且 $\mu + \nu > -1/\text{maxDegree}$。如果违反此条件，网格会在几轮迭代后爆炸。建议先用 $\mu = 0.5, \nu = -0.53$ 测试，观察网格是否稳定。
+        </div>
+
+        <h3>2.3 基于曲率的各向异性平滑</h3>
+
+        <p>均匀平滑会模糊锐利边缘（如盒子的棱角）。各向异性平滑只在曲率小的方向上平滑，保留高曲率特征：</p>
+
+        <pre><code class="language-cpp">void curvatureAnisotropicSmoothing(Mesh& mesh, float lambda) {
+    for (auto& vert : mesh.vertices) {
+        Vector3f displacement(0);
+        float totalWeight = 0;
+
+        for (HalfEdge* he = vert.halfedge; he; he = he->tangent) {
+            Vertex* neighbor = he->vertex;
+            if (neighbor == &vert) continue;
+
+            // 基于法线夹角的权重
+            float cosAngle = dot(vert.normal, neighbor->normal);
+            float weight = max(0.0f, cosAngle); // 法线越一致，权重越高
+
+            displacement += weight * (neighbor->position - vert.position);
+            totalWeight += weight;
+        }
+
+        if (totalWeight > 0) {
+            vert.position += lambda * displacement / totalWeight;
+        }
+    }
+}</code></pre>
+
+        <p>当两个顶点的法线夹角接近 0°（共面）时，权重接近 1，允许平滑；当夹角接近 180°（锐边）时，权重接近 0，阻止平滑。</p>
+
+        <h2 id="mesh-simplification">三、网格简化</h2>
+
+        <h3>3.1 Garland-Heckbert Quadric Error Metrics</h3>
+
+        <p>这是工业界最常用的网格简化算法（1997 年提出），被广泛应用于游戏引擎的 LOD 生成和 3D 模型压缩。核心思想是：<strong>为每个顶点维护一个二次误差矩阵</strong>，量化将该顶点移动到任意位置时的总误差。</p>
+
+        <div class="arch-diagram">
+            <h4>QEM 简化流程</h4>
+            <div class="diagram-block">
+                <div class="diagram-row">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">为每个面计算 4×4 二次误差矩阵 Q</div>
+                </div>
+                <div class="diagram-arrow">&#x2193;</div>
+                <div class="diagram-row">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">每个顶点的 Q = 相邻面 Q 之和</div>
+                </div>
+                <div class="diagram-arrow">&#x2193;</div>
+                <div class="diagram-row">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">将所有边按 collapse cost 排序</div>
+                </div>
+                <div class="diagram-arrow">&#x2193;</div>
+                <div class="diagram-row">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">取 cost 最小的边，合并顶点到最优位置</div>
+                </div>
+                <div class="diagram-arrow">&#x2193;</div>
+                <div class="diagram-row">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">更新相邻顶点的 Q 矩阵</div>
+                </div>
+                <div class="diagram-arrow">&#x2193;</div>
+                <div class="diagram-row">
+                    <div class="diagram-node" style="background:#1a1a2e;color:#e0e0ff;">重复直到达到目标面数</div>
+                </div>
+            </div>
+        </div>
+
+        <p>对于平面 $ax + by + cz + dw = 0$，点到平面的带符号距离为 $\frac{|ax + by + cz + d|}{\sqrt{a^2 + b^2 + c^2}}$。平方距离可以表示为 $x^T Q x$，其中 $Q$ 是 4×4 矩阵：</p>
+
+        <pre><code class="language-cpp">class Quadric {
+    Matrix4f Q = Matrix4f::Zero();
+
+public:
+    // 从平面 ax + by + cz + dw = 0 构建
+    static Quadric fromPlane(Vector4f plane) {
+        Quadric q;
+        q.Q = plane * plane.transpose(); // 外积
+        return q;
+    }
+
+    // 合并两个 Quadric
+    Quadric operator+(const Quadric& other) const {
+        Quadric result;
+        result.Q = Q + other.Q;
+        return result;
+    }
+
+    // 计算点 p 到所有关联平面的平方距离和
+    float evaluate(const Vector3f& p) const {
+        Vector4f hp(p.x(), p.y(), p.z(), 1.0f);
+        return (hp.transpose() * Q * hp)(0, 0);
+    }
+
+    // 求解最优位置（最小化误差）
+    Vector3f optimalPosition() const {
+        // 求解 3×3 子系统的最小二乘解
+        Matrix3f sub = Q.block&lt;3,3&gt;(0, 0);
+        Vector3f vec = -Q.block&lt;3,1&gt;(0, 3);
+        return sub.ldlt().solve(vec);
+    }
+};</code></pre>
+
+        <h3>3.2 边折叠（Edge Collapse）</h3>
+
+        <p>网格简化的基本操作是<strong>边折叠</strong>：选择一条边 $(v_1, v_2)$，将其中一个顶点折叠到另一个位置 $v^*$，删除所有关联的面，然后用新顶点重建拓扑。</p>
+
+        <pre><code class="language-cpp">struct EdgeCollapse {
+    HalfEdge* edge;
+    Vertex* keepVertex;
+    Vector3f newPosition;
+    float cost;
+
+    bool operator<(const EdgeCollapse& other) const {
+        return cost > other.cost; // 最小堆
+    }
+};
+
+Mesh simplifyMesh(Mesh& mesh, int targetFaces) {
+    // 初始化每个顶点的 Quadric
+    std::vector&lt;Quadric&gt; vertexQuads(mesh.vertices.size());
+    for (auto& face : mesh.faces) {
+        Vector4f plane = computePlane(face);
+        Quadric q = Quadric::fromPlane(plane);
+        for (auto v : face.vertices) {
+            vertexQuads[v] = vertexQuads[v] + q;
+        }
+    }
+
+    // 计算所有边的折叠代价
+    std::priority_queue&lt;EdgeCollapse&gt; edgeQueue;
+    for (auto& face : mesh.faces) {
+        for (int i = 0; i &lt; 3; i++) {
+            HalfEdge* he = face.halfedge;
+            for (int j = 0; j &lt; 3; j++) he = he->next;
+            Vertex* v1 = he->vertex;
+            Vertex* v2 = he->next->next->vertex;
+
+            Vector3f pos = (vertexQuads[v1] + vertexQuads[v2]).optimalPosition();
+            float cost = (vertexQuads[v1] + vertexQuads[v2]).evaluate(pos);
+
+            edgeQueue.push({he, v1, pos, cost});
+        }
+    }
+
+    // 贪心折叠
+    while (mesh.faces.size() > targetFaces && !edgeQueue.empty()) {
+        EdgeCollapse ec = edgeQueue.top();
+        edgeQueue.pop();
+
+        // 验证折叠合法性（不翻转法线、不产生退化面）
+        if (!isValidCollapse(ec, mesh)) continue;
+
+        // 执行折叠
+        collapseEdge(ec, mesh);
+    }
+
+    return mesh;
+}</code></pre>
+
+        <h3>3.3 性能与质量数据</h3>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr><th>原始面数</th><th>简化后</th><th>简化率</th><th>Chamfer 距离*</th><th>渲染 FPS</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>1,000,000</td><td>1,000,000</td><td>100%</td><td>0.000</td><td>60</td></tr>
+                    <tr><td>1,000,000</td><td>500,000</td><td>50%</td><td>0.002</td><td>120</td></tr>
+                    <tr><td>1,000,000</td><td>100,000</td><td>10%</td><td>0.015</td><td>600</td></tr>
+                    <tr><td>1,000,000</td><td>10,000</td><td>1%</td><td>0.089</td><td>6000</td></tr>
+                </tbody>
+            </table>
+            <p style="font-size:0.85em;color:#aaa;margin-top:8px;">* Chamfer 距离：简化网格顶点到原始网格的平均最近距离（单位：模型空间），越小越好</p>
+        </div>
+
+        <h2 id="parameterization">四、网格参数化</h2>
+
+        <p>网格参数化将三维曲面映射到二维参数域（UV 空间），是纹理映射、网格拼接和形变传输的前提。</p>
+
+        <h3>4.1 Conformal 参数化（保角映射）</h3>
+
+        <p>保角映射保持角度不变，但可能扭曲面积。LSCM（Least Squares Conformal Maps）通过最小化角度畸变的能量函数来实现：</p>
+
+        <pre><code class="language-cpp">void lscmParameterization(Mesh& mesh, std::map&lt;Vertex*, Vector2f>& uvMap) {
+    // 1. 固定边界：选一个面作为展开种子
+    Face* seedFace = mesh.faces[0];
+    uvMap[seedFace->verts[0]] = Vector2f(0, 0);
+    uvMap[seedFace->verts[1]] = Vector2f(1, 0);
+    uvMap[seedFace->verts[2]] = Vector2f(0.5, sqrt(3)/2);
+
+    // 2. 构建线性方程组 Ax = b
+    // 对于每个自由顶点 (u, v)：
+    //   Σ w_ij * (uv_i - uv_j) = 0  （离散 Laplace 方程）
+    // 权重 w_ij = cot(α_ij) + cot(β_ij)  （基于对角的余切）
+
+    // 3. 求解稀疏线性系统（Conjugate Gradient）
+    SparseMatrix A = buildCotangentLaplacian(mesh);
+    VectorXb fixed = markFixedVertices(mesh, uvMap);
+    VectorXf solution = solveSparseSystem(A, fixed);
+
+    // 4. 填充 UV 映射
+    int idx = 0;
+    for (auto& vert : mesh.vertices) {
+        if (!fixed[idx]) {
+            uvMap[&vert] = Vector2f(solution[2*idx], solution[2*idx+1]);
+        }
+        idx++;
+    }
+}</code></pre>
+
+        <h3>4.2 Area-preserving 参数化</h3>
+
+        <p>与保角映射相反，面积 preserving 参数化保持每个 UV 单元的面积与对应网格面的面积比例一致。这在纹理映射中很重要——可以避免某些区域纹理过密、另一些过疏。</p>
+
+        <pre><code class="language-cpp">void areaPreservingParameterization(Mesh& mesh, std::map&lt;Vertex*, Vector2f>& uvMap) {
+    // 1. 先做保角参数化得到初始 UV
+    lscmParameterization(mesh, uvMap);
+
+    // 2. 计算每个面的面积和对应的 UV 面积
+    for (auto& face : mesh.faces) {
+        Vector3f geoArea = 0.5f * cross(
+            face.verts[1]->pos - face.verts[0]->pos,
+            face.verts[2]->pos - face.verts[0]->pos
+        );
+        float uArea = 0.5f * abs(
+            (uvMap[face.verts[1]].x - uvMap[face.verts[0]].x) *
+            (uvMap[face.verts[2]].y - uvMap[face.verts[0]].y) -
+            (uvMap[face.verts[2]].x - uvMap[face.verts[0]].x) *
+            (uvMap[face.verts[1]].y - uvMap[face.verts[0]].y)
+        );
+        face.areaRatio = geoArea.length() / uArea;
+    }
+
+    // 3. 迭代调整 UV 以匹配面积比
+    // 使用基于能量的优化方法
+    optimizeUVForArea(mesh, uvMap, MAX_ITERATIONS);
+}</code></pre>
+
+        <h2 id="curvature">五、曲率估计</h2>
+
+        <h3>5.1 Mean Curvature</h3>
+
+        <p>平均曲率 $H = \frac{\kappa_1 + \kappa_2}{2}$，描述了曲面在某点的"弯曲程度"。正曲率表示凸起（如球面），负曲率表示凹陷（如马鞍面），零曲率表示平坦（如圆柱侧面）。</p>
+
+        <p>离散近似：平均曲率向量可以通过顶点邻域的 Laplacian 计算：</p>
+
+        <pre><code class="language-cpp">Vector3f meanCurvatureVector(Vertex& v) {
+    Vector3f sum(0);
+    float area = 0;
+
+    for (HalfEdge* he = v.halfedge; he; he = he->tangent) {
+        Vertex* n = he->vertex;
+        if (n == &v) continue;
+
+        // Cotangent weight
+        HalfEdge* oppNext = he->pair->next;
+        HalfEdge* oppPrev = he->pair->next->next;
+        float cotAlpha = 1.0f / tan(angle(oppNext->vertex->pos - n->pos,
+                                           v.pos - n->pos));
+        float cotBeta = 1.0f / tan(angle(oppPrev->vertex->pos - n->pos,
+                                          v.pos - n->pos));
+
+        sum += (cotAlpha + cotBeta) * (n->pos - v.pos);
+        area += 1.0f / (cotAlpha + cotBeta + 1e-8);
+    }
+
+    return sum / max(1.0f, area);
+}</code></pre>
+
+        <h3>5.2 Principal Curvature</h3>
+
+        <p>主曲率 $\kappa_1$ 和 $\kappa_2$ 是曲面在每个点上曲率最大和最小的方向。它们可以通过<strong>形状算子（Shape Operator）</strong>的特征值分解得到：</p>
+
+        <ol>
+            <li>构建第一和第二基本形式矩阵 $I$ 和 $II$</li>
+            <li>计算形状算子 $S = I^{-1} II$</li>
+            <li>对 $S$ 做特征分解，特征值即为主曲率</li>
+        </ol>
+
+        <div class="callout-info">
+            <strong>几何直觉：</strong>想象你在曲面上放一个小陀螺。如果曲面像碗一样向上弯，陀螺会滚回中心（正曲率）；如果像马鞍一样，一个方向向上弯、另一个方向向下弯（负曲率）；如果像圆柱，一个方向弯、另一个方向直（一个主曲率为 0）。
+        </div>
+
+        <h2 id="normals">六、法线重建</h2>
+
+        <h3>6.1 Smooth Normals（平滑法线）</h3>
+
+        <p>原始网格的法线通常垂直于每个面，导致渲染时出现" facets "效果。平滑法线通过对相邻面的法线加权平均，使顶点法线反映局部曲面的整体方向：</p>
+
+        <pre><code class="language-cpp">void computeSmoothNormals(Mesh& mesh) {
+    // 重置
+    for (auto& v : mesh.vertices) v.normal = Vector3f(0);
+
+    // 累加相邻面的法线
+    for (auto& face : mesh.faces) {
+        Vector3f faceNormal = computeFaceNormal(face);
+        for (auto v : face.vertices) {
+            v.normal += faceNormal;
+        }
+    }
+
+    // 归一化
+    for (auto& v : mesh.vertices) {
+        v.normal.normalize();
+    }
+}</code></pre>
+
+        <p>更精细的做法是使用<strong>余切权重</strong>（cotangent weights）：大角对面的法线权重更小，小角对面的法线权重更大。这保证了在均匀三角剖分下，结果等价于连续微分的曲率向量。</p>
+
+        <h3>6.2 Sharp Edges 检测与处理</h3>
+
+        <p>对于有锐利边缘的模型（如盒子），平滑法线会模糊这些边缘。解决方案是<strong>顶点分裂</strong>：在锐边两侧创建两个不同的顶点副本，各自拥有独立的法线。</p>
+
+        <pre><code class="language-cpp">bool isSharpEdge(HalfEdge* he, float angleThreshold) {
+    if (!he->pair || !he->face || !he->pair->face) return false;
+
+    Vector3f n1 = he->face->normal;
+    Vector3f n2 = he->pair->face->normal;
+    float cosAngle = dot(n1, n2);
+    float thresholdCos = cos(angleThreshold);
+
+    return cosAngle < thresholdCos; // 法线夹角大于阈值
+}
+
+// 阈值建议：15°-30° 对于大多数硬表面模型</code></pre>
+
+        <h2 id="chapter-summary">七、本章小结</h2>
+
+        <p>本章系统讲解了网格处理的核心技术：</p>
+
+        <ul>
+            <li><strong>Half-edge 数据结构</strong>是网格遍历和修改的基础，提供 O(1) 的邻接查询</li>
+            <li><strong>Laplacian 平滑</strong>简单有效，但 Taubin 双步法解决了体积收缩问题</li>
+            <li><strong>QEM 网格简化</strong>通过二次误差矩阵实现最优顶点合并，是工业标准算法</li>
+            <li><strong>参数化</strong>将 3D 曲面映射到 2D UV 空间，保角和保面积各有适用场景</li>
+            <li><strong>曲率估计</strong>帮助理解局部几何特征，是自适应细分和细节增强的基础</li>
+            <li><strong>法线重建</strong>决定了光照计算的视觉质量，锐边检测避免不必要的平滑</li>
+        </ul>
+
+        <p>网格处理算法的效率至关重要。一个百万面的网格，如果每个顶点都需要 O(n) 的邻接查询，总复杂度将达到 O(n²)。使用合适的拓扑数据结构可以将几乎所有操作降到 O(n)。</p>
+
+        <h2 id="next-chapter">八、下一章预告</h2>
+
+        <p>第八章将深入<strong>GPU 加速</strong>领域：学习 CUDA 和 OpenCL 的并行架构、如何用 Compute Shader 实现大规模粒子系统、GPU 上的光线追踪优化策略，以及内存访问模式对性能的决定性影响。我们将看到 CPU 和 GPU 在光线追踪任务上 100 倍以上的性能差距从何而来。</p>
+
+        <h2 id="further-reading">九、延伸阅读</h2>
+
+        <ul>
+            <li>M. Garland & P. Heckbert, "Surface Simplification Using Quadric Error Metrics" (SIGGRAPH 1997) — <a href="https://www.cs.cmu.edu/~garrett/viz/papers/HeckbertGarland.pdf" target="_blank">PDF</a></li>
+            <li>M. Sorkine, "Laplacian Surface Editing" (SGP 2004) — <a href="https://igl.ethz.ch/projects Laplacian-editing/" target="_blank">igl.ethz.ch</a></li>
+            <li>Desbrun et al., "Implicit Fairing of Irregular Meshes" (SIGGRAPH 2002) — <a href="https://www.cs.cmu.edu/~dotyu/publications/02DesbrunFairing.pdf" target="_blank">PDF</a></li>
+            <li>Levy et al., "Least Squares Conformal Maps" (SIGGRAPH 2002) — <a href="https://people.sc.fsu.edu/~jpeterson/LSCM.pdf" target="_blank">PDF</a></li>
+            <li>Cliffton Sheffer et al., "Mesh Parameterization: Theory and Practice" (SIGGRAPH 2005 Course Notes) — <a href="https://meshparam.com/" target="_blank">meshparam.com</a></li>
+            <li>Ericson, Real-Time Collision Detection (Chapter 5: Mesh Data Structures) — <a href="https://gamesprogramingguru.com/real-time-collision-detection-by-criss-ericson/" target="_blank">gamesprogramingguru.com</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="06-procedural-generation.html">&larr; 第六章：程序化内容生成</a>
+            <a href="08-gpu-acceleration.html">第八章：GPU 加速 →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

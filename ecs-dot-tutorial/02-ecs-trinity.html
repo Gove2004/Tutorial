@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 - ECS 三要素深度解剖 - ECS 与 Unity DOTS 入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav"><a href="index.html">目录</a><a href="01-ecs-paradigm-shift.html">&larr; 上一章</a><a href="03-data-oriented-design.html">03 - 数据导向设计 &rarr;</a></nav>
+    <main>
+        <h1>ECS 三要素深度解剖</h1>
+        <p>Entity、Component、System——这三个词听起来简单，但每个概念的设计决策都暗藏着深刻的工程权衡。本章将逐一解剖，深入到 Unity Entities 2.x 的源码级实现。</p>
+
+        <h2>Entity：不是对象，只是一个 ID</h2>
+        <p>这是 ECS 中最反直觉的概念。在 OOP 中，对象是数据和行为的容器。在 ECS 中，<strong>Entity 只是一个 64 位的整数 ID</strong>，没有任何数据，没有任何行为。</p>
+
+        <div class="definition">
+            <h4>Entity 的本质</h4>
+            <p>Entity 是一个唯一的标识符，由两部分组成：</p>
+            <ul>
+                <li><strong>Generation ID（16 位）</strong>：防止 ID 复用导致的悬空引用</li>
+                <li><strong>Entity Index（48 位）</strong>：在 EntityDB 中的槽位索引</li>
+            </ul>
+            <p>48 位 = 281 万亿个可能的 Entity。即使 Generation ID 循环复用，实际游戏中也永远不会遇到冲突。</p>
+        </div>
+
+<pre><code class="language-csharp">// Unity DOTS 中的 Entity
+var entity = entityManager.CreateEntity();
+// entity 就是一个 struct Entity { int m_Index; uint m_Generation; }
+
+// 创建时指定组件
+var enemyEntity = entityManager.CreateEntity(
+    typeof(Position),
+    typeof(Velocity),
+    typeof(Health)
+);
+
+// 创建时不指定组件，动态添加
+var entity = entityManager.CreateEntity();
+entityManager.AddComponentData(entity, new Position { Value = float3.zero });
+entityManager.AddComponentData(entity, new Velocity { Value = new float3(1, 0, 0) });</code></pre>
+
+        <h3>为什么 Entity 只是一个 ID？</h3>
+        <p>因为<strong>数据应该和数据在一起，而不是和 ID 在一起</strong>。在 OOP 中，数据（字段）绑定在对象（类）上。在 ECS 中，数据（Component）存储在连续的数组中，Entity 只是这些数组中的索引。</p>
+<pre><code class="language-text">OOP:  Entity A { Position, Velocity, Health }  // 数据在对象内部
+ECS:  Position 数组: [posA, posB, posC, ...]    // 数据在独立数组中
+      Velocity 数组: [velA, velB, velC, ...]
+      Health  数组: [hpA, hpB, hpC, ...]
+
+Entity A = 索引 0
+Entity B = 索引 1
+Entity C = 索引 2
+
+Position[0] = posA, Velocity[0] = velA, Health[0] = hpA
+// 通过 Entity ID（索引 0）可以查到所有组件</code></pre>
+
+        <h3>Entity 的 Generation ID 防复用机制</h3>
+        <p>当一个 Entity 被 Destroy 后，它的槽位会被复用以创建新 Entity。但旧 Entity 的引用可能仍存在于某些系统中。Generation ID 解决了这个问题：</p>
+<pre><code class="language-csharp">// Entity A（index=0, gen=1）被创建
+var entityA = entityManager.CreateEntity();  // Entity(0, 1)
+
+// Entity A 被销毁
+entityManager.DestroyEntity(entityA);  // Entity(0, 1) 被标记为死亡
+
+// 新 Entity B 复用了 index=0
+var entityB = entityManager.CreateEntity();  // Entity(0, 2)
+
+// 此时 entityA 仍然持有 Entity(0, 1)，但 generation 1 已经无效
+// 任何尝试访问 entityA 的操作都会被拒绝
+entityManager.GetComponentData(entityA);  // InvalidEntityException!</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>设计直觉</strong>：这就像酒店房间号。房间 101 被 occupant A 入住，后来 A 搬走了。新 occupant B 入住 101。如果有人拿着 A 的房卡（101-A），刷开门后如果发现里面的人不是 A，就知道这张卡已经失效了。Generation ID 就是这个"A"的标识。
+        </div>
+
+        <h2>Component：纯数据，零逻辑</h2>
+        <p>Component 是 ECS 中最严格的约束之一：<strong>它只能是数据，不能有方法</strong>。一个合法的 Component 应该满足：</p>
+
+        <ul>
+            <li>是 <code>struct</code>（值类型，确保连续内存布局）</li>
+            <li>只包含字段，不包含方法（除了构造函数）</li>
+            <li>不包含引用类型字段（指针除外）</li>
+            <li>大小最好是 64 字节的整数倍（对齐到 Cache Line）</li>
+        </ul>
+
+<pre><code class="language-csharp">// 正确的 Component
+public struct Position : IComponentData
+{
+    public float3 Value;  // float3 = 12 字节
+}
+
+public struct Velocity : IComponentData
+{
+    public float3 Value;
+}
+
+public struct Health : IComponentData
+{
+    public int Value;
+}
+
+// 错误的 Component（常见陷阱）
+public struct BadComponent : IComponentData
+{
+    public List&lt;float&gt; data;      // 引用类型！
+    public string name;           // 引用类型！
+    public extern SomeClass obj;  // 外部引用！
+}</code></pre>
+
+        <h3>IComponentData 的约束</h3>
+        <p><code>IComponentData</code> 是一个 marker interface，它告诉 Burst Compiler 和 Entities 框架："这个 struct 是纯数据，可以安全地存储在 SoA 数组中"。它强制要求：</p>
+        <ul>
+            <li>struct 必须是 <code>unmanaged</code>（不包含托管引用）</li>
+            <li>不能有构造函数（除了默认的）</li>
+            <li>不能被继承</li>
+        </ul>
+
+        <h3>SharedComponentData：分组而非过滤</h3>
+        <p>大多数 Component 是每个 Entity 独有的（Position、Velocity）。但有些数据是多个 Entity 共享的（Material、Rendering Settings）。<code>SharedComponentData</code> 将这些共享数据分组，相同值的 Entity 被放在同一个 Chunk 中：</p>
+<pre><code class="language-csharp">public struct MaterialType : ISharedComponentData
+{
+    public int Value;  // 0 = Stone, 1 = Wood, 2 = Metal
+}
+
+// 所有 MaterialType=0 的 Entity 被放在同一个 Chunk 中
+// 渲染时可以直接按 Chunk 批次绘制，减少状态切换</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>SharedComponentData 的陷阱</strong>：如果每个 Entity 的 SharedComponentData 值都不同，它会失去分组效果，反而增加内存开销。只有当大量 Entity 共享少量不同的值时，SharedComponentData 才有意义。
+        </div>
+
+        <h3>BufferComponentData：动态大小的组件</h3>
+        <p>有些组件的大小在运行时才知道（比如一个 Entity 的邻居列表）。<code>DynamicBuffer&lt;T&gt;</code> 提供了动态数组的能力：</p>
+<pre><code class="language-csharp">// 邻居列表——大小不确定
+var buffer = entityManager.AddBuffer&lt;NeighborBuffer&gt;(entity);
+buffer.Add(new NeighborBuffer { Target = otherEntity, Distance = 5.0f });
+buffer.Add(new NeighborBuffer { Target = anotherEntity, Distance = 3.2f });</code></pre>
+
+        <h2>System：行为的容器，数据的消费者</h2>
+        <p>System 是 ECS 中唯一包含逻辑的地方。它的工作是：<strong>查询满足条件的 Entity，然后处理它们</strong>。</p>
+
+<pre><code class="language-csharp">// 旧式 IJobComponentSystem（Entities 0.x）
+public class MovementSystem : JobComponentSystem
+{
+    private EntityQuery _query;
+
+    protected override void OnCreate()
+    {
+        _query = GetEntityQuery(ComponentType.ReadOnly&lt;Position&gt;(),
+                                ComponentType.ReadOnly&lt;Velocity&gt;());
+    }
+
+    protected override JobHandle OnUpdate(JobHandle inputDeps)
+    {
+        return new MoveJob {Dt = Time.DeltaTime}.Schedule(this, inputDeps);
+    }
+
+    [BurstCompile]
+    struct MoveJob : IJobComponentSystem
+    {
+        public float Dt;
+        EntityCommandBufferSystem ecbSystem;
+
+        public void Execute(int i, ref Position pos, [ReadOnly] ref Velocity vel)
+        {
+            pos.Value += vel.Value * Dt;
+        }
+    }
+}</code></pre>
+
+        <h3>System 的设计原则</h3>
+        <ol>
+            <li><strong>System 之间没有依赖顺序</strong>：不应该假设 System A 在 System B 之前执行。如果需要顺序，使用 Job Handle 依赖图。</li>
+            <li><strong>System 是纯函数</strong>：System 不应该有内部状态（除了 EntityQuery 这样的查询对象）。输入是 Entity 的数据，输出是修改后的数据。</li>
+            <li><strong>System 不持有数据</strong>：System 不应该有 <code>List&lt;Entity&gt;</code> 这样的字段来"记住" Entity。数据只在 EntityManager 中。</li>
+        </ol>
+
+        <h2>EntityQuery：系统的查询机制</h2>
+        <p>EntityQuery 定义了 System 要处理哪些 Entity。它是 ECS 中"过滤"的核心机制：</p>
+<pre><code class="language-csharp">// 查询所有同时有 Position 和 Velocity 的 Entity
+var query = GetEntityQuery(
+    ComponentType.ReadOnly&lt;Position&gt;(),
+    ComponentType.ReadOnly&lt;Velocity&gt;()
+);
+
+// 查询有 Position 但没有 Health 的 Entity
+var query2 = GetEntityQuery(
+    ComponentType.ReadOnly&lt;Position&gt;(),
+    ComponentType.Exclude&lt;Health&gt;()
+);
+
+// 查询有 Position 或 Velocity 的 Entity（并集）
+var query3 = GetEntityQuery(
+    ComponentType.Any&lt;Position, Velocity&gt;()
+);</code></pre>
+
+        <h3>EntityQuery 的内部实现</h3>
+        <p>Entities 使用 <strong>Archetype</strong> 来组织 Entity。每个 Archetype 代表一种组件类型组合：</p>
+<pre><code class="language-text">Archetype A: [Position, Velocity]        → 10,000 个 Entity
+Archetype B: [Position, Velocity, Health] → 500 个 Entity
+Archetype C: [Position]                   → 200 个 Entity
+
+MovementSystem 的 EntityQuery 查询 [Position, Velocity]
+→ 直接定位到 Archetype A，遍历其中的 10,000 个 Entity
+→ 不需要检查其他 Archetype</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>关键优化</strong>：EntityQuery 的查询是 O(1) 的——它直接通过组件类型哈希定位到对应的 Archetype，不需要遍历所有 Entity。这是 ECS 在大规模场景下依然高效的原因。
+        </div>
+
+        <h2>Component Data 的生命周期</h2>
+<pre><code class="language-text">1. EntityManager.CreateEntity(Position, Velocity, Health)
+   → 创建 Entity ID (index=0, gen=1)
+   → 查找或创建 Archetype([Position, Velocity, Health])
+   → 在 Archetype 的 Chunk 中分配槽位
+
+2. System 的 OnUpdate()
+   → EntityQuery 定位到 Archetype
+   → 遍历 Chunk 中的每个 Entity
+   → 读取 Position[0], Velocity[0], Health[0]
+   → 修改数据
+
+3. EntityManager.DestroyEntity(entity)
+   → 标记 Entity(0, 1) 为死亡
+   → Generation ID 递增
+   → 数据仍在 Chunk 中（惰性清理）
+
+4. EntityManager.Cleanup()（定期）
+   → 扫描所有 Chunk
+   → 移除死亡的 Entity
+   → 回收槽位</code></pre>
+
+        <h2>练习与思考</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><h4>概念题</h4><p>为什么 Component 必须是 struct 而不能是 class？如果用了 class，对内存布局和缓存命中率有什么影响？</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><h4>分析题</h4><p>一个 Entity 有 Position、Velocity、Health 三个组件。如果 Position 和 Velocity 经常一起被读取，而 Health 很少被访问。将它们放在同一个 Component 中（struct { Position, Velocity, Health }）还是分开存放（三个独立的 IComponentData）更好？为什么？</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><h4>代码题</h4><p>写一个 Component，存储一个 Entity 的"最近攻击者"。这个 Component 应该包含 Entity 引用还是其他数据？为什么不能用 class？</p></div></div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>Entity 只是一个 64 位 ID（Index + Generation），不含任何数据</li>
+            <li>Component 是纯数据 struct，不能包含引用类型或方法</li>
+            <li>System 是唯一的逻辑容器，通过 EntityQuery 查询和处理数据</li>
+            <li>SharedComponentData 用于分组，BufferComponentData 用于动态大小</li>
+            <li>EntityQuery 通过 Archetype 实现 O(1) 过滤</li>
+        </ul>
+
+        <div class="callout callout-info"><strong>下一章预告</strong>：Chapter 03 将深入数据导向设计（DDD）——Cache Line 原理、SoA vs AoS、内存布局的艺术。</div>
+        <div class="callout callout-info"><strong>延伸阅读</strong>：<ul><li><a href="https://docs.unity3d.com/Packages/com.unity.entities@2.2/api/Unity.Entities.IComponentData.html" target="_blank">IComponentData 官方文档</a></li><li><a href="https://github.com/Unity-Technologies/Entities/blob/master/COM/src/Core/ComponentData.cs" target="_blank">Unity.Entities 源码：ComponentData</a></li></ul></div>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom"><a href="01-ecs-paradigm-shift.html">&larr; ECS 范式革命</a><a href="03-data-oriented-design.html">03 - 数据导向设计 &rarr;</a></nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cs.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

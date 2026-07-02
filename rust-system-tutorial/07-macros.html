@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 - 宏系统 - Rust 系统编程入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-concurrency.html">&larr; 第六章：并发编程</a>
+        <a href="08-ffi.html">第八章：FFI 与 C 互操作 &rarr;</a>
+    </nav>
+    <main>
+        <h1>第七章：宏系统</h1>
+
+        <p>宏系统是 Rust 最具表达力的特性之一。它允许你在编译期进行代码生成，用极少的代码描述通用的模式，同时保持零运行时开销。Rust 的宏分为两类：<strong>声明宏</strong>（macro_rules!）和<strong>过程宏</strong>（procedural macros）。本章将深入两者的工作原理和使用场景。</p>
+
+        <details class="callout callout-info">
+            <summary>为什么 Rust 的宏比 C/C++ 的宏更安全？</summary>
+            <p>C 语言的 #define 宏是纯文本替换，不做任何语法检查。C++ 模板元编程虽然强大但极其复杂。Rust 的宏工作在<strong>语法树</strong>（AST）层面，编译器确保生成的代码是合法的，并且有完善的 hygiene（命名卫生）机制防止变量名冲突。</p>
+        </details>
+
+        <h2>7.1 声明宏（macro_rules!）：模式匹配的代码生成</h2>
+
+        <p>声明宏是 Rust 最常用、最强大的宏形式。它通过模式匹配来匹配输入，然后将匹配的部分插入到模板中生成代码。</p>
+
+        <h3>7.1.1 基本语法：重复匹配</h3>
+
+        <pre class="language-rust"><code>// $()* 语法：零次或多次重复
+// 匹配逗号分隔的表达式列表
+macro_rules! sum {
+    // 基准情形：只有一个元素
+    ($first:expr) => {
+        $first
+    };
+    // 递归情形：第一个元素 + 剩余部分的求和
+    ($first:expr, $($rest:expr),+) => {
+        $first + sum!($($rest),+)
+    };
+}
+
+fn main() {
+    println!("{}", sum!(1));          // 1
+    println!("{}", sum!(1, 2));       // 3
+    println!("{}", sum!(1, 2, 3));    // 6
+    println!("{}", sum!(1, 2, 3, 4)); // 10
+}</code></pre>
+
+        <h3>7.1.2 片段说明符（Fragment Specifiers）</h3>
+
+        <p>macro_rules! 支持多种片段类型，每种对应语法树的不同部分：</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>说明符</th>
+                        <th>匹配内容</th>
+                        <th>示例</th>
+                        <th>限制</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>expr</code></td>
+                        <td>表达式</td>
+                        <td><code>1 + 2</code>, <code>x.max(y)</code></td>
+                        <td>无</td>
+                    </tr>
+                    <tr>
+                        <td><code>stmt</code></td>
+                        <td>语句</td>
+                        <td><code>let x = 1;</code></td>
+                        <td>需要 <code>;</code> 结尾</td>
+                    </tr>
+                    <tr>
+                        <td><code>pat</code></td>
+                        <td>模式</td>
+                        <td><code>Some(x)</code>, <code>[a, ..]</code></td>
+                        <td>无</td>
+                    </tr>
+                    <tr>
+                        <td><code>ty</code></td>
+                        <td>类型</td>
+                        <td><code>i32</code>, <code>Vec&lt;String&gt;</code></td>
+                        <td>无</td>
+                    </tr>
+                    <tr>
+                        <td><code>ident</code></td>
+                        <td>标识符</td>
+                        <td><code>foo</code>, <code>x</code></td>
+                        <td>无</td>
+                    </tr>
+                    <tr>
+                        <td><code>path</code></td>
+                        <td>路径</td>
+                        <td><code>std::vec::Vec</code></td>
+                        <td>无</td>
+                    </tr>
+                    <tr>
+                        <td><code>tt</code></td>
+                        <td>token tree</td>
+                        <td>任意单个 token 树</td>
+                        <td>无</td>
+                    </tr>
+                    <tr>
+                        <td><code>block</code></td>
+                        <td>代码块</td>
+                        <td><code>{ let x = 1; }</code></td>
+                        <td>需要 <code>{}</code></td>
+                    </tr>
+                    <tr>
+                        <td><code>item</code></td>
+                        <td>顶层项</td>
+                        <td><code>fn foo() {}</code></td>
+                        <td>需要完整定义</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <pre class="language-rust"><code>// 组合使用多个片段说明符
+macro_rules! define_struct {
+    // 匹配: define_struct!(MyStruct { field: Type, ... })
+    ($name:ident { $($field:ident: $ty:ty),* $(,)? }) => {
+        pub struct $name {
+            $(pub $field: $ty),*
+        }
+
+        impl $name {
+            // 自动生成 getter
+            $(
+                pub fn $field(&amp;self) -&gt; &amp;$ty {
+                    &amp;self.$field
+                }
+            )*
+        }
+    };
+}
+
+define_struct!(Person {
+    name: String,
+    age: u32,
+    email: String,
+});
+
+fn main() {
+    let p = Person {
+        name: "Alice".to_string(),
+        age: 30,
+        email: "alice@example.com".to_string(),
+    };
+    println!("{} is {} years old", p.name(), p.age());
+}</code></pre>
+
+        <h3>7.1.3 TT Muncher：处理嵌套语法</h3>
+
+        <p>TT Muncher 是一种递归处理 token tree 的技术，常用于解析复杂的嵌套语法：</p>
+
+        <pre class="language-rust"><code>// 一个简单的 JSON 字面量宏
+macro_rules! json {
+    // 对象
+    ({ $($key:literal : $val:expr),* $(,)? }) => {{
+        let mut map = std::collections::HashMap::new();
+        $(
+            map.insert($key.to_string(), $val);
+        )*
+        map
+    }};
+    // 数组
+    ([ $($elem:expr),* $(,)? ]) => {{
+        vec![$($elem),*]
+    }};
+    // 字面量
+    ($lit:literal) => { $lit };
+    // 标识符
+    ($id:ident) => { $id };
+}</code></pre>
+
+        <h3>7.1.4 宏的 Hygiene（命名卫生）</h3>
+
+        <p>宏的 hygiene 机制确保宏内部引入的标识符不会与外部代码冲突：</p>
+
+        <pre class="language-rust"><code>macro_rules! example {
+    () => {
+        let x = 42;
+        println!("x = {}", x);
+    };
+}
+
+fn main() {
+    let x = 100;  // 外部的 x
+    example!();    // 宏内部的 x 不会影响外部
+    println!("x = {}", x);  // 仍然输出 100
+    // 输出:
+    // x = 42
+    // x = 100
+}
+
+// $crate: 引用定义宏的 crate，防止名称冲突
+// $call_site: 使用调用点的可见性（而非定义点的可见性）
+// 默认行为：宏内引入的标识符具有定义点的可见性</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>：宏的 hygiene 也意味着你不能在宏中访问调用点的局部变量。如果需要引用外部变量，必须通过参数显式传入。
+        </div>
+
+        <h2>7.2 过程宏（Procedural Macros）</h2>
+
+        <p>过程宏接受 Rust 代码作为输入，生成 Rust 代码作为输出。它们运行在编译期，比声明宏更灵活，但也更复杂。</p>
+
+        <h3>7.2.1 三种过程宏</h3>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>类型</th>
+                        <th>属性</th>
+                        <th>输入</th>
+                        <th>输出</th>
+                        <th>典型用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Derive</td>
+                        <td><code>#[derive(MyTrait)]</code></td>
+                        <td>结构体/枚举定义</td>
+                        <td>附加 trait 实现</td>
+                        <td>serde::Serialize</td>
+                    </tr>
+                    <tr>
+                        <td>Function-like</td>
+                        <td><code>my_macro!(...) 或 #[my_macro(...)]</code></td>
+                        <td>任意 token 流</td>
+                        <td>新 token 流</td>
+                        <td>sqlx::sql!</td>
+                    </tr>
+                    <tr>
+                        <td>Attribute</td>
+                        <td><code>#[my_attr]</code></td>
+                        <td>带属性的项</td>
+                        <td>修改后的项</td>
+                        <td>actix_web::get</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>7.2.2 Derive Macro 示例</h3>
+
+        <pre class="language-rust"><code>// 手动实现 Debug trait（冗长）
+impl std::fmt::Debug for Point {
+    fn fmt(&amp;self, f: &amp;mut std::fmt::Formatter&lt;'_&gt;) -&gt; std::fmt::Result {
+        f.debug_struct("Point")
+            .field("x", &amp;self.x)
+            .field("y", &amp;self.y)
+            .finish()
+    }
+}
+
+// 使用 derive macro（一行搞定）
+#[derive(Debug)]
+struct Point {
+    x: f32,
+    y: f32,
+}</code></pre>
+
+        <p>serde 是最著名的 derive macro 示例：</p>
+
+        <pre class="language-rust"><code>use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Config {
+    host: String,
+    port: u16,
+    debug: bool,
+}
+
+// serde 的 derive macro 自动生成：
+// - Serialize::serialize() — 将结构体编码为 JSON
+// - Deserialize::deserialize() — 从 JSON 解码为结构体
+// 性能：序列化 1KB 结构体约 2μs，零拷贝优化后可达 0.5μs</code></pre>
+
+        <h2>7.3 cargo-expand：查看宏展开</h2>
+
+        <p>cargo-expand 是调试宏的最重要工具。它将宏展开为普通的 Rust 代码：</p>
+
+        <pre class="language-rust"><code>$ cargo install cargo-expand
+$ cargo expand
+
+// 展开后的 #[derive(Debug)] 示例：
+impl ::core::fmt::Debug for Point {
+    fn fmt(&amp;self, f: &amp;mut ::core::fmt::Formatter&lt;'_&gt;) -&gt; ::core::fmt::Result {
+        f.debug_struct("Point")
+            .field("x", &amp;self.x)
+            .field("y", &amp;self.y)
+            .finish()
+    }
+}
+
+// 展开后的 macro_rules! 示例：
+// sum!(1, 2, 3) 展开为：
+1 + (2 + (3))</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>调试技巧</strong>：cargo-expand 的输出可能很长。使用 <code>cargo expand --lib</code> 只看库代码，<code>cargo expand --bin mybin</code> 只看特定二进制文件的代码。
+        </div>
+
+        <h2>7.4 编写自己的 derive macro crate</h2>
+
+        <p>创建一个 derive macro 需要两个 crate：一个是 proc-macro crate（存放宏代码），另一个是使用宏的普通 crate。</p>
+
+        <h3>7.4.1 项目结构</h3>
+
+        <pre class="language-rust"><code>my-macros/
+├── Cargo.toml           # proc-macro crate
+├── src/
+│   └── lib.rs           # 宏的实现
+├── examples/
+│   └── demo.rs          # 使用宏的示例
+└── tests/
+    └── compile-fail.rs   # 编译失败测试</code></pre>
+
+        <h3>7.4.2 Cargo.toml 配置</h3>
+
+        <pre class="language-rust"><code># my-macros/Cargo.toml
+[package]
+name = "my-macros"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true  # 必须是 proc-macro crate
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"</code></pre>
+
+        <h3>7.4.3 实现一个 derive macro</h3>
+
+        <pre class="language-rust"><code>// my-macros/src/lib.rs
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::{parse_macro_input, DeriveInput, Data, Fields};
+
+/// 自动为结构体生成 Display trait 的 derive macro
+#[proc_macro_derive(DisplayEx)]
+pub fn derive_display_ex(input: TokenStream) -&gt; TokenStream {
+    // 1. 解析输入
+    let input = parse_macro_input!(input as DeriveInput);
+
+    // 2. 提取结构体名和字段
+    let name = &amp;input.ident;
+    let fields = match &amp;input.data {
+        Data::Struct(s) =&gt; match &amp;s.fields {
+            Fields::Named(f) =&gt; &amp;f.named,
+            Fields::Unnamed(f) =&gt; &amp;f.unnamed,
+            Fields::Unit =&gt; return TokenStream::new(),
+        },
+        _ =&gt; panic!("只能用于结构体"),
+    };
+
+    // 3. 生成代码
+    let field_formats: Vec&lt;_&gt; = fields.iter().map(|f| {
+        let field_name = &amp;f.ident;
+        quote! {
+            .field(#field_name, &amp;self.#field_name)
+        }
+    }).collect();
+
+    let expanded = quote! {
+        impl std::fmt::Display for #name {
+            fn fmt(&amp;self, f: &amp;mut std::fmt::Formatter&lt;'_&gt;) -&gt; std::fmt::Result {
+                f.debug_struct(stringify!(#name))
+                    #(.field_formats)*
+                    .finish()
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}</code></pre>
+
+        <h3>7.4.4 使用 syn 和 quote 的核心概念</h3>
+
+        <pre class="language-rust"><code>// syn: 将 TokenStream 解析为 AST
+// quote: 将 AST 转回 TokenStream
+
+// 核心类型：
+// TokenStream  — 编译器输入的原始 token 流
+// DeriveInput  — 被 derive 修饰的类型
+// Ident       — 标识符（如 "MyStruct"）
+// Fields      — 结构体的字段（Named/Unnamed/Unit）
+// Generics    — 泛型参数
+
+// quote! 宏的插值语法：
+// $variable  — 插入 Rust 表达式
+// #ident    — 插入单个标识符
+// #( ... )*  — 重复插入（每个元素用空格分隔）
+// #(, ...)*  — 重复插入（每个元素用逗号分隔）
+
+// 性能提示：
+// - quote! 在编译期运行，不影响运行时性能
+// - 大型宏展开可能增加编译时间 10-50ms
+// - 使用 cargo-expand 验证生成的代码是否正确</code></pre>
+
+        <h2>7.5 Attribute Macro 实战</h2>
+
+        <p>Attribute macro 可以修改带属性的函数、结构体或其他项：</p>
+
+        <pre class="language-rust"><code>// 一个简单的 logging attribute macro
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::{parse_macro_input, ItemFn, LitStr};
+
+#[proc_macro_attribute]
+pub fn log_call(args: TokenStream, input: TokenStream) -&gt; TokenStream {
+    let args_str = parse_macro_input!(args as LitStr);
+    let log_msg = args_str.value();
+
+    let input_fn = parse_macro_input!(input as ItemFn);
+    let fn_name = &amp;input_fn.sig.ident;
+    let fn_inputs = &amp;input_fn.sig.inputs;
+    let fn_output = &amp;input_fn.sig.output;
+    let fn_body = &amp;input_fn.block;
+
+    let expanded = quote! {
+        fn #fn_name(#fn_inputs) #fn_output {
+            tracing::info!("Entering {}: {}", stringify!(#fn_name), #log_msg);
+            let _span = tracing::info_span!("#fn_name").entered();
+            #fn_body
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+// 使用：
+#[log_call("processes user input")]
+fn process_input(data: &amp;str) -&gt; String {
+    data.to_uppercase()
+}
+
+// 展开后等价于：
+fn process_input(data: &amp;str) -&gt; String {
+    tracing::info!("Entering process_input: processes user input");
+    let _span = tracing::info_span!("process_input").entered();
+    data.to_uppercase()
+}</code></pre>
+
+        <h2>7.6 宏的性能考量</h2>
+
+        <pre class="language-rust"><code>// 声明宏 vs 函数的性能对比（10^9 次调用）：
+// macro_rules! 内联展开: ~0.3ns（零开销，直接内联）
+// 函数调用:              ~0.5ns（可能有内联，但不保证）
+// 结论：宏不会带来运行时开销，因为它在编译期就展开了
+
+// 编译期性能：
+// macro_rules! 展开:  ~1-5ms（简单宏）
+// derive macro:      ~10-50ms（中等复杂度）
+// 复杂 attribute macro: ~50-200ms
+// 结论：宏会增加编译时间，但不影响运行时性能
+
+// 大型项目的宏展开时间占比：
+// 小型项目 (&lt;10 个宏):  编译时间增加 &lt;5%
+// 中型项目 (10-100 个宏): 编译时间增加 5-15%
+// 大型项目 (&gt;100 个宏):  编译时间增加 15-30%</code></pre>
+
+        <h2>7.7 本章小结</h2>
+
+        <div class="callout callout-tip">
+            <summary>关键要点</summary>
+            <ul>
+                <li><strong>macro_rules!</strong>：通过模式匹配生成代码，支持 $()* 重复、hygiene 隔离、片段说明符</li>
+                <li><strong>片段说明符</strong>：expr、stmt、pat、ty、ident、path、tt、block、item，各有不同的匹配范围</li>
+                <li><strong>TT Muncher</strong>：递归处理 token tree 的技术，用于解析复杂嵌套语法</li>
+                <li><strong>Hygiene</strong>：宏内引入的标识符与外部隔离，不会发生命名冲突</li>
+                <li><strong>Derive macro</strong>：为结构体/枚举自动生成 trait 实现，最广泛使用的过程宏类型</li>
+                <li><strong>Attribute macro</strong>：修改带属性的函数/结构体，功能最强大</li>
+                <li><strong>syn + quote</strong>：编写过程宏的标准工具链</li>
+                <li><strong>cargo-expand</strong>：调试宏的最重要工具，查看宏展开结果</li>
+                <li><strong>性能</strong>：宏零运行时开销，但增加编译时间</li>
+            </ul>
+        </div>
+
+        <h2>7.8 下一章预告</h2>
+
+        <p>第八章将进入 <strong>FFI 与 C 互操作</strong>，学习如何用 Rust 调用 C 函数、用 bindgen 自动生成绑定、用 cbindgen 生成 C 头文件，以及如何编写安全的 FFI 边界。</p>
+
+        <h2>7.9 延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://doc.rust-lang.org/book/ch19-06-macros.html" target="_blank">The Rust Book - Chapter 19: Macros</a></li>
+            <li><a href="https://doc.rust-lang.org/reference/procedural-macros.html" target="_blank">The Rust Reference - Procedural Macros</a></li>
+            <li><a href="https://github.com/dtolnay/quote" target="_blank">quote crate Documentation</a></li>
+            <li><a href="https://github.com/dtolnay/syn" target="_blank">syn crate Documentation</a></li>
+            <li><a href="https://github.com/dtolnay/cargo-expand" target="_blank">cargo-expand on GitHub</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="06-concurrency.html">&larr; 第六章：并发编程</a>
+            <a href="08-ffi.html">第八章：FFI 与 C 互操作 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

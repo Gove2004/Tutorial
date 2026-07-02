@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>09 - 性能优化 - Web 浏览器内部入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-event-loop.html">&larr; 第八章：事件循环</a>
+        <a href="10-building-browser.html">第十章：构建浏览器 &rarr;</a>
+    </nav>
+    <main>
+        <h1>第九章：Web 性能优化</h1>
+        <p class="intro">性能是用户体验的核心维度。研究表明，页面加载时间每增加 1 秒，转化率下降 7%，跳出率增加 16%。本章将系统讲解现代 Web 性能优化的核心技术——从 Google 定义的 Core Web Vitals 指标，到 Lazy Loading、Code Splitting、Service Worker 缓存策略等实战手段。</p>
+
+        <div class="definition">
+            <h4>核心概念：Web 性能指标体系</h4>
+            <p>现代 Web 性能优化围绕三个维度展开：<strong>加载速度</strong>（用户多久看到内容）、<strong>交互性</strong>（用户多久能交互）、<strong>视觉稳定性</strong>（页面在加载过程中是否跳动）。Google 将这些维度量化为 Core Web Vitals 指标。</p>
+        </div>
+
+        <h2>9.1 Core Web Vitals：LCP、CLS、INP</h2>
+        <p>Core Web Vitals 是 Google 定义的一组用户中心性能指标，直接影响搜索引擎排名和用户体验评估。</p>
+
+        <div class="comparison">
+            <table>
+                <thead>
+                    <tr><th>指标</th><th>全称</th><th>衡量什么</th><th>优秀值</th><th>合格值</th><th>需改进</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>LCP</strong></td><td>Largest Contentful Paint</td><td>最大内容块渲染时间</td><td>&le; 2.5s</td><td>&le; 4.0s</td><td>&gt; 4.0s</td></tr>
+                    <tr><td><strong>INP</strong></td><td>Interaction to Next Paint</td><td>用户交互到下次绘制的延迟</td><td>&le; 200ms</td><td>&le; 500ms</td><td>&gt; 500ms</td></tr>
+                    <tr><td><strong>CLS</strong></td><td>Cumulative Layout Shift</td><td>页面加载过程中的布局偏移总量</td><td>&le; 0.1</td><td>&le; 0.25</td><td>&gt; 0.25</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>9.1.1 LCP（最大内容块渲染时间）</h3>
+        <p>LCP 衡量视口内最大内容元素（通常是图片、视频或大块文本）渲染完成的时间。它是用户感知页面加载速度的核心指标。</p>
+
+        <pre><code class="language-javascript">// 测量 LCP
+const lcpObserver = new PerformanceObserver((list) => {
+    const entries = list.getEntries();
+    const lastEntry = entries[entries.length - 1];
+    console.log('LCP:', lastEntry.startTime, 'ms');
+    console.log('LCP 元素:', lastEntry.element);
+});
+lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+
+// 优化 LCP 的策略
+// 1. 预加载关键资源
+<link rel="preload" as="image" href="/hero.jpg">
+
+// 2. 压缩图片（WebP/AVIF 格式）
+// 3. 使用 CDN 加速静态资源
+// 4. 服务端渲染 (SSR) 或静态站点生成 (SSG)
+// 5. 避免渲染阻塞的 JavaScript
+// 6. 关键 CSS 内联，非关键 CSS 异步加载</code></pre>
+
+        <h3>9.1.2 CLS（累计布局偏移）</h3>
+        <p>CLS 衡量页面在加载过程中元素的意外位移总和。布局偏移会让用户点击错目标、阅读迷失，是最令人沮丧的体验问题之一。</p>
+
+        <pre><code class="language-javascript">// 测量 CLS
+const clsObserver = new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) {
+        console.log('CLS score:', entry.value);
+        console.log('Sources:', entry.sources);
+        // entry.sources 列出导致本次偏移的具体元素
+    }
+});
+clsObserver.observe({ type: 'layout-shift', buffered: true });
+
+// 常见 CLS 来源及修复
+// 1. 没有尺寸的图片
+// ❌ &lt;img src="photo.jpg"&gt;  // 加载时页面高度变化
+// ✅ &lt;img src="photo.jpg" width="800" height="600"&gt;
+// ✅ &lt;img src="photo.jpg" style="aspect-ratio: 4/3;"&gt;
+
+// 2. 动态插入的广告/内容
+// ❌ document.getElementById('ad-container').innerHTML = adHtml;
+// ✅ 预先设置容器高度: #ad-container { min-height: 200px; }
+
+// 3. WebFont 导致的文本重排
+// ❌ @font-face { src: url('/font.woff2'); }
+// ✅ @font-face {
+//      src: url('/font.woff2');
+//      font-display: swap;  // 字体加载期间先用系统字体
+//    }
+
+// 4. 动态注入的 DOM 元素
+// ✅ 使用 CSS 动画代替 JS 动画（不触发布局）
+// ✅ 使用 transform 代替 top/left 定位</code></pre>
+
+        <h3>9.1.3 INP（交互到下次绘制）</h3>
+        <p>INP 取代了之前的 FID（First Input Delay），衡量用户在页面加载后所有交互的响应时间。它不仅关注第一次交互，还关注整页生命周期内的所有交互。</p>
+
+        <pre><code class="language-javascript">// 测量 INP
+const inpObserver = new PerformanceObserver((list) => {
+    const entries = list.getEntries();
+    // INP 是所有交互延迟的第 98 百分位数
+    const inpValue = entries.reduce((max, entry) =>
+        Math.max(max, entry.duration), 0);
+    console.log('INP:', inpValue, 'ms');
+});
+inpObserver.observe({ type: 'event', buffered: true,
+    entryTypes: ['event'] });
+
+// 优化 INP 的策略
+// 1. 减少主线程阻塞
+// 2. 使用 Web Worker 处理计算密集型任务
+// 3. 避免长任务（>50ms）
+// 4. 使用 requestIdleCallback 安排低优先级任务
+// 5. 优化事件处理器，避免同步 DOM 操作</code></pre>
+
+        <div class="callout info">
+            <strong>📊 性能数据</strong>：根据 Web Almanac 2024 报告，全球桌面端 LCP 中位数为 <strong>3.8 秒</strong>，移动端为 <strong>6.2 秒</strong>。这意味着超过一半的网站 LCP 未达标（&le; 2.5s）。CLS 中位数为 <strong>0.12</strong>，勉强合格。优化空间巨大。
+        </div>
+
+        <h2>9.2 Lazy Loading：按需加载</h2>
+        <p>Lazy Loading 的核心思想是：<strong>只在需要时才加载资源</strong>。这包括图片懒加载、组件懒加载、路由懒加载等多个层面。</p>
+
+        <h3>9.2.1 图片懒加载</h3>
+        <pre><code class="language-html">&lt;!-- 原生懒加载（无需 JS） --&gt;
+&lt;img src="photo.jpg" loading="lazy" alt="风景照片" width="800" height="600"&gt;
+
+&lt;!-- IntersectionObserver 方式（更灵活） --&gt;
+&lt;img data-src="photo.jpg" alt="风景照片" class="lazy"&gt;
+
+&lt;script&gt;
+const lazyImages = document.querySelectorAll('img.lazy');
+const imageObserver = new IntersectionObserver((entries) =&gt; {
+    entries.forEach(entry =&gt; {
+        if (entry.isIntersecting) {
+            const img = entry.target;
+            img.src = img.dataset.src;
+            img.classList.remove('lazy');
+            imageObserver.unobserve(img);  // 只加载一次
+        }
+    });
+}, {
+    rootMargin: '200px 0px'  // 视口外 200px 就开始预加载
+});
+
+lazyImages.forEach(img =&gt; imageObserver.observe(img));
+&lt;/script&gt;</code></pre>
+
+        <h3>9.2.2 组件与路由懒加载</h3>
+        <pre><code class="language-javascript">// React 组件懒加载
+import { lazy, Suspense } from 'react';
+
+// 只有当组件被渲染时才加载代码
+const HeavyChart = lazy(() =&gt; import('./HeavyChart'));
+const AdminPanel = lazy(() =&gt; import('./AdminPanel'));
+
+function App() {
+    return (
+        &lt;Suspense fallback=&lt;div&gt;加载中...&lt;/div&gt;&gt;
+            &lt;HeavyChart data={chartData} /&gt;
+            &lt;AdminPanel /&gt;
+        &lt;/Suspense&gt;
+    );
+}
+
+// Vue 组件懒加载
+const HeavyChart = () =&gt; import('./HeavyChart.vue');
+const routes = [
+    {
+        path: '/admin',
+        component: () =&gt; import('./AdminPanel.vue'),
+        // 路由级别的代码分割
+    }
+];
+
+// 等效的 Webpack 魔法注释
+// import(/* webpackChunkName: "admin" */ './AdminPanel')</code></pre>
+
+        <h3>9.2.3 懒加载性能收益</h3>
+        <table>
+            <thead>
+                <tr><th>场景</th><th>优化前</th><th>优化后</th><th>改善幅度</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>首屏图片 (10 张)</td><td>加载全部 10 张 (~2MB)</td><td>只加载首屏 3 张 (~600KB)</td><td>减少 70% 传输量</td></tr>
+                <tr><td>SPA 首屏 JS bundle</td><td>全部组件 (~500KB)</td><td>只加载首屏 (~150KB)</td><td>减少 70% 初始加载</td></tr>
+                <tr><td>LCP (含大图)</td><td>4.2s</td><td>2.1s</td><td>改善 50%</td></tr>
+            </tbody>
+        </table>
+
+        <h2>9.3 Code Splitting：代码分割</h2>
+        <p>Code Splitting 将单个巨大的 JavaScript bundle 拆分为多个较小的 chunk，按需加载。这是现代前端工程化的核心技术。</p>
+
+        <h3>9.3.1 分割策略</h3>
+        <pre><code class="language-javascript">// 1. 路由级分割 (Route-level)
+// 每个页面/路由对应一个 chunk
+const routes = [
+    { path: '/', component: Home },           // home.js
+    { path: '/about', component: About },     // about.js
+    { path: '/dashboard', component: Dashboard }, // dashboard.js
+];
+
+// 2. 组件级分割 (Component-level)
+// 重型组件（图表、编辑器）单独打包
+const Chart = lazy(() =&gt; import('./Chart'));
+const Editor = lazy(() =&gt; import('./Editor'));
+
+// 3. 第三方库分割 (Vendor chunk)
+// 将 React、Lodash 等公共依赖提取为独立 chunk
+// webpack.config.js:
+module.exports = {
+    optimization: {
+        splitChunks: {
+            chunks: 'all',
+            cacheGroups: {
+                vendor: {
+                    test: /[\\/]node_modules[\\/]/,
+                    name: 'vendors',
+                    chunks: 'all',
+                },
+            },
+        },
+    },
+};
+
+// 4. 预加载 vs 预取
+// preload: 在当前页面需要时使用（高优先级）
+&lt;link rel="preload" href="/dashboard.js" as="script"&gt;
+
+// prefetch: 未来可能需要时使用（低优先级，空闲时下载）
+&lt;link rel="prefetch" href="/admin.js" as="script"&gt;</code></pre>
+
+        <h3>9.3.2 分割效果对比</h3>
+        <pre><code class="language-bash"># 优化前：单个 bundle
+dist/bundle.js    2.5 MB  # 首屏必须加载全部内容
+
+# 优化后：多个 chunk
+dist/home.js      150 KB  # 首页
+dist/about.js      45 KB  # About 页
+dist/vendors.js   380 KB  # 公共依赖（可长期缓存）
+dist/dashboard.js 220 KB  # 仪表盘（路由懒加载）
+
+# 效果:
+# - 首页首屏 JS 从 2.5MB 降至 150KB + 380KB (vendors 可缓存)
+# - 实际首次加载: 150KB (home) + 380KB (vendors, 缓存命中则为 0)
+# - 第三方用户首次加载: 150KB (home) + 0 (vendors 缓存命中)</code></pre>
+
+        <h2>9.4 Service Worker：离线优先与缓存策略</h2>
+        <p>Service Worker 是一个运行在后台的独立线程，可以拦截和代理网络请求。它是 PWA（Progressive Web App）的核心技术。</p>
+
+        <h3>9.4.1 缓存策略模式</h3>
+        <table>
+            <thead>
+                <tr><th>策略</th><th>工作流程</th><th>适用场景</th><th>优缺点</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>Cache First</strong></td><td>先查缓存，命中则返回；否则请求网络并缓存</td><td>静态资源（CSS/JS/图片）</td><td>快但有过期风险</td></tr>
+                <tr><td><strong>Network First</strong></td><td>先请求网络，成功则缓存并返回；失败则返回缓存</td><td>动态数据（API 响应）</td><td>数据新鲜但依赖网络</td></tr>
+                <tr><td><strong>Stale While Revalidate</strong></td><td>先返回缓存，同时后台更新缓存</td><td>内容型页面</td><td>平衡速度与新鲜度</td></tr>
+                <tr><td><strong>Network Only</strong></td><td>只通过网络获取</td><td>实时数据（天气、股票）</td><td>永远最新但无离线能力</td></tr>
+                <tr><td><strong>Cache Only</strong></td><td>只从缓存读取</td><td>离线应用</td><td>完全离线但可能过期</td></tr>
+            </tbody>
+        </table>
+
+        <pre><code class="language-javascript">// Service Worker 缓存策略实现
+self.addEventListener('fetch', (event) =&gt; {
+    const url = new URL(event.request.url);
+
+    // 静态资源：Cache First
+    if (url.pathname.startsWith('/static/')) {
+        event.respondWith(
+            caches.match(event.request)
+                .then(cached =&gt; {
+                    if (cached) return cached;  // 命中缓存
+                    const fetchPromise = fetch(event.request)
+                        .then(response =&gt; {
+                            caches.open('v1').then(cache =&gt; cache.put(event.request, response));
+                            return response;
+                        });
+                    return fetchPromise;
+                })
+        );
+    }
+
+    // API 请求：Network First
+    if (url.pathname.startsWith('/api/')) {
+        event.respondWith(
+            fetch(event.request)
+                .then(response =&gt; {
+                    const clone = response.clone();
+                    caches.open('api-v1').then(cache =&gt; cache.put(event.request, clone));
+                    return response;
+                })
+                .catch(() =&gt; caches.match(event.request));  // 网络失败时用缓存
+        );
+    }
+});</code></pre>
+
+        <h3>9.4.2 Service Worker 性能收益</h3>
+        <table>
+            <thead>
+                <tr><th>指标</th><th>无 SW</th><th>SW + Cache First</th><th>改善</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>LCP (首次访问)</td><td>3.5s</td><td>2.8s</td><td>-20%</td></tr>
+                <tr><td>LCP (二次访问)</td><td>N/A</td><td>0.3s</td><td>-89% (缓存命中)</td></tr>
+                <tr><td>网络请求数</td><td>85</td><td>12 (仅 API)</td><td>-86%</td></tr>
+                <tr><td>流量消耗</td><td>2.5MB</td><td>150KB</td><td>-94%</td></tr>
+                <tr><td>弱网体验</td><td>不可用</td><td>可用 (离线缓存)</td><td>功能可用</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout tip">
+            <strong>💡 关键洞察</strong>：Service Worker 的最大价值不在首次访问（只能带来 10-20% 的改善），而在<strong>回访用户</strong>的体验。二次访问时，静态资源全部命中缓存，LCP 可以从 3.5s 降到 <strong>0.3s</strong>，改善近 90%。
+        </div>
+
+        <h2>9.5 Performance API：精确性能监控</h2>
+        <p>Performance API 提供了浏览器内置的性能测量工具，让我们可以精确量化页面的各项指标。</p>
+
+        <h3>9.5.1 Navigation Timing API</h3>
+        <pre><code class="language-javascript">// 获取详细的导航性能数据
+const nav = performance.getEntriesByType('navigation')[0];
+
+console.log({
+    // 时间线分解 (单位: ms)
+    dnsLookup:     nav.domainLookupEnd - nav.domainLookupStart,
+    tcpConnect:    nav.connectEnd - nav.connectStart,
+    tlsHandshake:  nav.secureConnectionStart ? nav.connectEnd - nav.secureConnectionStart : 0,
+    ttfb:          nav.responseStart - nav.requestStart,        // Time to First Byte
+    domParse:      nav.domContentLoadedEventEnd - nav.domInteractive,
+    domReady:      nav.domComplete - nav.domContentLoadedEventEnd,
+    loadComplete:  nav.loadEventEnd - nav.fetchStart,
+});
+
+// 关键指标阈值:
+// TTFB &lt; 200ms: 优秀 (服务器响应快)
+// TTFB &lt; 800ms: 合格
+// TTFB &gt; 1.5s: 需要优化 (可能是数据库慢查询、CDN 配置问题)</code></pre>
+
+        <h3>9.5.2 Resource Timing API</h3>
+        <pre><code class="language-javascript">// 分析每个资源的加载性能
+const resources = performance.getEntriesByType('resource');
+resources.forEach(res =&gt; {
+    console.log(`${res.name}:`);
+    console.log(`  大小: ${res.transferSize / 1024} KB`);
+    console.log(`  耗时: ${res.duration.toFixed(2)}ms`);
+    console.log(`  缓存: ${res.transferSize === 0 ? 'Memory Cache' : 'Network'}`);
+    console.log(`  类型: ${res.initiatorType}`);
+});
+
+// 找出最慢的资源
+const slowest = resources
+    .sort((a, b) =&gt; b.duration - a.duration)
+    .slice(0, 5);
+console.log('Top 5 最慢资源:', slowest.map(r =&gt; r.name));</code></pre>
+
+        <h3>9.5.3 自定义性能标记</h3>
+        <pre><code class="language-javascript">// 标记关键业务操作
+performance.mark('user-login-start');
+await loginUser(credentials);
+performance.mark('user-login-end');
+performance.measure('login-duration', 'user-login-start', 'user-login-end');
+
+// 上报性能数据
+const measures = performance.getEntriesByType('measure');
+measures.forEach(m =&gt; {
+    // 上报到性能监控平台
+    sendToAnalytics({
+        metric: m.name,
+        value: m.duration,
+        category: 'performance',
+    });
+});</code></pre>
+
+        <h2>9.6 实战：Lighthouse 性能审计</h2>
+        <p>Lighthouse 是 Chrome 内置的自动化性能审计工具，可以对页面进行全面评分。</p>
+
+        <pre><code class="language-bash"># 命令行运行 Lighthouse
+npx lighthouse https://example.com --output=json --output-path=./lighthouse-report.json
+
+# 或在 Chrome DevTools 中:
+# 1. 打开 Audits 面板
+# 2. 选择 "Performance" 类别
+# 3. 点击 "Run audit"
+# 4. 查看分数和建议
+
+# 典型优化前后对比:
+# 优化前:
+#   LCP: 5.2s  [Fail]
+#   CLS: 0.45  [Fail]
+#   INP: 680ms [Fail]
+#   Total Blocking Time: 850ms
+#   Lighthouse Score: 42/100
+
+# 优化后 (图片懒加载 + 代码分割 + 字体优化 + 尺寸预留):
+#   LCP: 1.8s  [Pass]
+#   CLS: 0.05  [Pass]
+#   INP: 120ms [Pass]
+#   Total Blocking Time: 80ms
+#   Lighthouse Score: 95/100</code></pre>
+
+        <h2>9.7 本章小结</h2>
+        <p>本章系统讲解了 Web 性能优化的核心技术：</p>
+        <ul>
+            <li><strong>Core Web Vitals</strong>：LCP（&le;2.5s）、CLS（&le;0.1）、INP（&le;200ms）是三大核心指标。</li>
+            <li><strong>Lazy Loading</strong>：IntersectionObserver + loading="lazy" 按需加载，可减少 70% 传输量。</li>
+            <li><strong>Code Splitting</strong>：路由级 + 组件级分割，将 2.5MB bundle 拆分为按需加载的小 chunk。</li>
+            <li><strong>Service Worker</strong>：缓存策略（Cache First / Network First）让回访用户 LCP 降低 89%。</li>
+            <li><strong>Performance API</strong>：Navigation Timing + Resource Timing + 自定义标记实现精确监控。</li>
+        </ul>
+
+        <h2>下一章预告</h2>
+        <p>第十章是本教程的最后一章——我们将亲手构建一个简易浏览器。从 HTML 解析器到 CSS 引擎，从 Layout 到渲染输出，你会看到前面所有章节的知识如何串联成一个完整的系统。这不仅是理论的总结，更是实践的起点。</p>
+
+        <h2>延伸阅读</h2>
+        <ul>
+            <li>Core Web Vitals 官方文档：<a href="https://web.dev/vitals/" target="_blank">https://web.dev/vitals/</a></li>
+            <li>Web Page Test（在线性能测试）：<a href="https://www.webpagetest.org" target="_blank">https://www.webpagetest.org</a></li>
+            <li>Lighthouse 文档：<a href="https://developer.chrome.com/docs/lighthouse/overview" target="_blank">https://developer.chrome.com/docs/lighthouse/overview</a></li>
+            <li>Performance API 参考：<a href="https://developer.mozilla.org/zh-CN/docs/Web/API/Performance_API" target="_blank">https://developer.mozilla.org/zh-CN/docs/Web/API/Performance_API</a></li>
+            <li>Service Worker Cookbook：<a href="https://github.com/GoogleChrome/workbox" target="_blank">https://github.com/GoogleChrome/workbox</a></li>
+            <li>HTTP Archive 年度报告：<a href="https://httparchive.org/reports" target="_blank">https://httparchive.org/reports</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="08-event-loop.html">&larr; 第八章：事件循环</a>
+            <a href="10-building-browser.html">第十章：构建浏览器 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-js.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

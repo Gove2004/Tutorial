@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>09 - 性能优化实战 - Compute Shader 入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-gpu-algorithms.html">← 上一章</a>
+        <a href="10-advanced-topics.html">10 - 进阶主题 →</a>
+    </nav>
+
+    <main>
+        <h1>性能优化实战</h1>
+
+        <p>你的 Compute Shader 跑对了，但不够快。怎么办？本章教你系统地分析性能瓶颈、定位热点、实施优化。内容包括 Warp 级分析、Bank Conflict 消除、指令级优化、Occupancy 调优和 Profiler 使用。</p>
+
+        <h2>优化方法论：先测量，再优化</h2>
+
+        <p>性能优化的第一原则：<strong>不要猜，测量</strong>。没有 Profiling 数据的优化只是在写小说。</p>
+
+        <pre><code class="language-text">优化流程：
+1. 建立基准（Baseline）：当前实现的性能数据
+2. Profiling：用工具定位瓶颈
+3. 假设：你认为哪个环节最慢？
+4. 测量验证：只优化你假设的那一环
+5. 回归验证：确认确实提升了，没有引入新问题
+6. 重复 2-5，直到达到目标性能</code></pre>
+
+        <h2>Profiler 工具</h2>
+
+        <h3>PIX in Windows（DX12 首选）</h3>
+
+<pre><code class="language-bash"># 在 Visual Studio 中启动
+# 菜单：PIX in Windows → Start Debugging
+
+# 或命令行
+pix capture --exec my_app.exe -- output.pix
+
+# PIX 提供的关键数据：
+# - GPU 时钟级指令统计
+# - 每个 Shader 的指令数和执行时间
+# - Warp 状态分布（Idle / Waiting / Active）
+# - Memory 带宽利用率
+# - 每指令的发射周期</code></pre>
+
+        <h3>RenderDoc（跨平台）</h3>
+
+        <p>RenderDoc 可以捕捉 DX12/Vulkan/OpenGL 的每一帧。对于 Compute Shader：</p>
+
+        <ul>
+            <li>查看每个 Dispatch 的执行时间</li>
+            <li>检查 Shader 变量的值和寄存器使用</li>
+            <li>观察资源状态转换是否正确</li>
+        </ul>
+
+        <h3>Nsight Graphics / Nsight Compute（NVIDIA 专用）</h3>
+
+        <p>Nsight Compute 是 GPU 性能分析的瑞士军刀：</p>
+
+<pre><code class="language-bash"># 命令行 Profiling
+ncu --target-processes all -o my_kernel.prof ./my_app
+
+# 关键 Metric 查询
+ncu -k MyKernel --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum ./my_app
+# 上面的 metric 计算全局内存的命中率（请求数/扇区数）</code></pre>
+
+        <h2>Warp 分析：理解 GPU 的真实执行</h2>
+
+        <p>GPU 的调度单位是 Warp（32 线程），不是线程，不是 Group。优化必须从 Warp 层面理解。</p>
+
+        <h3>Warp 状态机</h3>
+
+<pre><code class="language-text">每个 Warp 在任何时刻处于以下状态之一：
+
+  [EXECUTING] ←── 正在执行指令（最好的状态）
+       │
+       ├──→ [MEM_WAIT] ── 等待内存返回（最坏的状态）
+       │         │
+       │         └──→ [EXECUTING]（数据到了）
+       │
+       └──→ [IDLE] ── 没有指令可执行（Warp 被调度器丢弃）
+                 │
+                 └──→ [EXECUTING]（下一个 Warp 被激活）
+
+GPU 的性能取决于：有多少 Warp 处于 EXECUTING 状态。
+理想：所有 SM 的所有 Warp 都在 EXECUTING。
+现实：很多时间在 MEM_WAIT 和 IDLE 之间摆动。</code></pre>
+
+        <h3>通过 Warp 效率诊断问题</h3>
+
+        <table>
+            <thead>
+                <tr><th>Warp 状态</th><th>可能的原因</th><th>优化方向</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>IDLE 过高</strong></td><td>Occupancy 不足，SM 上 Warp 太少</td><td>增加每组线程数，减少寄存器使用</td></tr>
+                <tr><td><strong>MEM_WAIT 过高</strong></td><td>全局内存访问过多，缓存命中率低</td><td>用 Shared Memory，合并内存访问</td></tr>
+                <tr><td><strong>STALL_BRANCH 过高</strong></td><td>分支发散</td><td>重构代码消除分支，用数学函数替代</td></tr>
+                <tr><td><strong>STALL_MEM_DEPENDENCY 过高</strong></td><td>指令依赖链太长</td><td>增加指令级并行，用不同线程处理不同数据</td></tr>
+            </tbody>
+        </table>
+
+        <h2>Bank Conflict 深度分析</h2>
+
+        <p>Bank Conflict 是 Shared Memory 最常见的性能陷阱。让我们用一个具体例子量化它的代价。</p>
+
+        <h3>Bank Conflict 的代价</h3>
+
+<pre><code class="language-text">假设 32 Banks，每 Bank 每次服务 1 个请求：
+
+无冲突：32 个线程同时访问 32 个不同 Bank
+  → 1 个事务完成，32 周期
+
+2 路冲突：32 个线程访问同一 Bank 的不同地址
+  → 32 次访问被分成 16 组，每组 2 个线程
+  → 2 个事务完成，64 周期（2x 慢）
+
+32 路冲突：32 个线程访问同一个 Bank 的同一地址
+  → 虽然地址相同可以广播，但如果地址不同：
+  → 32 个事务完成，1024 周期（32x 慢）</code></pre>
+
+        <h3>检测 Bank Conflict</h3>
+
+        <p>Nsight Compute 提供 <code>sm__throughput.st_bank_conflict_pipe_low.sum`pipe</code> metric：</p>
+
+<pre><code class="language-bash"># 查询 Bank Conflict 率
+ncu -k MyKernel --metrics sm__throughput.st_bank_conflict_pipe_low.sum ./my_app
+
+# 如果返回值 > 0，说明有 Bank Conflict
+# 理想值 = 0</code></pre>
+
+        <h3>消除 Bank Conflict 的实战技巧</h3>
+
+<pre><code class="language-hlsl">// ❌ 有冲突：32 个线程访问 shared[0..31]，每个占 4 字节
+// Bank 0: shared[0], shared[32], shared[64]...
+// Bank 1: shared[1], shared[33], shared[65]...
+// Warp 0 的 32 个线程访问 shared[0..31] → 每个 Bank 1 次访问 → 无冲突 ✅
+
+// 但是！如果访问模式是 shared[tid * 2]：
+// 线程 0 → shared[0] (Bank 0)
+// 线程 1 → shared[2] (Bank 1)
+// 线程 2 → shared[4] (Bank 2)
+// ...
+// 线程 16 → shared[32] (Bank 0) ← 和线程 0 冲突！
+// 线程 17 → shared[34] (Bank 1) ← 和线程 1 冲突！
+// → 16 路 Bank Conflict！
+
+// ✅ 修复：加 padding
+SharedMemory float shared[32][33];  // 每行 33 个 float
+// 线程 i 访问 shared[i][0]
+// 线程 i+16 访问 shared[i+16][0]
+// 偏移 = (i+16) * 33 = i*33 + 528
+// 528 % 32 = 16 → 不同 Bank，无冲突</code></pre>
+
+        <h2>Occupancy 调优</h2>
+
+        <p><strong>Occupancy</strong> = 一个 SM 上实际驻留的 Warp 数 / 最大可能的 Warp 数。高 Occupancy 意味着更好的延迟隐藏。</p>
+
+        <h3>限制 Occupancy 的因素</h3>
+
+        <table>
+            <thead>
+                <tr><th>资源</th><th>RTX 4090 上限/SM</th><th>每个 Warp 消耗</th><th>最大 Warp 数</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Shared Memory</td><td>164 KB</td><td>取决于 Shader 声明</td><td>164KB / sharedPerWarp</td></tr>
+                <tr><td>Registers</td><td>65K / SM</td><td>perThreadRegs × 32</td><td>65K / (perThreadRegs × 32)</td></tr>
+                <tr><td>Block/SM</td><td>最大 32 个 Block</td><td>—</td><td>32 × (threadsPerBlock / 32)</td></tr>
+            </tbody>
+        </table>
+
+        <h3>计算 Occupancy 的实战方法</h3>
+
+<pre><code class="language-hlsl">// 假设：
+// numthreads(256, 1, 1) = 256 线程 = 8 Warp
+// 每个线程使用 64 个寄存器
+// 每个 Warp 使用 64 × 32 = 2048 个寄存器
+// SM 有 65536 个寄存器
+// 最大 Warp 数 = 65536 / 2048 = 32 Warp
+// 每个 Block 8 Warp → 最多 4 个 Block 同时驻留
+// Occupancy = 4 × 8 / 32 = 100% ✅
+
+// 但如果每个线程用 128 个寄存器：
+// 每个 Warp 128 × 32 = 4096
+// 最大 Warp 数 = 65536 / 4096 = 16 Warp
+// 每个 Block 8 Warp → 最多 2 个 Block
+// Occupancy = 2 × 8 / 16 = 100% ✅ (刚好填满)
+
+// 如果每个线程用 256 个寄存器：
+// 每个 Warp 256 × 32 = 8192
+// 最大 Warp 数 = 65536 / 8192 = 8 Warp
+// 每个 Block 8 Warp → 最多 1 个 Block
+// Occupancy = 1 × 8 / 8 = 100% ✅
+// 但只有一个 Block 时，如果一个 Block 在等内存，整个 SM 就 IDLE 了
+// → 实际性能可能很差！</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>Occupancy ≠ 性能</strong>：100% Occupancy 是必要的，但不是充分的。如果你的 Shader 内存带宽饱和了，增加 Occupancy 只会增加上下文切换的开销。先解决内存瓶颈，再优化 Occupancy。
+        </div>
+
+        <h2>指令级优化</h2>
+
+        <h3>减少指令数</h3>
+
+<pre><code class="language-hlsl">// ❌ 低效：重复计算
+float result = sin(x) * sin(x) + cos(x) * cos(x);
+
+// ✅ 高效：利用数学恒等式
+float result = 1.0;  // sin² + cos² = 1
+
+// ❌ 低效：多次除法
+float a = x / divisor;
+float b = y / divisor;
+float c = z / divisor;
+
+// ✅ 高效：除法是慢指令（~20 周期），换成乘法
+float invDivisor = rcp(divisor);  // rcp ≈ 7 周期
+float a = x * invDivisor;
+float b = y * invDivisor;
+float c = z * invDivisor;</code></pre>
+
+        <h3>用数学函数替代分支</h3>
+
+<pre><code class="language-hlsl">// ❌ 分支：导致 Warp 发散
+if (x &gt; 0)
+    result = x;
+else
+    result = -x;
+
+// ✅ 无分支：abs() 是单指令
+result = abs(x);
+
+// ❌ 分支
+if (x &gt; threshold)
+    result = 1.0;
+else
+    result = 0.0;
+
+// ✅ 无分支：step() 或 smoothstep()
+result = step(threshold, x);</code></pre>
+
+        <h3>利用 Warp-level 原语（SM 6.0+）</h3>
+
+<pre><code class="language-hlsl">// WaveReadLaneAt：Warp 内线程间交换数据（无 Shared Memory）
+// 比 Shared Memory + Barrier 快得多
+
+[numthreads(32, 1, 1)]  // 正好一个 Warp
+void CSMain(uint3 tid : SV_DispatchThreadID)
+{
+    float local = sharedData[tid.x];
+
+    // 广播 local 到 Warp 内所有线程
+    // 比 GroupMemoryBarrier + 每个线程读更快
+    float broadcast = __shfl_sync(0xFFFFFFFF, local, 0);
+
+    // SM 6.0+ HLSL 等效：
+    // 用 WaveActiveAllEqual / WaveReadLaneFirst 等
+}</code></pre>
+
+        <h2>内存访问模式优化</h2>
+
+        <h3>合并内存访问（Coalesced Access）</h3>
+
+        <p>全局内存访问的效率取决于 Warp 内线程的访问模式：</p>
+
+        <table>
+            <thead>
+                <tr><th>访问模式</th><th>内存事务</th><th>效率</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>线程 i 访问地址 i（连续）</td><td>1 个事务</td><td>100% ✅</td></tr>
+                <tr><td>线程 i 访问地址 i×2（跨步 2）</td><td>2 个事务</td><td>50%</td></tr>
+                <tr><td>线程 i 访问地址 random()（随机）</td><td>32 个事务</td><td>3% ❌</td></tr>
+            </tbody>
+        </table>
+
+<pre><code class="language-hlsl">// ❌ 随机访问：每个线程访问全局数组的不同位置
+uint idx = hash(tid.x);  // 哈希函数 → 随机索引
+result[tid.x] = globalArray[idx] * 2;
+
+// ✅ 顺序访问：每个线程访问连续位置
+result[tid.x] = globalArray[tid.x] * 2;
+
+// ⚠️ 有时随机访问不可避免：如何用 Shared Memory 缓解？
+// 1. 每个线程先把随机读的数据加载到 Shared Memory
+// 2. 在 Shared Memory 中做重排（Sort/Transpose）
+// 3. 从 Shared Memory 顺序读取</code></pre>
+
+        <h3>用 Texture 缓存做随机读优化</h3>
+
+        <p>如果随机读的访问模式有空间局部性（相邻线程读相近的地址），用 Texture SRV 而非 Buffer SRV。Texture 缓存针对空间局部性做了优化：</p>
+
+<pre><code class="language-hlsl">// Texture2D 有专用的 L1 纹理缓存
+// 对于空间局部性好的随机访问，Texture SRV 比 Buffer SRV 快 2-4x
+Texture2D&lt;float4&gt; dataTexture : register(t0);
+
+// 线程 (x, y) 读 dataTexture[int2(x, y)]
+// 线程 (x+1, y) 读 dataTexture[int2(x+1, y)]
+// → 空间局部性好 → Texture 缓存命中率高</code></pre>
+
+        <h2>Profiler 实战：一个完整的优化案例</h2>
+
+        <p>让我们用真实的 Profiling 数据演示完整的优化流程：</p>
+
+<pre><code class="language-text">项目：1024×1024 图像的 5×5 高斯模糊
+
+【第 0 轮】基线性能：
+  PIX 报告：
+  - Dispatch 时间：12.4 ms
+  - Instruction Throughput：1.8（>1.0，说明有 stalls）
+  - Warp State：MEM_WAIT 45%, EXECUTING 40%, IDLE 15%
+  → 诊断：内存等待占比太高
+
+【第 1 轮】优化：加入 Shared Memory Tile
+  - Dispatch 时间：8.1 ms（↓35%）
+  - Warp State：MEM_WAIT 20%, EXECUTING 70%, IDLE 10%
+  → 改善显著，但还有空间
+
+【第 2 轮】优化：Separable Blur（拆成水平+垂直）
+  - Dispatch 时间：5.3 ms（↓35%）
+  - Warp State：MEM_WAIT 12%, EXECUTING 82%, IDLE 6%
+  → 采样次数从 25 降到 10
+
+【第 3 轮】优化：用 rcp() 替代除法
+  - Dispatch 时间：5.0 ms（↓6%）
+  → 边际收益递减
+
+结论：从 12.4ms 到 5.0ms，优化了 60%。
+     主要收益来自 Shared Memory + Separable Blur。
+     指令级优化只贡献了微小的改善。</code></pre>
+
+        <h2>优化检查清单</h2>
+
+        <div class="definition">
+            <h4>Compute Shader 性能检查清单</h4>
+            <p>按优先级从高到低检查：</p>
+            <ol>
+                <li><strong>内存访问</strong>：是否合并了全局内存访问？是否用了 Shared Memory 减少全局读取？</li>
+                <li><strong>Bank Conflict</strong>：Nsight 报告有 Bank Conflict 吗？Shared Memory 布局有 padding 吗？</li>
+                <li><strong>分支发散</strong>：Warp 内有分支吗？能用数学函数替代吗？</li>
+                <li><strong>Occupancy</strong>：寄存器使用是否太多？Shared Memory 是否太大限制了 Block 数？</li>
+                <li><strong>指令效率</strong>：有没有可以用 rcp/abs/step 替代的操作？</li>
+                <li><strong>Barrier 频率</strong>：有没有不必要的 Barrier？Barrier 是否可以在循环外？</li>
+                <li><strong>Dispatch 开销</strong>：如果每次只 Dispatch 一小块数据，CPU 开销可能超过 GPU 收益</li>
+            </ol>
+        </div>
+
+        <h2>练习与思考</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>动手练习</h4>
+                    <p>用 PIX 或 Nsight Compute 分析 Chapter 06 的高斯模糊项目。测量 Shared Memory 优化前后的性能差异。Bank Conflict 指标是多少？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>优化挑战</h4>
+                    <p>一段 Compute Shader 的 Instruction Throughput = 2.3。分析可能的原因，并提出至少三种优化方案。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>深度思考</h4>
+                    <p>为什么"先解决内存瓶颈，再优化 Occupancy"？如果 Shader 已经是 Compute Bound（计算瓶颈）而非 Memory Bound，Occupancy 还有意义吗？</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>性能优化必须先 Profiling，后动手</li>
+            <li>Warp 状态分布（EXECUTING/MEM_WAIT/IDLE）是最直接的诊断指标</li>
+            <li>Bank Conflict 用 padding 消除，Occupancy 用寄存器/Shared Memory 调优</li>
+            <li>数学函数替代分支是零成本优化</li>
+            <li>合并内存访问比什么都重要</li>
+            <li>优化收益递减——先解决大头问题</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章预告</strong>：Chapter 10 将探索 Compute Shader 的进阶方向——DXR 光线追踪和 Mesh Shader，了解 Compute Shader 在现代图形管线中的角色演变。
+        </div>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://developer.nvidia.com/blog/optimizing-cuda-code-using-nsight-compute/" target="_blank">NVIDIA: Optimizing CUDA Code with Nsight Compute</a></li>
+                <li><a href="https://microsoft.github.io/PIX/" target="_blank">PIX in Windows Documentation</a></li>
+                <li><a href="https://github.com/NVIDIA/nsight-compute" target="_blank">Nsight Compute GitHub</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="08-gpu-algorithms.html">← GPU 加速算法</a>
+            <a href="10-advanced-topics.html">10 - 进阶主题 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hlsl.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 - DOM 树构建 - Web 浏览器内部入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-http-protocol.html">← 上一章</a>
+        <a href="05-css-layout.html">后章 →</a>
+    </nav>
+    <main>
+        <h1>第四章：DOM 树构建</h1>
+
+        <p>浏览器通过网络层接收到 HTML 文档后，第一步要做的事情就是把它变成一棵树——DOM 树（Document Object Model Tree）。这棵树不仅是页面结构的表示，更是浏览器与 JavaScript 交互的桥梁。本章将深入 HTML 解析器的内部，理解 DOM 是如何诞生的。</p>
+
+        <h2>4.1 HTML 解析器的工作原理</h2>
+
+        <p>HTML 解析器是一个流式处理器——它在接收到 HTML 数据的瞬间就开始工作，而不是等到整个文档下载完毕。这种设计允许"边下载边解析"，显著提升了首屏渲染速度。</p>
+
+        <h3>4.1.1 词法分析（Tokenization）</h3>
+
+        <p>解析的第一步是将 HTML 字符流转换为 Token 序列。HTML 解析器遵循一套复杂的规则来处理各种边界情况：</p>
+
+        <pre><code class="language-javascript">// 词法分析示例：HTML 字符流 → Token 序列
+// 输入: "&lt;p&gt;Hello &lt;b&gt;World&lt;/b&gt;!&lt;/p&gt;"
+
+// 输出的 Token 序列:
+[
+  { type: 'START_TAG',   name: 'p',    attrs: [] },
+  { type: 'TEXT',        chars: 'Hello ' },
+  { type: 'START_TAG',   name: 'b',    attrs: [] },
+  { type: 'TEXT',        chars: 'World' },
+  { type: 'END_TAG',     name: 'b' },
+  { type: 'TEXT',        chars: '!' },
+  { type: 'END_TAG',     name: 'p' },
+]</code></pre>
+
+        <p>词法分析器需要处理很多特殊情况：</p>
+
+        <div class="steps">
+            <h4>HTML 特殊字符处理</h4>
+            <ol>
+                <li><strong>注释</strong>——<!-- --> 以 <code>&lt;!--</code> 开头，<code>--&gt;</code> 结尾。注释内容不参与 DOM 树构建。</li>
+                <li><strong>实体编码</strong>——<code>&amp;amp;</code>、<code>&amp;lt;</code>、<code>&amp;nbsp;</code> 等特殊字符会被解码为对应的 Unicode 字符。</li>
+                <li><strong>CDATA</strong>——<code>&lt;![CDATA[...]]&gt;</code> 原始内容块，不进行任何解析。</li>
+                <li><strong>DOCTYPE</strong>——<code>&lt;!DOCTYPE html&gt;</code> 声明，触发标准模式解析。</li>
+                <li><strong>不可见标签</strong>——<code>&lt;script&gt;</code> 和 <code>&lt;style&gt;</code> 的内容会被特殊处理（暂停解析去下载和执行）。</li>
+            </ol>
+        </div>
+
+        <h3>4.1.2 树构建（Tree Construction）</h3>
+
+        <p>树构建器（又称"渲染引擎的 DOM 构建器"）接收 Token 流，根据 HTML 规范中的<strong>插入模式</strong>（Insertion Mode）规则，将节点插入到 DOM 树中。</p>
+
+        <div class="arch-diagram">
+            <pre><code class="language-text">
+树构建的核心逻辑
+─────────────────
+
+for each token in token_stream:
+    current_node = getActiveFormattingElement()
+
+    switch (insertion_mode):
+        case 'in_body':
+            if token is START_TAG_html:
+                append token to document
+            elif token is TEXT:
+                create text node, append to current
+            elif token is START_TAG:
+                create element node, push to stack
+                set insertion_mode based on element
+            elif token is END_TAG:
+                pop from stack if name matches
+            elif token is COMMENT:
+                create comment node, append to current
+
+        case 'in_table':
+            # 表格有特殊的解析规则
+            # 例如: 隐式创建 tbody
+
+        case 'in_cell':
+            # 单元格内的特殊处理
+            # 例如: 遇到新单元格则闭合当前单元格
+            ...
+            </code></pre>
+        </div>
+
+        <p>树构建器维护着一个<strong>打开的元素栈</strong>（Stack of Open Elements）。每当遇到开始标签，就将对应元素压入栈顶；遇到结束标签时，从栈顶向下查找匹配的元素并弹出。这个栈也决定了元素的嵌套关系。</p>
+
+        <h3>4.1.3 错误恢复（Error Recovery）</h3>
+
+        <p>现实世界中的 HTML 经常是不规范的——缺少闭合标签、标签嵌套错误、属性值未加引号等。HTML 解析器有一套完善的容错机制：</p>
+
+        <pre><code class="language-html">&lt;!-- 不规范但能被正确解析的 HTML --&gt;
+&lt;div class="container"&gt;
+  &lt;p&gt;第一段
+  &lt;p&gt;第二段&lt;/p&gt;    ← 缺少闭合标签
+  &lt;span&gt;文字&lt;/div&gt;  ← 标签不匹配
+&lt;/div&gt;
+
+<!-- 解析器会自动修复：
+ 1. 遇到第二个 <p> 时，自动闭合第一个 <p>
+ 2. <span> 和 </div> 不匹配时，先闭合 <span> 再继续
+-->
+
+<!-- 修复后的 DOM 结构：
+<div class="container">
+  <p>第一段</p>
+  <p>第二段</p>
+  <span>文字</span>
+</div>
+--></code></pre>
+
+        <div class="callout callout-info">
+            <strong>💡 为什么 HTML 解析如此宽容？</strong>
+            <p>Web 的兼容性要求解析器必须能够处理几十年来积累的不规范 HTML。一个现代浏览器如果拒绝解析有轻微错误的页面，会导致大量现有网站无法正常工作。这种"宽容解析"是 Web 平台向后兼容的代价。</p>
+        </div>
+
+        <h2>4.2 DOM 节点模型</h2>
+
+        <p>DOM 树中的每个节点都是一个对象，不同类型的节点有不同的属性和方法。理解节点模型对于编写高效的 DOM 操作代码至关重要。</p>
+
+        <pre><code class="language-javascript">// DOM 节点类型常量
+Node.ELEMENT_NODE         // 1  - 元素节点 (div, p, span...)
+Node.ATTRIBUTE_NODE       // 2  - 属性节点 (class, id...)
+Node.TEXT_NODE            // 3  - 文本节点
+Node.COMMENT_NODE         // 8  - 注释节点
+Node.DOCUMENT_NODE        // 9  - 文档节点
+Node.DOCUMENT_TYPE_NODE   // 10 - DOCTYPE 节点
+Node.DOCUMENT_FRAGMENT_NODE // 11 - 文档片段
+
+// 节点之间的关系
+const div = document.querySelector('.container');
+
+div.childNodes        // 所有子节点（包括文本和注释）
+div.children          // 只有元素子节点（推荐用这个）
+div.firstChild        // 第一个子节点
+div.lastChild         // 最后一个子节点
+div.parentNode        // 父节点
+div.parentElement     // 父元素节点（null 如果无父元素）
+div.previousSibling   // 前一个兄弟节点
+div.nextSibling       // 后一个兄弟节点
+div.ownerDocument     // 所属文档</code></pre>
+
+        <h3>4.2.1 Element 节点</h3>
+
+        <p>Element 是最常用的 DOM 节点类型，代表 HTML 标签。它继承了 HTMLElement，拥有大量的属性和方法：</p>
+
+        <pre><code class="language-javascript">// Element 常用 API
+const el = document.getElementById('myDiv');
+
+// 属性操作
+el.tagName          // "DIV"
+el.className        // "container active"
+el.id               // "myDiv"
+el.getAttribute('data-id')  // 自定义属性
+el.dataset.id       // 等价于上面的写法（更简洁）
+
+// 内容操作
+el.innerHTML        // HTML 字符串（会触发解析）
+el.outerHTML        // 包含自身标签的 HTML 字符串
+el.textContent      // 纯文本（不含标签，性能更好）
+el.innerText        // 可见文本（考虑 CSS 样式，如 display:none 的文本不包含）
+
+// 样式操作
+el.style.color      // "red"（只读，返回 computed style）
+el.classList.add('active')
+el.classList.remove('hidden')
+el.classList.toggle('expanded')
+el.matches(':hover')  // 是否匹配选择器
+
+// 查询子元素
+el.querySelector('p')       // 第一个匹配的子孙元素
+el.querySelectorAll('.item') // 所有匹配的子孙元素（NodeList）
+
+// 创建和插入
+const newEl = document.createElement('div');
+el.appendChild(newEl);           // 追加到最后
+el.insertBefore(newEl, child);   // 在指定子节点前插入
+el.prepend(newEl);               // ES2017: 追加到最前
+el.append(child1, child2);       // ES2017: 追加多个节点
+el.replaceWith(newEl);           // 替换当前节点
+el.remove();                     // 删除当前节点</code></pre>
+
+        <h3>4.2.2 属性节点与自定义属性</h3>
+
+        <p>HTML 属性存储在元素的属性列表中。每个属性都有一个名称和一个值：</p>
+
+        <pre><code class="language-html">&lt;div id="main" class="container" data-user-id="42" custom-attr="value"&gt;
+  <!--
+    id, class, data-* 都是属性
+    属性值会被解析器转换为 DOM 对象的属性
+  -->
+</div></code></pre>
+
+        <div class="callout callout-tip">
+            <strong>🚀 为什么推荐用 data-* 属性？</strong>
+            <p>自定义属性必须以 <code>data-</code> 开头，这样浏览器会自动将它们暴露为 <code>element.dataset</code> 对象。这是 HTML5 规范推荐的在 HTML 和 JavaScript 之间传递数据的方式，语义清晰且不会与未来新增的标准属性冲突。</p>
+        </div>
+
+        <h2>4.3 Shadow DOM：封装的力量</h2>
+
+        <p>Shadow DOM 是 Web Components 的核心技术之一。它允许你在 DOM 树中创建一个"隔离的子树"，这个子树的样式和结构与外部 DOM 完全隔离。</p>
+
+        <div class="arch-diagram">
+            <pre><code class="language-text">
+普通 DOM 树 vs Shadow DOM
+──────────────────────────
+
+普通 DOM:
+&lt;div class="card"&gt;
+  &lt;h2&gt;标题&lt;/h2&gt;
+  &lt;p&gt;内容&lt;/p&gt;
+  &lt;style&gt;
+    h2 { color: red; }  ← 影响全局
+  &lt;/style&gt;
+&lt;/div&gt;
+
+Shadow DOM:
+&lt;div class="card"&gt;
+  #shadow-root (open)          ← 隔离边界
+  ┌─────────────────────────┐
+  │ &lt;style&gt;                │
+  │   h2 { color: blue; }   │  ← 样式只影响 shadow 内部
+  │ &lt;/style&gt;               │
+  │ &lt;h2&gt;标题&lt;/h2&gt;          │
+  │ &lt;slot name="content"&gt;&lt;/slot&gt;  ← 插槽：外部内容注入点
+  └─────────────────────────┘
+  &lt;p slot="content"&gt;外部传入&lt;/p&gt;  ← 通过 slot 注入
+&lt;/div&gt;</code></pre>
+        </div>
+
+        <pre><code class="language-javascript">// 创建 Shadow DOM
+const card = document.createElement('div');
+document.body.appendChild(card);
+
+// 附加 shadow root（open 模式下可以从外部访问）
+const shadow = card.attachShadow({ mode: 'open' });
+
+// 在 shadow 内部定义结构和样式
+shadow.innerHTML = `
+  &lt;style&gt;
+    :host {
+      display: block;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    h2 {
+      color: #333;
+      margin: 0 0 8px 0;
+    }
+    ::slotted(p) {
+      color: #666;
+    }
+  &lt;/style&gt;
+  &lt;h2&gt;卡片标题&lt;/h2&gt;
+  &lt;slot&gt;&lt;/slot&gt;  <!-- 默认内容 -->
+`;
+
+// 外部可以通过 slot 注入内容
+const paragraph = document.createElement('p');
+paragraph.textContent = '这是通过 slot 注入的内容';
+card.appendChild(paragraph);
+
+// mode: 'closed' 时，shadow root 从外部完全不可见
+// 但内部仍然正常工作
+            </code></pre>
+
+        <h3>4.3.1 Slot 和 Slotfill</h3>
+
+        <p>Shadow DOM 通过 <code>&lt;slot&gt;</code> 元素实现内容分发。外部传入的子节点被称为"slotfill"，它们被插入到 shadow 树中对应的 slot 位置：</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>概念</th>
+                        <th>说明</th>
+                        <th>示例</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Named Slot</td>
+                        <td>具名插槽，通过 name 属性区分</td>
+                        <td><code>&lt;slot name="header"&gt;&lt;/slot&gt;</code></td>
+                    </tr>
+                    <tr>
+                        <td>Fallback Content</td>
+                        <td>插槽的默认内容，当外部没有提供时显示</td>
+                        <td><code>&lt;slot&gt;默认文本&lt;/slot&gt;</code></td>
+                    </tr>
+                    <tr>
+                        <td>Slotfill</td>
+                        <td>外部传入并填充到插槽的内容</td>
+                        <td><code>&lt;p slot="header"&gt;标题&lt;/p&gt;</code></td>
+                    </tr>
+                    <tr>
+                        <td>:host 伪类</td>
+                        <td>选择 shadow host 元素本身</td>
+                        <td><code>:host { display: block; }</code></td>
+                    </tr>
+                    <tr>
+                        <td>::slotted()</td>
+                        <td>选择通过 slot 插入的元素</td>
+                        <td><code>::slotted(p) { color: red; }</code></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2>4.4 DOM 操作的坑与优化</h2>
+
+        <h3>4.4.1 重排（Reflow）与重绘（Repaint）</h3>
+
+        <p>修改 DOM 会触发两种昂贵的操作：</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>重排 (Reflow)</th>
+                        <th>重绘 (Repaint)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>触发条件</td>
+                        <td>改变布局（尺寸、位置）</td>
+                        <td>改变外观（颜色、背景）</td>
+                    </tr>
+                    <tr>
+                        <td>成本</td>
+                        <td>高（需要重新计算所有相关布局）</td>
+                        <td>中（只需要填充像素）</td>
+                    </tr>
+                    <tr>
+                        <td>常见操作</td>
+                        <td>修改 width/height、添加/删除节点、改变字体、滚动页面</td>
+                        <td>修改 color/background-color/border</td>
+                    </tr>
+                    <tr>
+                        <td>优化技巧</td>
+                        <td>批量修改、使用 transform（触发合成而非重排）</td>
+                        <td>通常无法避免，但成本较低</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <pre><code class="language-javascript">// ❌ 糟糕的做法：每次修改都触发重排
+for (let i = 0; i < 1000; i++) {
+  const li = document.createElement('li');
+  li.textContent = `Item ${i}`;
+  ul.appendChild(li);  // 1000 次重排！
+}
+
+// ✅ 好做法：使用 DocumentFragment 批量插入
+const fragment = document.createDocumentFragment();
+for (let i = 0; i < 1000; i++) {
+  const li = document.createElement('li');
+  li.textContent = `Item ${i}`;
+  fragment.appendChild(li);  // 不触发重排
+}
+ul.appendChild(fragment);      // 只触发 1 次重排
+
+// ✅ 更好的做法：使用 innerHTML 一次性设置
+ul.innerHTML = Array.from({ length: 1000 }, (_, i) =>
+  `<li>Item ${i}</li>`
+).join('');
+
+// ✅ 极致优化：先 detach，再操作，最后 reattach
+const parent = ul.parentNode;
+parent.removeChild(ul);
+for (let i = 0; i < 1000; i++) {
+  const li = document.createElement('li');
+  li.textContent = `Item ${i}`;
+  ul.appendChild(li);  // detached 操作不触发重排
+}
+parent.appendChild(ul);  // 最后才放回文档
+            </code></pre>
+
+        <h3>4.4.2 避免强制同步布局</h3>
+
+        <p>当你交替读写 DOM 属性时，浏览器被迫在每个写操作后立即执行重排，而不是批量处理：</p>
+
+        <pre><code class="language-javascript">// ❌ 强制同步布局：每次循环都触发重排
+boxes.forEach(box => {
+  box.style.width = '100px';
+  const w = box.offsetWidth;  // 强制浏览器立即计算布局
+});
+
+// ✅ 分离读写操作：先批量写，再批量读
+boxes.forEach(box => {
+  box.style.width = '100px';
+});
+boxes.forEach(box => {
+  const w = box.offsetWidth;  // 此时浏览器可以批量计算
+});
+            </code></pre>
+
+        <h2>4.5 性能数据：DOM 节点数量与渲染时间的关系</h2>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>DOM 节点数</th>
+                        <th>首次渲染时间</th>
+                        <th>内存占用</th>
+                        <th>推荐场景</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>&lt; 1,000</td>
+                        <td>&lt; 100ms</td>
+                        <td>&lt; 10MB</td>
+                        <td>绝大多数页面</td>
+                    </tr>
+                    <tr>
+                        <td>1,000 - 5,000</td>
+                        <td>100-300ms</td>
+                        <td>10-30MB</td>
+                        <td>中等复杂度页面</td>
+                    </tr>
+                    <tr>
+                        <td>5,000 - 15,000</td>
+                        <td>300-800ms</td>
+                        <td>30-80MB</td>
+                        <td>数据密集型应用（需虚拟列表）</td>
+                    </tr>
+                    <tr>
+                        <td>&gt; 15,000</td>
+                        <td>&gt; 800ms</td>
+                        <td>&gt; 80MB</td>
+                        <td>⚠️ 需要架构优化</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>Google 的工程团队曾发现，Chrome 设置页面的 DOM 节点数超过 15,000 时，页面交互明显变慢。他们通过将页面拆分为多个独立的 Web Component（每个组件有 Shadow DOM 隔离），将每个组件的 DOM 节点数控制在 1,000 以内，显著改善了性能。</p>
+
+        <div class="callout callout-warning">
+            <strong>⚠️ 1500 节点警告</strong>
+            <p>Chrome DevTools 的 Elements 面板在节点数超过 1500 时会发出警告。这不是硬性限制，但意味着你的页面可能需要优化。对于数据表格、列表等场景，使用虚拟滚动（Virtual Scrolling）技术只渲染可视区域内的节点。</p>
+        </div>
+
+        <h2>4.6 本章小结</h2>
+
+        <ul>
+            <li>HTML 解析器分三步工作：词法分析（Tokenization）→ 树构建（Tree Construction）→ 错误恢复（Error Recovery）。</li>
+            <li>DOM 节点有多种类型，Element 是最核心的类型，提供了丰富的属性和方法。</li>
+            <li>Shadow DOM 通过封装和插槽机制，实现了样式和结构的隔离，是 Web Components 的基石。</li>
+            <li>频繁的 DOM 操作会触发重排和重绘，应使用 DocumentFragment、批量操作、离线操作等技巧优化。</li>
+            <li>DOM 节点数量直接影响渲染性能，建议将单页面节点数控制在 1500 以内。</li>
+        </ul>
+
+        <h2>4.7 下一章预告</h2>
+
+        <p>DOM 树构建完成后，浏览器需要解析 CSS 并构建 CSSOM 树，然后将两者合并为渲染树。第五章将深入 CSS 的匹配规则、层叠算法、盒模型以及现代布局系统（Flexbox 和 Grid）的内部实现。</p>
+
+        <h2>4.8 延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://dom.spec.whatwg.org/" target="_blank">WHATWG DOM 标准规范</a></li>
+            <li><a href="https://html.spec.whatwg.org/multipage/parsing.html" target="_blank">HTML 解析算法规范</a></li>
+            <li><a href="https://w3c.github.io/webcomponents/spec/shadow/" target="_blank">Web Components Shadow DOM 规范</a></li>
+            <li><a href="https://developers.google.com/web/fundamentals/performance/critical-rendering-path/constructing-the-object-model" target="_blank">Google - 构建对象模型 (OM)</a></li>
+            <li><a href="https://css-tricks.com/almanac-properties/d/display/" target="_blank">CSS-Tricks - display 属性完整参考</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="03-http-protocol.html">← 第三章：HTTP 协议演进</a>
+            <a href="05-css-layout.html">第五章：CSS 布局引擎 →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-js.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

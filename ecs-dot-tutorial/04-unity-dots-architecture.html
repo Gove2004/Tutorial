@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 - Unity DOTS 架构 - ECS 与 Unity DOTS 入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-data-oriented-design.html">&larr; 上一章</a>
+        <a href="05-burst-compiler-deep-dive.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>04 - Unity DOTS 架构全景</h1>
+        <p class="intro">DOTS（Data-Oriented Technology Stack）不是单一的技术，而是一套相互配合的技术栈。本章梳理 Unity 从 2015 年到 2026 年的 DOTS 演进历程，详解 Hub 架构中每个 Package 的职责，以及 World 隔离的设计哲学。</p>
+
+        <h2>4.1 DOTS 的完整演进史</h2>
+
+        <p>DOTS 不是一夜之间出现的，它是 Unity 团队花了近十年逐步构建的结果。理解这段历史对于把握 DOTS 的设计决策至关重要。</p>
+
+        <h3>4.1.1 阶段一：前 DOTS 时代（2015 之前）</h3>
+
+        <p>在 DOTS 出现之前，Unity 的游戏逻辑完全基于 MonoBehaviour。每个 GameObject 都是一个独立的对象，组件（Component）是挂载在 GameObject 上的类。</p>
+
+        <pre><code class="language-cs">// 2015 年之前的典型 Unity 代码
+public class PlayerController : MonoBehaviour
+{
+    public float speed = 5f;
+    public int health = 100;
+
+    void Update()
+    {
+        transform.position += transform.forward * speed * Time.deltaTime;
+    }
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <p>这种模式的问题在实体数量增长时暴露无遗：</p>
+        <ul>
+            <li><strong>GC 压力</strong>：每个 MonoBehaviour 都是引用类型，创建 10000 个实体 = 10000 个 GC 对象。</li>
+            <li><strong>缓存不友好</strong>：GameObject 的数据分散在堆上，遍历时需要大量随机内存访问。</li>
+            <li><strong>单线程瓶颈</strong>：Update 模式天然串行，无法利用多核。</li>
+            <li><strong>虚函数开销</strong>：MonoBehaviour 是类，虚函数调用阻止了编译器内联优化。</li>
+        </ul>
+
+        <h3>4.1.2 阶段二：Entities 0.0 - 初步尝试（2017）</h3>
+
+        <p>Unity 在 2017 年推出了第一个实验性的 Entities 包（版本号 0.0.x），引入了 Entity 和 Component 的概念，但 API 非常不稳定：</p>
+
+        <div class="arch-diagram">
+Entities 0.0 架构（2017）：
+
+    [MonoBehaviour Authoring]
+              │
+              ▼
+    [EntityManager.CreateEntity()]
+              │
+              ▼
+    [ComponentDataObject&lt;T&gt;]  ← 需要通过 GetComponentData() 读取
+              │
+              ▼
+    [ComponentSystem]  ← 继承自 ComponentSystem
+              │
+              ▼
+    [foreach (var entity in GetAllEntities())]  ← 手动遍历
+        {
+            var pos = GetComponentData&lt;Position&gt;(entity);
+            // 没有 SIMD，没有 Burst，没有 Jobs
+        }
+</div>
+
+        <p>这一版本的主要问题：</p>
+        <ul>
+            <li>API 频繁变更，每次小版本更新都需要重写大量代码。</li>
+            <li>没有 Burst 编译支持，System 运行在 Mono JIT 上。</li>
+            <li>没有 Job System 集成，无法并行化。</li>
+            <li>ComponentDataObject 的存取方式繁琐且容易出错。</li>
+        </ul>
+
+        <h3>4.1.3 阶段三：Entities 0.11 - 第一次重大重构（2019）</h3>
+
+        <p>2019 年，Unity 发布了 Entities 0.11，这是 DOTS 的第一个"可用"版本。引入了大量新 API 和架构改进：</p>
+
+        <div class="arch-diagram">
+Entities 0.11 架构（2019）：
+
+    [IComponentData]  ← 值类型，无虚函数
+    [SystemBase]      ← 替代 ComponentSystem，更简洁的 API
+    [BurstCompile]    ← 可选的 Burst 编译支持
+    [IJobChunk]       ← 新的并行 Job 接口
+    [EntityCommandBuffer]  ← 统一的实体创建/销毁/修改
+    [Hybrid Renderer] ← 将 ECS 数据渲染到 GameObject 上
+    [Translation]     ← 替代 transform，用 Position + Rotation 代替
+    [Baker&lt;T&gt;]       ← 烘焙管线，将 MonoBehaviour 转为 IComponentData
+</div>
+
+        <p>关键改进：</p>
+        <ul>
+            <li><strong>IComponentData 取代 ComponentDataObject</strong>：不再需要通过 EntityManager 逐个存取组件，而是直接在 Job 中通过引用访问。</li>
+            <li><strong>Burst 集成</strong>：System 可以用 [BurstCompile] 标记，享受 SIMD 优化。</li>
+            <li><strong>IJobChunk</strong>：新的并行接口，直接操作 Chunk 级别的内存块。</li>
+            <li><strong>EntityCommandBuffer</strong>：统一了实体创建/销毁/修改的操作方式。</li>
+        </ul>
+
+        <h3>4.1.4 阶段四：Entities 1.x - 稳定化（2021-2022）</h3>
+
+        <p>2021 年发布的 Entities 1.x 系列标志着 DOTS API 的相对稳定。这一版本最大的变化是引入了 <strong>Entities 1.0</strong> 的版本号跳跃（从 0.17 直接到 1.0），原因是：</p>
+
+        <ol>
+            <li>API 已经稳定，不再需要 0.x 系列的"实验性"标识。</li>
+            <li>Unity 决定将 DOTS 作为正式产品路线，而非实验性功能。</li>
+            <li>包管理器版本号需要反映成熟度。</li>
+        </ol>
+
+        <p>1.x 版本的主要新增功能：</p>
+
+        <table>
+            <thead>
+                <tr><th>功能</th><th>版本</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>ISystem / SystemAPI</td><td>1.0</td><td>新的 System 声明方式，更简洁的组件访问</td></tr>
+                <tr><td>Shared Component Data</td><td>1.0</td><td>优化相同组件数据的实体分组</td></tr>
+                <tr><td>Chunk Component Data</td><td>1.0</td><td>Chunk 级别的共享组件</td></tr>
+                <tr><td>Hybrid Renderer V2</td><td>1.2</td><td>GPU Instancing 原生支持，性能大幅提升</td></tr>
+                <tr><td>Job Component System</td><td>1.0</td><td>IJobChunk 和 IJobParallelForTransform 标准化</td></tr>
+                <tr><td>Entities Graphics</td><td>1.0</td><td>GPU 端的材质/网格管理</td></tr>
+            </tbody>
+        </table>
+
+        <h3>4.1.5 阶段五：Entities 2.x - 当前形态（2023+）</h3>
+
+        <p>2023 年开始，Unity 将 DOTS 生态统一到了 Entities 2.x 系列。这一代最重要的变化是：</p>
+
+        <div class="callout callout-info">
+            <strong>为什么从 1.x 跳到 2.x？</strong>
+            <p>Unity 在 2023 年底宣布将 DOTS 相关包统一到 2.x 版本号。主要原因包括：(1) 新的 ISystem 声明方式（非泛型、非继承）彻底改变了 System 的编写方式；(2) Job System 和 Burst 深度集成到核心管线；(3) Hybrid Renderer V2 成为默认渲染后端；(4) 多个子系统的 API 进行了不兼容的重构。</p>
+        </div>
+
+        <p>2.x 的核心变化：</p>
+
+        <pre><code class="language-cs">// 旧版（1.x）System 声明
+public partial class MySystem1x : SystemBase
+{
+    protected override void OnUpdate()
+    {
+        Dependencies.Complete();
+        var ecb = commandBufferSystem.CreateCommandBuffer();
+        foreach (var (pos, vel) in SystemAPI.Query&lt;RefRO&lt;Position&gt;, RefRO&lt;Velocity&gt;&gt;())
+        {
+            // 需要手动管理 ECB 生命周期
+        }
+        ecb.Playback(entityManager);
+    }
+}
+
+// 新版（2.x）System 声明
+public partial struct MySystem2x : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        // 不再需要 Dependencies.Complete()
+        // ECB 自动管理
+        foreach (var (pos, vel) in SystemAPI.Query&lt;RefRO&lt;Position&gt;, RefRO&lt;Velocity&gt;&gt;().WithAll&lt;Health&gt;())
+        {
+            pos.ValueRW += vel.ValueRW * SystemAPI.Time.DeltaTime;
+        }
+    }
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>4.2 Hub 架构：DOTS 的六大支柱</h2>
+
+        <p>DOTS 不是一个单一的 Package，而是多个 Package 协同工作的生态系统。Unity 将这些 Package 统称为 "DOTS Hub"。</p>
+
+        <div class="arch-diagram">
+DOTS Hub 架构总览：
+
+┌──────────────────────────────────────────────────────────────┐
+│                        Unity DOTS Hub                         │
+├────────────┬────────────┬────────────┬───────────────────────┤
+│  Entities   │   Burst    │   Jobs     │   Collections         │
+│  (ECS)     │ (Compiler) │ (Scheduler)│  (Containers)         │
+│            │            │            │                       │
+│  World     │  LLVM      │  Thread    │  NativeArray          │
+│  Archetype │  SIMD      │  Pool      │  NativeList           │
+│  Chunk     │  Inlining  │  Barrier   │  NativeHashMap        │
+│  Query     │  Vectorize │  Handle    │  NativeQueue          │
+├────────────┴────────────┴────────────┴───────────────────────┤
+│              扩展层（可选）                                     │
+│  Hybrid Renderer V2 │ Translation │ Baking │ Entities Graphics│
+└──────────────────────────────────────────────────────────────┘
+        </div>
+
+        <h3>4.2.1 Entities（核心 ECS 引擎）</h3>
+
+        <p>Entities 是 DOTS 的心脏，负责：</p>
+
+        <ul>
+            <li><strong>Entity 管理</strong>：创建、销毁、查询实体。Entity 只是一个 64-bit ID（Generation ID + Index）。</li>
+            <li><strong>Component 存储</strong>：将 IComponentData 存储在 Archetype/Chunk 结构中。</li>
+            <li><strong>Query 系统</strong>：基于组件类型组合的高效查询引擎。</li>
+            <li><strong>System 生命周期</strong>：ISystem 的注册、排序和执行调度。</li>
+            <li><strong>EntityCommandBuffer</strong>：异步的实体操作缓冲，用于 Job 安全的数据修改。</li>
+        </ul>
+
+        <h3>4.2.2 Burst（编译器）</h3>
+
+        <p>Burst 是 Unity 定制的 JIT 编译器，它将 C# 代码（IL）转换为高度优化的原生机器码：</p>
+
+        <ul>
+            <li><strong>LLVM 后端</strong>：使用 LLVM 编译器基础设施进行代码生成和优化。</li>
+            <li><strong>SIMD 向量化</strong>：自动将标量循环转换为 SIMD 指令（SSE/AVX/NEON）。</li>
+            <li><strong>Loop Unrolling</strong>：自动展开循环以减少分支开销。</li>
+            <li><strong>Function Inlining</strong>：激进的函数内联，消除函数调用开销。</li>
+        </ul>
+
+        <h3>4.2.3 Jobs（并行框架）</h3>
+
+        <p>Job System 提供线程安全的并行执行框架：</p>
+
+        <ul>
+            <li><strong>JobHandle</strong>：依赖关系追踪，确保 Job 按正确的顺序执行。</li>
+            <li><strong>NativeContainer</strong>：线程安全的容器基类，提供读写检查和 Dispose 管理。</li>
+            <li><strong>Work Stealing</strong>：动态负载均衡，空闲线程自动从繁忙线程"偷取"工作。</li>
+            <li><strong>Thread Pool</strong>：预创建的线程池，避免频繁创建/销毁线程的开销。</li>
+        </ul>
+
+        <h3>4.2.4 Collections（安全集合）</h3>
+
+        <p>Collections 提供了专为 Job System 设计的线程安全集合类型：</p>
+
+        <ul>
+            <li><strong>NativeArray&lt;T&gt;</strong>：连续的、Job 安全的数组。</li>
+            <li><strong>NativeList&lt;T&gt;</strong>：动态增长的列表。</li>
+            <li><strong>NativeHashMap&lt;K,V&gt;</strong>：哈希表（注意：Job 中只支持单线程写入）。</li>
+            <li><strong>NativeQueue&lt;T&gt;</strong>：队列。</li>
+            <li><strong>NativeMultiHashMap&lt;K,V&gt;</strong>：支持一个 Key 对应多个 Value 的哈希表。</li>
+        </ul>
+
+        <h3>4.2.5 Mathematics</h3>
+
+        <p>Mathematics 包提供了 SIMD 友好的数学类型和运算：</p>
+
+        <ul>
+            <li><strong>float3 / float4 / float3x3 / float4x4</strong>：SIMD 向量和矩阵类型。</li>
+            <li><strong>Unity.Mathematics.noise</strong>：Perlin noise、Simplex noise 等程序化噪声。</li>
+            <li><strong>Unity.Mathematics.random</strong>：PCG 随机数生成器。</li>
+            <li><strong>Unity.Mathematics.math</strong>：SIMD 化的数学函数库（sin, cos, sqrt, lerp 等）。</li>
+        </ul>
+
+        <h3>4.2.6 扩展 Package</h3>
+
+        <table>
+            <thead>
+                <tr><th>Package</th><th>作用</th><th>必要性</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Hybrid Renderer V2</td><td>将 ECS 数据渲染到场景</td><td>需要可视化时必需</td></tr>
+                <tr><td>Translation</td><td>GameObject ↔ ECS 坐标转换</td><td>Hybrid 场景必需</td></tr>
+                <tr><td>Building Blocks</td><td>常用组件预设（Position, Rotation, Scale）</td><td>推荐安装</td></tr>
+                <tr><td>Entities Graphics</td><td>GPU 端材质/网格管理</td><td>高级渲染需求</td></tr>
+                <tr><td>Baking Geometry</td><td>GameObject 网格烘焙为 ECS 数据</td><td>Hybrid 场景推荐</td></tr>
+            </tbody>
+        </table>
+
+        <h2>4.3 Package 依赖关系图</h2>
+
+        <p>DOTS 的各个 Package 之间存在严格的依赖关系。理解这些关系对于排查编译错误和版本冲突非常重要：</p>
+
+        <div class="arch-diagram">
+Package 依赖关系图（箭头表示"依赖"方向）：
+
+Entities 2.x
+  ├── Burst (≥ 1.8.0)          ← Entities 的 System 需要 Burst 编译
+  ├── Jobs (≥ 3.3.0)           ← EntityCommandBuffer 内部使用 Job
+  ├── Collections (≥ 3.3.0)    ← NativeArray, ECB 等
+  ├── Mathematics (≥ 3.3.0)    ← float3, float4x4 等类型
+  └── Hybrid Renderer V2       ← 可选，用于渲染
+
+Burst
+  ├── LLVM (内置)              ← Burst 自带 LLVM 编译器
+  └── Il2Cpp Optimizer         ← 与 IL2CPP 后端的集成
+
+Jobs
+  └── Collections              ← NativeContainer 基类
+
+Collections
+  └── (无外部依赖)             ← 纯 C# + intrinsics
+
+Mathematics
+  └── (无外部依赖)             ← 纯数学库，可独立使用
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>⚠️ 版本冲突</strong>：DOTS Package 之间版本耦合紧密。如果你手动更新了 Entities 包但没有同步更新 Burst/Jobs/Collections，可能会导致编译错误或运行时崩溃。始终通过 Package Manager 统一更新所有 DOTS 相关包。
+        </div>
+
+        <h2>4.4 World 概念与隔离</h2>
+
+        <h3>4.4.1 World 是什么</h3>
+
+        <p>World 是 DOTS 中最高级别的隔离单元。每个 World 拥有自己独立的：</p>
+        <ul>
+            <li><strong>EntityManager</strong>：实体的创建、销毁和查询。</li>
+            <li><strong>Scene</strong>：Entity 组成的逻辑场景。</li>
+            <li><strong>System Set</strong>：注册的 ISystem 及其执行顺序。</li>
+            <li><strong>Job Scheduler 上下文</strong>：Job 执行的调度环境。</li>
+        </ul>
+
+        <p>不同 World 之间的 Entity 完全隔离——你不能在一个 World 中直接查询另一个 World 的 Entity。</p>
+
+        <pre><code class="language-cs">// 创建和使用自定义 World
+using Unity.Entities;
+
+// 获取默认 World（Unity 启动时自动创建）
+World defaultWorld = World.DefaultGameObjectInjectionWorld;
+
+// 创建全新的 World
+var customWorld = new World("MyCustomWorld");
+
+// 在自定义 World 中创建 EntityManager
+var entityManager = customWorld.GetOrCreateSystem&lt;EntityManagerSystem&gt;();
+
+// 在自定义 World 中注册 System
+customWorld.GetOrCreateSystem&lt;MovementSystem&gt;();
+customWorld.GetOrCreateSystem&lt;RenderingSystem&gt;();
+
+// 运行指定 World 的 Systems
+customWorld.Update();
+
+// 销毁 World（释放所有 Entity 和 System）
+customWorld.Dispose();</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>4.4.2 为什么需要 World 隔离</h3>
+
+        <p>World 隔离有几个重要的应用场景：</p>
+
+        <table>
+            <thead>
+                <tr><th>场景</th><th>目的</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>多场景加载</td><td>内存管理</td><td>每个场景一个 World，卸载场景时直接 Dispose World</td></tr>
+                <tr><td>热重载</td><td>开发效率</td><td>在单独的 World 中测试修改后的 System，不影响主世界</td></tr>
+                <tr><td>仿真环境</td><td>测试/AI训练</td><td>并行运行多个 World，每个 World 是不同的仿真实例</td></tr>
+                <tr><td>服务端/客户端</td><td>网络同步</td><td>服务器 World 和客户端 World 独立运行</td></tr>
+                <tr><td>VR/AR</td><td>渲染隔离</td><td>左右眼分别在不同的 World 中渲染</td></tr>
+            </tbody>
+        </table>
+
+        <h3>4.4.3 World 的生命周期</h3>
+
+        <pre><code class="language-cs">// World 的完整生命周期示例
+using Unity.Entities;
+using UnityEngine;
+
+public class WorldLifecycleExample : MonoBehaviour
+{
+    World simulationWorld;
+
+    void Start()
+    {
+        // 1. 创建 World
+        simulationWorld = new World("Simulation World");
+
+        // 2. 注册 System
+        var moveSystem = simulationWorld.GetOrCreateSystem&lt;MovementSystem&gt;();
+        var renderSystem = simulationWorld.GetOrCreateSystem&lt;RenderingSystem&gt;();
+
+        // 3. 创建 Entity
+        var entityManager = simulationWorld.EntityManager;
+        var archetype = entityManager.CreateArchetype(typeof(Position), typeof(Velocity));
+        var entities = entityManager.Instantiate archetype, 100);
+
+        // 4. 运行 Simulation
+        simulationWorld.Update();  // 调用所有注册的 System
+    }
+
+    void OnDestroy()
+    {
+        // 5. 清理
+        simulationWorld.Dispose();  // 释放所有 Entity、System、NativeArray
+    }
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>4.5 从 0.x 到 2.x：为什么 Unity 要跳这么大版本号</h2>
+
+        <p>Unity 从 Entities 0.17 直接跳到 1.0，后来又跳到 2.x，这背后有多重考量：</p>
+
+        <h3>4.5.1 0.x 到 1.0 的变化（2021）</h3>
+
+        <table>
+            <thead>
+                <tr><th>方面</th><th>0.x</th><th>1.0+</th><th>影响</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>System 基类</td><td>ComponentSystem / JobComponentSystem</td><td>SystemBase</td><td>API 大幅简化</td></tr>
+                <tr><td>组件存储</td><td>ComponentDataObject</td><td>IComponentData + RefRO/RefRW</td><td>更直观的读写语义</td></tr>
+                <tr><td>Job 接口</td><td>IJobProcessComponentData</td><td>IJobChunk + ForEach</td><td>更灵活的并行模式</td></tr>
+                <tr><td>渲染</td><td>Hybrid Renderer V1</td><td>Hybrid Renderer V2</td><td>GPU Instancing 原生支持</td></tr>
+                <tr><td>包管理</td><td>多个独立包，版本不统一</td><td>统一版本号体系</td><td>减少版本冲突</td></tr>
+            </tbody>
+        </table>
+
+        <h3>4.5.2 1.x 到 2.x 的变化（2023+）</h3>
+
+        <table>
+            <thead>
+                <tr><th>方面</th><th>1.x</th><th>2.x</th><th>影响</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>System 声明</td><td>class MySystem : SystemBase</td><td>struct MySystem : ISystem</td><td>值类型 System，零 GC</td></tr>
+                <tr><td>依赖管理</td><td>手动 Dependencies.Complete()</td><td>自动依赖追踪</td><td>代码量减少 30-50%</td></tr>
+                <tr><td>ECB 管理</td><td>手动 Create/Playback</td><td>自动 WorldUpdateAllocator</td><td>不易泄漏</td></tr>
+                <tr><td>Query 语法</td><td>Query = new EntityQuery(...)</td><td>SystemAPI.Query&lt;...&gt;()</td><td>更简洁的类型安全查询</td></tr>
+                <tr><td>Shared Component</td><td>分开的 SharedComponentData</td><td>统一为 SharedComponentData&lt;T&gt;</td><td>API 一致化</td></tr>
+                <tr><td>包版本</td><td>Entities 1.x, Burst 1.x...</td><td>所有包统一 2.x</td><td>简化依赖管理</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>📌 迁移建议</strong>：如果你正在维护旧版 0.x 或 1.x 的项目，Unity 提供了 Migration 工具可以帮助部分自动转换。但对于全新项目，直接从 2.x 开始是最明智的选择。
+        </div>
+
+        <h2>4.6 DOTS 与其他 ECS 框架对比</h2>
+
+        <p>理解 DOTS 在 ECS 生态中的定位：</p>
+
+        <table>
+            <thead>
+                <tr><th>特性</th><th>Unity DOTS</th><th>Flecs (C)</th><th>EnTT (C++)</th><th>Entitas (C#)</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>语言</td><td>C# + Burst</td><td>C</td><td>C++</td><td>C#</td></tr>
+                <tr><td>并行 Job</td><td>内置 Job System</td><td>需自行实现</td><td>需自行实现</td><td>需自行实现</td></tr>
+                <tr><td>SIMD</td><td>Burst 自动向量化</td><td>需手动使用</td><td>需手动使用</td><td>不支持</td></tr>
+                <tr><td>渲染</td><td>Hybrid Renderer V2</td><td>无</td><td>无</td><td>需自行对接</td></tr>
+                <tr><td>热重载</td><td>支持（Editor 集成）</td><td>不支持</td><td>不支持</td><td>不支持</td></tr>
+                <tr><td>学习曲线</td><td>陡峭</td><td>中等</td><td>中等</td><td>较平缓</td></tr>
+                <tr><td>适用场景</td><td>大规模仿真/游戏</td><td>嵌入式/轻量游戏</td><td>C++ 游戏引擎</td><td>小型 C# 项目</td></tr>
+            </tbody>
+        </table>
+
+        <h2>本章小结</h2>
+        <p>本章我们梳理了 Unity DOTS 从 2015 年至今的完整演进历程。DOTS 不是某个单一的技术，而是 Entities（ECS 引擎）、Burst（编译器）、Jobs（并行框架）、Collections（安全集合）、Mathematics（数学库）以及一系列扩展 Package 构成的完整技术栈。理解每个 Package 的职责和它们之间的依赖关系，是使用好 DOTS 的基础。World 隔离机制则为多场景、热重载、仿真测试等高级场景提供了底层支持。</p>
+
+        <h2>下一章预告</h2>
+        <p><a href="05-burst-compiler-deep-dive.html">第 05 章 - Burst Compiler 深入</a>：Burst 如何使用 LLVM 后端将 C# 代码编译为高度优化的原生机器码？SIMD 自动向量化在什么条件下生效？Burst 有哪些限制？</p>
+
+        <h2>延伸阅读</h2>
+        <ul>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.entities@2.2/manual/index.html" target="_blank">Unity.Entities 官方文档</a></li>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.collections@latest" target="_blank">Unity.Collections 官方文档</a></li>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.jobs@latest" target="_blank">Unity.Jobs 官方文档</a></li>
+            <li><a href="https://unity.com/products/dots" target="_blank">Unity DOTS 官方页面</a></li>
+            <li><a href="https://github.com/Unity-Technologies/Entities" target="_blank">Unity.Entities GitHub 仓库</a></li>
+            <li><a href="https://www.youtube.com/watch?v=3Fq5mENcIbc" target="_blank">GDC 2022 - Unity's DOTS Journey (Unity Official Talk)</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="03-data-oriented-design.html">&larr; 第 03 章 - 数据导向设计</a>
+            <a href="05-burst-compiler-deep-dive.html">第 05 章 - Burst Compiler 深入 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cs.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+    function copyCode(btn) {
+        const code = btn.parentElement.querySelector('code');
+        navigator.clipboard.writeText(code.textContent).then(() => {
+            btn.textContent = '已复制!';
+            setTimeout(() => btn.textContent = '复制', 1500);
+        });
+    }
+    </script>
+</body>
+</html>

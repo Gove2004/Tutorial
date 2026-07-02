@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 - 错误处理 - Rust 系统编程入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-standard-library.html">&larr; 第四章：标准库深入</a>
+        <a href="06-concurrency.html">第六章：并发编程 &rarr;</a>
+    </nav>
+    <main>
+        <h1>第五章：错误处理</h1>
+
+        <p>在系统编程中，错误处理往往占据了代码量的 30%-50%。Rust 通过类型系统强制你在编译期处理所有可能的错误路径，这比运行时 panic 或静默忽略错误要可靠得多。本章将深入探讨 Rust 的错误处理模式、工具链和设计哲学。</p>
+
+        <details class="callout callout-info">
+            <summary>为什么 Rust 的错误处理如此重要？</summary>
+            <p>在 C 语言中，错误码被忽略是最常见的 bug 来源。在 C++ 中，异常虽然提供了统一的错误处理机制，但引入了运行时开销和 noexcept 规范的复杂性。Rust 用类型系统强制你处理每一个错误，同时保持零运行时开销。</p>
+        </details>
+
+        <h2>5.1 Result vs Panic：何时使用哪个</h2>
+
+        <p>Rust 有两种主要的错误处理策略：<code>Result</code>（可恢复错误）和 <code>panic!</code>（不可恢复错误）。选择的关键在于<strong>错误是否属于程序的正常控制流</strong>。</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>场景</th>
+                        <th>使用 Result</th>
+                        <th>使用 panic!</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>用户输入无效</td>
+                        <td>✅ 返回 Err</td>
+                        <td>❌</td>
+                    </tr>
+                    <tr>
+                        <td>文件不存在</td>
+                        <td>✅ 返回 Err</td>
+                        <td>❌</td>
+                    </tr>
+                    <tr>
+                        <td>网络请求超时</td>
+                        <td>✅ 返回 Err</td>
+                        <td>❌</td>
+                    </tr>
+                    <tr>
+                        <td>数组越界</td>
+                        <td>⚠️ 取决于上下文</td>
+                        <td>✅ 调试模式 panic</td>
+                    </tr>
+                    <tr>
+                        <td>内部逻辑矛盾</td>
+                        <td>❌</td>
+                        <td>✅ unreachable!()</td>
+                    </tr>
+                    <tr>
+                        <td>内存不足</td>
+                        <td>❌</td>
+                        <td>✅ alloc::handle_alloc_error()</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <pre class="language-rust"><code>use std::num::ParseIntError;
+
+// 可恢复错误：使用 Result
+fn parse_port(input: &amp;str) -&gt; Result&lt;u16, ParseIntError&gt; {
+    input.parse()
+}
+
+// 不可恢复错误：使用 panic
+fn get_element_unchecked&lt;T&gt;(slice: &[T], index: usize) -&gt; &amp;T {
+    if index &lt; slice.len() {
+        &amp;slice[index]
+    } else {
+        panic!(
+            "Index {} out of bounds for slice of length {}",
+            index,
+            slice.len()
+        );
+    }
+}
+
+// 内部逻辑错误：使用 unreachable!
+enum Command {
+    Start,
+    Stop,
+}
+
+impl Command {
+    fn execute(&amp;self) -&gt; bool {
+        match self {
+            Command::Start =&gt; true,
+            Command::Stop =&gt; false,
+        }
+    }
+
+    fn as_str(&amp;self) -&gt; &amp;str {
+        match self {
+            Command::Start =&gt; "start",
+            Command::Stop =&gt; "stop",
+        }
+    }
+
+    // 如果枚举只定义了 Start 和 Stop，这里永远不可能到达
+    fn debug_name(&amp;self) -&gt; &amp;str {
+        match self {
+            Command::Start =&gt; "START",
+            Command::Stop =&gt; "STOP",
+        }
+        // 编译器知道这是 exhaustive match，不需要 unreachable!
+    }
+}</code></pre>
+
+        <h3>5.1.1 panic! 的展开策略</h3>
+
+        <p>Rust 的 panic 有两种处理模式：</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>模式</th>
+                        <th>行为</th>
+                        <th>适用场景</th>
+                        <th>设置方式</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Unwind（默认）</td>
+                        <td>逐帧展开栈，调用 drop</td>
+                        <td>GUI 应用、服务器</td>
+                        <td>Cargo.toml 中配置</td>
+                    </tr>
+                    <tr>
+                        <td>Abort</td>
+                        <td>立即终止进程</td>
+                        <td>嵌入式、追求最小体积</td>
+                        <td>panic = "abort"</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <pre class="language-rust"><code># Cargo.toml
+[profile.release]
+panic = "unwind"  # 或 "abort"
+
+# 性能影响：abort 模式可以减小二进制文件大小约 5-10%
+# 因为不需要 unwind 表（unwind tables）
+</code></pre>
+
+        <h2>5.2 thiserror：库作者的工具</h2>
+
+        <p><code>thiserror</code> 是一个 derive macro，用于简化自定义错误类型的定义。它是编写 Rust 库时的首选方案：</p>
+
+        <pre class="language-rust"><code>// Cargo.toml
+// [dependencies]
+// thiserror = "2"
+
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum NetworkError {
+    #[error("connection timed out after {timeout_ms}ms")]
+    Timeout { timeout_ms: u64 },
+
+    #[error("failed to resolve DNS for {hostname}: {reason}")]
+    DnsFailure { hostname: String, reason: String },
+
+    #[error("HTTP error: status={status}, body={body}")]
+    HttpError { status: u16, body: String },
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error("invalid URL: {0}")]
+    InvalidUrl(#[from] url::ParseError),
+}
+
+// 自动实现 Display（#[error(...)]）、Debug（#[derive(Debug)]）、
+// Source（#[source]）和 From（#[from]）trait
+impl NetworkError {
+    pub fn is_timeout(&amp;self) -&gt; bool {
+        matches!(self, NetworkError::Timeout { .. })
+    }
+
+    pub fn status_code(&amp;self) -&gt; Option&lt;u16&gt; {
+        match self {
+            NetworkError::HttpError { status, .. } =&gt; Some(*status),
+            _ =&gt; None,
+        }
+    }
+}</code></pre>
+
+        <h3>5.2.1 thiserror 的宏展开</h3>
+
+        <p>理解 thiserror 做了什么有助于你更好地使用它：</p>
+
+        <pre class="language-rust"><code>// 你写的：
+#[derive(Error, Debug)]
+pub enum ParseError {
+    #[error("not a number: {0}")]
+    NotNumber(String),
+}
+
+// thiserror 展开为：
+pub enum ParseError {
+    NotNumber(String),
+}
+
+impl std::fmt::Debug for ParseError { ... }  // 自动生成
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&amp;self, f: &amp;mut std::fmt::Formatter) -&gt; std::fmt::Result {
+        match self {
+            ParseError::NotNumber(s) =&gt; write!(f, "not a number: {}", s),
+        }
+    }
+}
+
+impl std::error::Error for ParseError {
+    fn source(&amp;self) -&gt; Option&lt;&amp;(dyn std::error::Error + 'static)&gt; {
+        None
+    }
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>为什么库要用 thiserror？</strong>：thiserror 的 <code>#[error]</code> 属性决定了 <code>Display</code> 的输出格式。库作者需要精确控制错误消息的国际化、版本稳定性等。thiserror 让你在定义错误类型时就确定这些信息，无需手动实现每个 trait。
+        </div>
+
+        <h2>5.3 Anyhow：应用代码的工具</h2>
+
+        <p><code>anyhow</code> 提供了灵活的错误包装能力，适合应用程序而非库：</p>
+
+        <pre class="language-rust"><code>// Cargo.toml
+// anyhow = "1"
+
+use anyhow::{Context, Result, bail};
+
+async fn fetch_config(url: &amp;str) -&gt; Result&lt;String&gt; {
+    // 使用 ? 自动包装错误
+    let response = reqwest::get(url)
+        .await
+        .context(format!("failed to fetch config from {}", url))?;
+
+    // 使用 .context() 添加上下文信息
+    let body = response.text()
+        .await
+        .context("failed to read response body")?;
+
+    // 使用 bail! 提前返回
+    if body.is_empty() {
+        bail!("config file is empty");
+    }
+
+    Ok(body)
+}
+
+// 链式上下文
+fn read_and_parse(path: &amp;str) -&gt; Result&lt;Config&gt; {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read config file: {}", path))?;
+
+    let config: Config = serde_json::from_str(&amp;content)
+        .with_context(|| "failed to parse config as JSON")?;
+
+    Ok(config)
+}</code></pre>
+
+        <h3>5.3.1 Context vs WithContext</h3>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>方法</th>
+                        <th>参数类型</th>
+                        <th>错误消息</th>
+                        <th>性能</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>.context(msg)</td>
+                        <td><code>impl Display</code></td>
+                        <td>立即求值</td>
+                        <td>无论是否有错误都会格式化</td>
+                    </tr>
+                    <tr>
+                        <td>.with_context(f)</td>
+                        <td><code>impl FnOnce() -&gt; S</code></td>
+                        <td>延迟求值</td>
+                        <td>仅在错误时调用闭包</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <pre class="language-rust"><code>// ❌ 不推荐：即使成功也会格式化字符串
+let result = do_something()
+    .context(format!("operation failed at step {}", step_num))?;
+
+// ✅ 推荐：只在失败时格式化
+let result = do_something()
+    .with_context(|| format!("operation failed at step {}", step_num))?;</code></pre>
+
+        <h2>5.4 错误传播模式</h2>
+
+        <h3>5.4.1 ? 运算符的展开</h3>
+
+        <p><code>?</code> 运算符在编译时被展开为 <code>match</code> 表达式：</p>
+
+        <pre class="language-rust"><code>// 使用 ? 的简写
+fn read_file(path: &amp;str) -&gt; Result&lt;String&gt; {
+    let content = std::fs::read_to_string(path)?;
+    Ok(content)
+}
+
+// 等价的手写展开
+fn read_file_expanded(path: &amp;str) -&gt; Result&lt;String&gt; {
+    let content = match std::fs::read_to_string(path) {
+        Ok(val) =&gt; val,
+        Err(err) =&gt; return Err(err.into()),  // .into() 做类型转换
+    };
+    Ok(content)
+}
+
+// 注意：? 末尾的 ; 和没有 ; 的区别
+fn example() -&gt; Result&lt;()&gt; {
+    let data = read_file("test.txt")?;  // 如果有错误，return Err(...)
+    let data2 = read_file("test2.txt")?;  // 继续传播
+    Ok(())
+}</code></pre>
+
+        <h3>5.4.2 错误转换（Error Conversion）</h3>
+
+        <pre class="language-rust"><code>// 将具体错误转换为通用错误
+use std::io;
+use std::num::ParseIntError;
+
+fn parse_number(s: &amp;str) -&gt; io::Result&lt;i32&gt; {
+    s.parse::&lt;i32&gt;()
+        .map_err(|e: ParseIntError| io::Error::new(io::ErrorKind::InvalidInput, e))
+}
+
+// 或者使用 ? 自动转换（需要 From 实现）
+fn parse_number_auto(s: &amp;str) -&gt; Result&lt;i32, Box&lt;dyn std::error::Error&gt;&gt; {
+    let n: i32 = s.parse()?;  // ? 自动调用 .into()
+    Ok(n)
+}</code></pre>
+
+        <h3>5.4.3 错误链（Error Chain）</h3>
+
+        <p>当一个错误由另一个错误引起时，Rust 通过 <code>std::error::Error::source()</code> 方法建立错误链：</p>
+
+        <pre class="language-rust"><code>use thiserror::Error;
+
+#[derive(Error, Debug)]
+enum AppError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("parse error: {0}")]
+    Parse(#[from] std::num::ParseIntError),
+
+    #[error("config error: {0}")]
+    Config(String),
+}
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let config = std::fs::read_to_string("config.txt")
+        .map_err(|e| AppError::Io(e))?;
+
+    let port: u16 = config.trim().parse()
+        .map_err(|e: std::num::ParseIntError| AppError::Parse(e))?;
+
+    println!("Port: {}", port);
+    Ok(())
+}</code></pre>
+
+        <h2>5.5 错误处理的性能考量</h2>
+
+        <p>Rust 的 <code>Result</code> 类型在编译后与 C 风格的错误码（errno）具有相同的性能特征：</p>
+
+        <pre class="language-rust"><code>// Result 的内存布局（单字段变体优化）
+// Ok(i32) 和 Err(std::io::Error) 在释放后大小相同
+
+fn main() {
+    println!("size of Result&lt;i32, io::Error&gt;: {}",
+        std::mem::size_of::&lt;Result&lt;i32, std::io::Error&gt;&gt;());  // 16 字节
+    println!("size of i32: {}", std::mem::size_of::&lt;i32&gt;());  // 4 字节
+    println!("size of io::Error: {}", std::mem::size_of::&lt;std::io::Error&gt;());  // 12 字节
+    // Result 大小 = max(4, 12) + discriminant = 12 + 4 = 16 字节
+}
+
+// 性能对比（10^9 次 Result 操作，Release 模式）：
+// Result::Ok:  ~1ns（与直接返回值相同）
+// Result::Err:  ~2ns（额外的一次分支预测）
+// C errno:     ~1ns
+// 差距：在现代 CPU 上几乎可以忽略</code></pre>
+
+        <div class="arch-diagram">
+            <h3>Result<T, E> 的内存布局</h3>
+            <pre class="text-art">
+enum Result&lt;T, E&gt; {
+    Ok(T),
+    Err(E),
+}
+
+内存布局（discriminant + 最大变体）：
+┌────────────────────┬────────────────────┐
+│ discriminant (1 byte) │  Ok: 0 / Err: 1   │
+├────────────────────┼────────────────────┤
+│ T (if Ok)          │  最多 8 字节 (SSA)  │
+│ E (if Err)         │  最多 8 字节 (SSA)  │
+└────────────────────┴────────────────────┘
+
+SSA (Single Small Scalar Optimization):
+当 T 或 E 是小标量类型时，直接嵌入 discriminant，
+不需要额外包装。Result&lt;u64, io::Error&gt; 大小 = 16 字节。
+            </pre>
+        </div>
+
+        <h2>5.6 自定义错误类型的设计原则</h2>
+
+        <pre class="language-rust"><code>use thiserror::Error;
+
+// 原则 1：错误类型应该反映领域模型
+#[derive(Error, Debug)]
+pub enum DatabaseError {
+    #[error("connection failed: {0}")]
+    Connection(#[from] std::io::Error),
+
+    #[error("query execution failed: {0}")]
+    Query(String),
+
+    #[error("constraint violation: {constraint}")]
+    ConstraintViolation { constraint: String },
+
+    #[error("deadlock detected")]
+    Deadlock,
+}
+
+// 原则 2：提供辅助方法
+impl DatabaseError {
+    pub fn is_recoverable(&amp;self) -&gt; bool {
+        matches!(self, DatabaseError::Connection(_) | DatabaseError::Deadlock)
+    }
+
+    pub fn retry_after(&amp;self) -&gt; Option&lt;std::time::Duration&gt; {
+        match self {
+            DatabaseError::Deadlock =&gt; Some(std::time::Duration::from_millis(100)),
+            _ =&gt; None,
+        }
+    }
+}
+
+// 原则 3：向上层暴露通用错误，向下层使用具体错误
+// 库的公共 API 使用具体错误类型
+// 应用层的 main 函数可以转换为 anyhow::Error
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    run().map_err(|e| e.into())
+}
+
+fn run() -&gt; Result&lt;(), DatabaseError&gt; {
+    let conn = connect("localhost:5432")?;
+    let rows = conn.query("SELECT * FROM users")?;
+    Ok(())
+}</code></pre>
+
+        <h3>5.6.1 错误类型的层级设计</h3>
+
+        <div class="arch-diagram">
+            <h3>错误类型分层架构</h3>
+            <pre class="text-art">
+应用层 (Application)
+  │  use anyhow::Result
+  │  fn main() -&gt; anyhow::Result&lt;()&gt; { ... }
+  │
+  ▼
+服务层 (Service)
+  │  use thiserror::Error
+  │  enum UserServiceError { NotFound, Conflict, ... }
+  │  fn create_user() -&gt; Result&lt;User, UserServiceError&gt;
+  │
+  ▼
+基础设施层 (Infrastructure)
+  │  std::io::Error, tokio::time::Error, ...
+  │  fn connect() -&gt; Result&lt;Connection, std::io::Error&gt;
+  │
+  ▼
+操作系统 / 网络
+            </pre>
+        </div>
+
+        <h2>5.7 实战：完整的错误处理模式</h2>
+
+        <pre class="language-rust"><code>use thiserror::Error;
+
+#[derive(Error, Debug)]
+enum CliError {
+    #[error("configuration error: {0}")]
+    Config(#[from] ConfigError),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("network error: {0}")]
+    Network(#[from] NetworkError),
+}
+
+#[derive(Error, Debug)]
+enum ConfigError {
+    #[error("file not found: {path}")]
+    FileNotFound { path: String },
+
+    #[error("parse error at line {line}: {reason}")]
+    Parse { line: usize, reason: String },
+}
+
+#[derive(Error, Debug)]
+enum NetworkError {
+    #[error("connection refused: {host}:{port}")]
+    ConnectionRefused { host: String, port: u16 },
+
+    #[error("timeout after {ms}ms")]
+    Timeout { ms: u64 },
+}
+
+// 主函数：将所有错误转换为 anyhow::Error
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let config = load_config("config.yaml")
+        .map_err(|e| CliError::Config(e))?;
+
+    let client = NetworkClient::new(&amp;config.host, config.port)
+        .map_err(|e| CliError::Network(e))?;
+
+    let data = client.fetch("/")?;
+    println!("{}", data);
+
+    Ok(())
+}</code></pre>
+
+        <h2>5.8 本章小结</h2>
+
+        <div class="callout callout-tip">
+            <summary>关键要点</summary>
+            <ul>
+                <li><strong>Result vs panic</strong>：可恢复错误用 Result，不可恢复错误用 panic</li>
+                <li><strong>thiserror</strong>：库作者的首选，轻量、编译快、类型安全</li>
+                <li><strong>anyhow</strong>：应用代码的首选，灵活的上下文包装</li>
+                <li><strong>? 运算符</strong>：自动错误传播和类型转换（.into()）</li>
+                <li><strong>性能</strong>：Result 与 C errno 性能相当，现代 CPU 分支预测几乎零开销</li>
+                <li><strong>错误链</strong>：source() 方法连接相关错误，便于调试</li>
+            </ul>
+        </div>
+
+        <h2>5.9 下一章预告</h2>
+
+        <p>第六章将进入 <strong>并发编程</strong>，深入讲解 <code>Send</code>、<code>Sync</code> 特质、<code>Arc&lt;Mutex&lt;T&gt;&gt;</code>、通道通信以及 <code>async/await</code> 的底层机制。</p>
+
+        <h2>5.10 延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://doc.rust-lang.org/book/ch09-00-error-handling.html" target="_blank">The Rust Book - Chapter 9: Error Handling</a></li>
+            <li><a href="https://docs.rs/thiserror/latest/thiserror/" target="_blank">thiserror Documentation</a></li>
+            <li><a href="https://docs.rs/anyhow/latest/anyhow/" target="_blank">anyhow Documentation</a></li>
+            <li><a href="https://blog.yoshuawuyts.com/errors-in-rust/" target="_blank">Errors in Rust - Yoshua Wuyts</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-standard-library.html">&larr; 第四章：标准库深入</a>
+            <a href="06-concurrency.html">第六章：并发编程 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

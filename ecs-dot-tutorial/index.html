@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECS 与 Unity DOTS 入门到精通</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <h1>ECS 与 Unity DOTS 入门到精通</h1>
+        <p class="intro">从零构建对 ECS（Entity Component System）架构和 Unity DOTS 技术栈的深度理解。不只讲"怎么用"，更深入到 Archetype 内存布局、Burst 编译器后端、Job Scheduler 依赖图等底层机制。</p>
+
+        <div class="callout callout-info">
+            <strong>关于本教程</strong>：
+            <ul>
+                <li><strong>前置知识</strong>：C# 基础、Unity Editor 基本使用、多线程编程概念</li>
+                <li><strong>学习深度</strong>：系统掌握 + 源码级剖析 + 性能调优</li>
+                <li><strong>DOTS 版本</strong>：Entities 2.x（Unity 6 / 2023.3+）</li>
+                <li><strong>主题风格</strong>：技术蓝（适合编程/架构类教程）</li>
+            </ul>
+        </div>
+
+        <div class="version-info">
+            <p><strong>版本：</strong>v1.0 | <strong>更新日期：</strong>2026-07-02</p>
+            <p><strong>适用环境：</strong>Unity 6 / Entities 2.2.0 / Burst 1.8 / Job System 3.3</p>
+        </div>
+
+        <h2>课程目录</h2>
+
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-ecs-paradigm-shift.html">01 - ECS 范式革命</a></h3>
+                <p>为什么 OOP 在游戏开发中遇到瓶颈？ECS 的哲学起源、与 OOP/面向数据编程的对比、GameDev 中数据局部性的重要性。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-ecs-trinity.html">02 - ECS 三要素深度解剖</a></h3>
+                <p>Entity 不是对象而是 ID、Component 不是类而是数据 POD、System 不是行为而是数据转换流水线。每个概念的每一个设计决策。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-data-oriented-design.html">03 - 数据导向设计（DDD）</a></h3>
+                <p>Cache Line 原理、SoA vs AoS、Struct of Arrays 的内存布局艺术、数据预取、False Sharing 及其消除。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-unity-dots-architecture.html">04 - Unity DOTS 架构全景</a></h3>
+                <p>Entities 0.x → 2.x 的完整演进史。Hub 架构、Package 依赖关系、World/ECS/Hybrid/Rendering/Baking 六大支柱。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-burst-compiler-deep-dive.html">05 - Burst Compiler 深入</a></h3>
+                <p>LLVM 后端、SIMD 自动向量化、Loop Unrolling、Function Inlining、JIT 编译时机、Burst 的限制条件与调试。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-job-system-deep-dive.html">06 - Job System 深入</a></h3>
+                <p>Dependency Graph、JobHandle、NativeArray 生命周期、Barrier、Scheduled vs Execute、Work Stealing。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="07-ecs-implementation.html">07 - ECS 源码级实现</a></h3>
+                <p>Archetype、Chunk、World 的内部结构。Component Type、Version、GUID 系统。Entity 的 Generation ID 防复用。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="08-component-system-patterns.html">08 - ChunkIterator 与并行 Job 模式</a></h3>
+                <p>ForEach、IJobChunk、IJobEntity。Chunk 遍历的内部原理。Read/Write Group 依赖分析。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="09-hybrid-ecs.html">09 - Hybrid ECS 与 GameObject 集成</a></h3>
+                <p>Authoring + Baker 转换管线、GameObjectUtility、Hybrid Renderer V2、何时用 Hybrid、何时全 DOTS。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="10-dots-game-project.html">10 - DOTS 实战：从零构建 Roguelike 地牢</a></h3>
+                <p>综合应用：Tilemap 生成、实体 AI、战斗系统、渲染管线。从架构设计到性能调优的完整流程。</p>
+            </div>
+        </div>
+
+        <h2>学习路线建议</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>第一阶段：理解为什么（第 1-3 章）</h4>
+                    <p>不写一行代码，彻底理解 ECS 的哲学基础和数据导向设计。这是大多数人跳过但最关键的部分。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>第二阶段：理解架构（第 4-7 章）</h4>
+                    <p>深入 DOTS 的每一个核心子系统。理解 Archetype 内存布局、Burst 编译原理、Job Scheduler 工作机制。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>第三阶段：实战与混合（第 8-10 章）</h4>
+                    <p>掌握并行 Job 模式、Hybrid ECS 转换管线，最终构建一个完整的小游戏项目。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>开发环境</h2>
+
+        <ul>
+            <li><strong>Unity 版本</strong>：Unity 6（2023.3+）推荐，Entities 2.x</li>
+            <li><strong>必要 Package</strong>：Entities、Burst、Jobs、Collections、Mathematics</li>
+            <li><strong>推荐 Package</strong>：Hybrid Renderer V2、Translation Generator、Building Blocks</li>
+            <li><strong>IDE</strong>：Visual Studio 2022 / Rider（Rider 对 Burst 调试支持更好）</li>
+            <li><strong>Profiling</strong>：Unity Profiler（CPU/Simulation tab）、Frame Debugger、Memory Profiler</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://docs.unity3d.com/Packages/com.unity.entities@2.2/manual/index.html" target="_blank">Unity Entities 官方文档</a></li>
+                <li><a href="https://docs.unity3d.com/Packages/com.unity.burst@latest" target="_blank">Burst Compiler 文档</a></li>
+                <li><a href="https://unity.com DOTSScience" target="_blank">Unity DOTS Science: 论文与研究报告</a></li>
+                <li><a href="https://github.com/Unity-Technologies/Entities" target="_blank">Unity.Entities GitHub 源码</a></li>
+            </ul>
+        </div>
+    </main>
+</body>
+</html>

@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 - 渲染管线 - 从零构建游戏引擎入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-engine-overview.html">&larr; 上一章</a>
+        <a href="03-math-foundations.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>第二章：渲染管线——从顶点到像素</h1>
+
+        <div class="callout callout-info">
+            <strong>学习目标</strong>：理解图形从 CPU 内存到 GPU 屏幕的完整旅程。掌握渲染管线的每个阶段、Draw Call 的性能影响、批渲染和实例化等核心技术。这些是渲染子系统的基础。
+        </div>
+
+        <h2>渲染管线概述</h2>
+
+        <p>渲染管线（Rendering Pipeline）是图形 API（OpenGL / Vulkan / DirectX）定义的一套<strong>固定流程</strong>，描述了顶点数据如何一步步变成屏幕上的像素。理解这个流程是编写高效渲染器的第一步。</p>
+
+        <div class="arch-diagram">
+            <div class="arch-layer">
+                <div class="arch-block wide">输入装配（Input Assembler）— 从内存读取顶点数据和索引</div>
+            </div>
+            <div class="arch-divider">  v  </div>
+            <div class="arch-layer">
+                <div class="arch-row">
+                    <div class="arch-block">顶点着色器<br>(Vertex Shader)</div>
+                    <div class="arch-block">几何着色器<br>(Geometry Shader)<br><small>可选</small></div>
+                    <div class="arch-block">裁剪<br>(Clipping)</div>
+                </div>
+            </div>
+            <div class="arch-divider">  v  </div>
+            <div class="arch-layer">
+                <div class="arch-row">
+                    <div class="arch-block">光栅化<br>(Rasterization)</div>
+                    <div class="arch-block">逐片源处理<br>(Per-Sample)</div>
+                </div>
+            </div>
+            <div class="arch-divider">  v  </div>
+            <div class="arch-layer">
+                <div class="arch-row">
+                    <div class="arch-block">片段着色器<br>(Fragment Shader)</div>
+                    <div class="arch-block">测试与混合<br>(Tests & Blend)</div>
+                </div>
+            </div>
+            <div class="arch-divider">  v  </div>
+            <div class="arch-layer">
+                <div class="arch-block wide">帧缓冲区（Frame Buffer）— 最终像素输出到屏幕</div>
+            </div>
+        </div>
+
+        <p>每一帧，GPU 都要为场景中的每个物体执行这套流程。如果场景中有 1000 个物体，就需要执行 1000 次。这就是为什么减少 Draw Call（绘制调用）是渲染优化的第一要务。</p>
+
+        <h2>固定功能管线 vs 可编程管线</h2>
+
+        <p>在 OpenGL 2.x 时代，渲染管线是「固定功能」的——顶点变换、光照计算、纹理采样都由 GPU 内部硬编码的模块完成。开发者只能通过设置参数（如光源位置、材质颜色）来影响结果，无法改变计算逻辑。</p>
+
+        <p>从 OpenGL 3.0+（以及 DirectX 10+）开始，管线全面转向<strong>可编程</strong>。固定的顶点变换和光照被 Vertex Shader 和 Fragment Shader 取代。开发者用 GLSL 编写着色器代码，完全控制每个顶点和每个片段的计算过程。</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>特性</th>
+                        <th>固定功能管线（OpenGL 2.x）</th>
+                        <th>可编程管线（OpenGL 3.0+）</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>灵活性</strong></td>
+                        <td>低——只能调参数</td>
+                        <td>极高——完全自定义计算</td>
+                    </tr>
+                    <tr>
+                        <td><strong>学习曲线</strong></td>
+                        <td>低——API 调用即可</td>
+                        <td>高——需要学习 GLSL</td>
+                    </tr>
+                    <tr>
+                        <td><strong>性能</strong></td>
+                        <td>好（硬件优化）</td>
+                        <td>取决于着色器质量</td>
+                    </tr>
+                    <tr>
+                        <td><strong>视觉效果</strong></td>
+                        <td>有限（Blinn-Phong 为主）</td>
+                        <td>无限（PBR、体积光、后处理）</td>
+                    </tr>
+                    <tr>
+                        <td><strong>现代地位</strong></td>
+                        <td>已废弃</td>
+                        <td>行业标准</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2>着色器：渲染管线的灵魂</h2>
+
+        <h3>顶点着色器（Vertex Shader）</h3>
+        <p>顶点着色器是渲染管线的第一个可编程阶段。它的职责是将顶点从模型空间变换到裁剪空间，并传递数据给后续阶段。</p>
+
+        <pre><code class="language-glsl">#version 460 core
+
+layout(location = 0) in vec3 aPosition;   // 顶点位置
+layout(location = 1) in vec3 aNormal;     // 顶点法线
+layout(location = 2) in vec2 aTexCoord;   // 纹理坐标
+
+uniform mat4 uModel;       // 模型矩阵
+uniform mat4 uView;        // 视图矩阵
+uniform mat4 uProjection;  // 投影矩阵
+
+out vec3 vNormal;
+out vec2 vTexCoord;
+out vec3 vWorldPos;
+
+void main()
+{
+    // 1. 将顶点变换到世界空间
+    vec4 worldPos = uModel * vec4(aPosition, 1.0);
+    vWorldPos = worldPos.xyz;
+
+    // 2. 变换法线（使用逆转置矩阵确保正确性）
+    vNormal = mat3(uModel) * aNormal;
+
+    // 3. 传递纹理坐标
+    vTexCoord = aTexCoord;
+
+    // 4. 变换到裁剪空间（GPU 自动执行透视除法）
+    gl_Position = uProjection * uView * worldPos;
+}</code></pre>
+
+        <p>顶点着色器的输入是顶点数据（位置、法线、纹理坐标等），输出是传递给片段着色器的插值数据。每个顶点执行一次，如果模型有 10 万个顶点，就执行 10 万次。</p>
+
+        <h3>片段着色器（Fragment Shader）</h3>
+        <p>片段着色器决定屏幕上每个像素的颜色。它接收顶点着色器输出的插值数据，进行光照计算、纹理采样等操作。</p>
+
+        <pre><code class="language-glsl">#version 460 core
+
+in vec3 vNormal;
+in vec2 vTexCoord;
+in vec3 vWorldPos;
+
+uniform sampler2D uTexture;
+uniform vec3 uLightDir;
+uniform vec3 uCameraPos;
+uniform vec3 uBaseColor;
+
+out vec4 fragColor;
+
+void main()
+{
+    // 1. 纹理采样
+    vec3 texColor = texture(uTexture, vTexCoord).rgb;
+
+    // 2. 标准化光照方向和观察方向
+    vec3 normal = normalize(vNormal);
+    vec3 lightDir = normalize(uLightDir);
+    vec3 viewDir = normalize(uCameraPos - vWorldPos);
+
+    // 3. 漫反射光照（Lambert 模型）
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 diffuse = diff * texColor;
+
+    // 4. 镜面高光（Blinn-Phong）
+    vec3 halfDir = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(normal, halfDir), 0.0), 32.0);
+    vec3 specular = spec * vec3(0.3);
+
+    // 5. 环境光（全局光照的简化近似）
+    vec3 ambient = texColor * 0.1;
+
+    // 6. 组合
+    vec3 result = ambient + diffuse + specular;
+    fragColor = vec4(result, 1.0);
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>为什么片段着色器叫「片段」不叫「像素」？</strong>：因为光栅化阶段生成的片段数量远多于屏幕像素。一个三角形可能覆盖 1000 个片段，但屏幕只有 200 万像素。片段经过深度测试、模板测试后，失败的才会被丢弃，剩下的才成为真正的像素写入帧缓冲区。
+        </div>
+
+        <h2>Draw Call 的概念与性能影响</h2>
+
+        <p>Draw Call（绘制调用）是 CPU 向 GPU 发送的一次「画这个物体」的命令。每次 Draw Call 都需要：</p>
+
+        <ol>
+            <li>CPU 准备顶点数据和状态（绑定纹理、设置着色器）</li>
+            <li>通过 PCIe 总线将命令发送到 GPU</li>
+            <li>GPU 切换状态、验证参数、执行渲染</li>
+            <li>CPU 等待 GPU 完成（或异步排队）</li>
+        </ol>
+
+        <p>这个过程虽然单次只需要几微秒，但<strong>累积起来是巨大的性能瓶颈</strong>。典型的性能数据：</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Draw Call 数量</th>
+                        <th>CPU 耗时/帧</th>
+                        <th>GPU 耗时/帧</th>
+                        <th>预估帧率</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>100</td><td>0.1 ms</td><td>2.0 ms</td><td>~450 FPS</td></tr>
+                    <tr><td>1,000</td><td>0.8 ms</td><td>2.5 ms</td><td>~300 FPS</td></tr>
+                    <tr><td>5,000</td><td>3.5 ms</td><td>4.0 ms</td><td>~130 FPS</td></tr>
+                    <tr><td>10,000</td><td>7.0 ms</td><td>6.0 ms</td><td>~75 FPS</td></tr>
+                    <tr><td>50,000</td><td>35 ms</td><td>15 ms</td><td>~20 FPS</td></tr>
+                    <tr><td>100,000</td><td>70 ms</td><td>25 ms</td><td>~10 FPS</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>可以看到，当 Draw Call 超过 10,000 时，CPU 已经成为瓶颈（7ms 占了一帧 16.7ms 的 42%）。这就是为什么 <strong>减少 Draw Call 是渲染优化的第一优先级</strong>。</p>
+
+        <h2>批渲染（Batch Rendering）</h2>
+
+        <p>批渲染的核心思想是：<strong>把多个物体的绘制合并成一次 Draw Call</strong>。方法是把多个物体的顶点数据拼接到一个大的顶点缓冲区中，然后一次性提交。</p>
+
+        <pre><code class="language-cpp">// 批渲染的核心逻辑
+class RenderBatcher {
+public:
+    void addMesh(const Mesh& mesh, const Mat4& transform, Texture* tex)
+    {
+        // 如果当前批次使用了不同的纹理，先 flush 再开新批次
+        if (m_currentTexture && m_currentTexture != tex) {
+            flush();
+        }
+
+        // 计算变换后的顶点
+        const auto& vertices = mesh.getVertices();
+        for (const auto& v : vertices) {
+            Vertex batchVertex;
+            batchVertex.position = transform * v.position;
+            batchVertex.normal = (mat3(transform) * v.normal).normalized();
+            batchVertex.texCoord = v.texCoord;
+            batchVertex.color = v.color;
+            m_batchVertices.push_back(batchVertex);
+        }
+
+        // 记录索引偏移
+        m_batchIndices.reserve(m_batchIndices.size() + mesh.getIndexCount());
+        uint32_t offset = static_cast<uint32_t>(m_vertexOffset);
+        for (uint32_t i = 0; i < mesh.getIndexCount(); ++i) {
+            m_batchIndices.push_back(mesh.getIndices()[i] + offset);
+        }
+
+        m_vertexOffset += vertices.size();
+        m_currentTexture = tex;
+    }
+
+    void flush()
+    {
+        if (m_batchVertices.empty()) return;
+
+        // 一次性上传所有顶点数据到 GPU
+        m_vbo.bind();
+        m_vbo.setData(m_batchVertices.data(), m_batchVertices.size() * sizeof(Vertex));
+        m_ibo.bind();
+        m_ibo.setData(m_batchIndices.data(), m_batchIndices.size() * sizeof(uint32_t));
+
+        // 绑定纹理（同一批次内纹理不变）
+        if (m_currentTexture) {
+            m_currentTexture->bind();
+        }
+
+        // 一次 Draw Call 渲染所有合并的物体
+        glDrawElements(GL_TRIANGLES, m_batchIndices.size(), GL_UNSIGNED_INT, nullptr);
+
+        // 清空批次
+        m_batchVertices.clear();
+        m_batchIndices.clear();
+        m_vertexOffset = 0;
+        m_currentTexture = nullptr;
+    }
+
+private:
+    std::vector&lt;Vertex&gt; m_batchVertices;
+    std::vector&lt;uint32_t&gt; m_batchIndices;
+    uint32_t m_vertexOffset = 0;
+    Texture* m_currentTexture = nullptr;
+    BufferObject m_vbo;
+    BufferObject m_ibo;
+};</code></pre>
+
+        <h3>批渲染的性能收益</h3>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>方案</th>
+                        <th>1000 个物体</th>
+                        <th>10000 个物体</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>逐个绘制</strong></td><td>1000 Draw Calls</td><td>10000 Draw Calls</td></tr>
+                    <tr><td><strong>批渲染</strong></td><td>1-10 Draw Calls</td><td>10-50 Draw Calls</td></tr>
+                    <tr><td><strong>CPU 耗时</strong></td><td>0.8 ms → 0.05 ms</td><td>7.0 ms → 0.3 ms</td></tr>
+                    <tr><td><strong>帧率提升</strong></td><td>16x</td><td>23x</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>批渲染的限制</strong>：同一批次内的物体必须使用相同的着色器和纹理。如果场景中有很多不同材质的物体，批渲染的效果会打折扣。这时候需要考虑 Instancing（实例化）或其他优化技术。
+        </div>
+
+        <h2>实例化渲染（Instancing）</h2>
+
+        <p>Instancing 是批渲染的进阶版——它不仅合并顶点数据，还<strong>在一次 Draw Call 中渲染多个相同网格的不同实例</strong>。每个实例可以有独立的位置、旋转、缩放、颜色。</p>
+
+        <pre><code class="language-glsl">// 顶点着色器支持 instanced arrays
+#version 460 core
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aTexCoord;
+
+// 实例属性：每个实例一个矩阵
+layout(location = 3) in mat4 aInstanceMatrix;
+
+uniform mat4 uView;
+uniform mat4 uProjection;
+
+out vec3 vNormal;
+out vec2 vTexCoord;
+out vec3 vWorldPos;
+
+void main()
+{
+    // 每个实例的顶点 = 实例矩阵 × 网格顶点
+    vec4 worldPos = aInstanceMatrix * vec4(aPosition, 1.0);
+    vWorldPos = worldPos.xyz;
+    vNormal = mat3(aInstanceMatrix) * aNormal;
+    vTexCoord = aTexCoord;
+    gl_Position = uProjection * uView * worldPos;
+}</code></pre>
+
+        <pre><code class="language-cpp">// 实例化渲染的 CPU 端代码
+void renderInstanced(const Mesh& mesh,
+                     const std::vector&lt;Mat4&gt;& transforms,
+                     Texture* texture)
+{
+    // 1. 上传实例矩阵数组到 GPU
+    GLuint instanceBuffer;
+    glGenBuffers(1, &instanceBuffer);
+    glBindBuffer(GL_ARRAY_BUFFER, instanceBuffer);
+    glBufferData(GL_ARRAY_BUFFER,
+                 transforms.size() * sizeof(Mat4),
+                 transforms.data(),
+                 GL_STATIC_DRAW);
+
+    // 2. 绑定实例属性（location 3）
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE,
+                          sizeof(Mat4), (void*)0);
+    // 关键：告诉 GPU 每个实例前进 1 个属性，而不是 1 个顶点
+    glVertexAttribDivisor(3, 1);
+
+    // 3. 一次 Draw Call 渲染 N 个实例
+    glBindTexture(GL_TEXTURE_2D, texture->id());
+    glDrawElementsInstanced(
+        GL_TRIANGLES,
+        mesh.getIndexCount(),
+        GL_UNSIGNED_INT,
+        nullptr,
+        transforms.size()  // 实例数量
+    );
+
+    // 4. 清理
+    glVertexAttribDivisor(3, 0);
+    glDeleteBuffers(1, &instanceBuffer);
+}</code></pre>
+
+        <p>使用 <code>glDrawElementsInstanced</code> 替代 <code>glDrawElements</code>，只需增加一行 <code>glVertexAttribDivisor(3, 1)</code> 就可以告诉 GPU：属性数组是按实例而不是按顶点推进的。</p>
+
+        <h3>Instancing 性能数据</h3>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>实例数量</th>
+                        <th>传统方式 Draw Calls</th>
+                        <th>Instancing Draw Calls</th>
+                        <th>CPU 节省</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>100</td><td>100</td><td>1</td><td>99%</td></tr>
+                    <tr><td>1,000</td><td>1,000</td><td>1</td><td>99.9%</td></tr>
+                    <tr><td>10,000</td><td>10,000</td><td>1</td><td>99.99%</td></tr>
+                    <tr><td>100,000</td><td>100,000</td><td>1</td><td>99.999%</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>Instancing 特别适合渲染大量相同或相似物体：树木、草地、建筑、NPC、粒子、子弹等。Unreal Engine 4 的 Niagara 粒子系统就重度依赖 Instancing，单帧可以渲染数百万个粒子。</p>
+
+        <h2>2D 渲染的特殊优化</h2>
+
+        <p>2D 引擎的渲染模式与 3D 有显著不同，主要体现在两个方面：Sprite Batching 和 Texture Atlas。</p>
+
+        <h3>Sprite Batching</h3>
+        <p>2D 游戏中最常见的优化技术。将所有 Sprite 的矩形顶点合并到一个批次中，一次性渲染。由于 2D Sprite 通常是正对摄像机的四边形的，变换矩阵非常简单（只需要平移和缩放）。</p>
+
+        <pre><code class="language-cpp">class SpriteBatcher {
+public:
+    void begin() {
+        m_vertices.clear();
+        m_indices.clear();
+        m_currentTexture = nullptr;
+        m_quadCount = 0;
+    }
+
+    void draw(Texture* tex, const Rect& quad) {
+        // 纹理切换时 flush
+        if (m_currentTexture && m_currentTexture != tex) {
+            flush();
+        }
+
+        // 添加四边形（2 个三角形 = 6 个顶点）
+        float x = quad.x, y = quad.y;
+        float w = quad.w, h = quad.h;
+        float u = quad.u, v = quad.v;  // 纹理坐标
+        float uw = quad.uw, vh = quad.vh;
+
+        // 顶点布局：位置(2) + 纹理坐标(2) + 颜色(4) = 16 字节/顶点
+        m_vertices.push_back({x,     y,     u,          v,           1,1,1,1});
+        m_vertices.push_back({x+w,   y,     u+uw,       v,           1,1,1,1});
+        m_vertices.push_back({x+w,   y+h,   u+uw,       v+vh,        1,1,1,1});
+        m_vertices.push_back({x,     y+h,   u,          v+vh,        1,1,1,1});
+
+        // 索引：两个三角形
+        uint32_t baseIndex = m_quadCount * 4;
+        m_indices.push_back(baseIndex + 0);
+        m_indices.push_back(baseIndex + 1);
+        m_indices.push_back(baseIndex + 2);
+        m_indices.push_back(baseIndex + 0);
+        m_indices.push_back(baseIndex + 2);
+        m_indices.push_back(baseIndex + 3);
+
+        m_quadCount++;
+        m_currentTexture = tex;
+    }
+
+    void flush() {
+        if (m_vertices.empty()) return;
+
+        // 上传到 GPU 并绘制
+        m_vbo.bind();
+        m_vbo.setData(m_vertices.data(), m_vertices.size() * sizeof(SpriteVertex));
+        m_ibo.bind();
+        m_ibo.setData(m_indices.data(), m_indices.size() * sizeof(uint32_t));
+
+        glDrawElements(GL_TRIANGLES, m_indices.size(), GL_UNSIGNED_INT, nullptr);
+
+        // 重置
+        m_vertices.clear();
+        m_indices.clear();
+        m_quadCount = 0;
+        m_currentTexture = nullptr;
+    }
+
+    // 性能：10000 个 Sprite
+    // 传统方式：10000 Draw Calls
+    // SpriteBatcher：1-4 Draw Calls（取决于纹理切换次数）
+    // CPU 耗时：~50ms → ~0.3ms（167x 提升）
+};</code></pre>
+
+        <h3>Texture Atlas（纹理图集）</h3>
+        <p>将多个小纹理拼成一张大图，Sprite 通过不同的 UV 坐标引用大图的子区域。这样即使 Sprite 来自不同的源文件，也可以共用同一个纹理，从而合并到一个批次中。</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>方案</th>
+                        <th>独立纹理（100 个 Sprite）</th>
+                        <th>Texture Atlas（1 张图集）</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>Draw Calls</strong></td><td>100</td><td>1</td></tr>
+                    <tr><td><strong>纹理切换次数</strong></td><td>100</td><td>0</td></tr>
+                    <tr><td><strong>显存占用</strong></td><td>100 × 64KB = 6.25 MB</td><td>1 × 4MB = 4 MB</td></tr>
+                    <tr><td><strong>GPU 缓存命中率</strong></td><td>低（频繁切换）</td><td>高（连续访问）</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>Texture Atlas 的缺点是会浪费一些空间（Atlas 中无法完美填充的空白区域），以及纹理边界处的 <strong>纹理 bleeding</strong>（相邻纹理的颜色渗透到边界）。解决方法是在 Atlas 生成时给每个子纹理加 1px 的 padding，并在采样时使用 clamp-to-edge 模式。</p>
+
+        <h2>OpenGL 基础渲染循环</h2>
+
+        <p>让我们把所有概念整合到一个完整的渲染循环中，展示从场景准备到屏幕输出的全过程。</p>
+
+        <pre><code class="language-cpp">// 完整的 OpenGL 渲染循环
+void Renderer::render(const Scene& scene, float deltaTime)
+{
+    // 1. 清除缓冲区
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // 2. 设置渲染状态
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // 3. 更新 Uniform（每帧变化的数据）
+    m_shader.use();
+    m_shader.setMat4("uView", scene.getCamera().getViewMatrix());
+    m_shader.setMat4("uProjection", scene.getCamera().getProjectionMatrix());
+    m_shader.setVec3("uLightDir", scene.getLightDirection());
+    m_shader.setFloat("uTime", deltaTime * scene.getTotalTime());
+
+    // 4. 渲染所有可见物体（按材质分组以实现批渲染）
+    auto groupedObjects = groupByMaterial(scene.getVisibleObjects());
+
+    for (auto& [material, objects] : groupedObjects) {
+        // 绑定材质对应的纹理
+        material->bindTextures();
+
+        // 绑定着色器
+        material->getShader().use();
+
+        // 渲染该组所有物体
+        for (auto& obj : objects) {
+            // 计算实例矩阵
+            Mat4 transform = obj.getWorldTransform();
+
+            // 设置 Uniform（每物体唯一的数据）
+            material->getShader().setMat4("uModel", transform);
+
+            // 绘制
+            obj.getMesh().draw();
+        }
+    }
+
+    // 5. UI 层（叠加在场景之上）
+    renderUI(scene.getUIElements());
+
+    // 6. 后处理效果（可选）
+    if (m_postProcessEnabled) {
+        applyPostProcessing();
+    }
+
+    // 7. 交换缓冲区
+    glfwSwapBuffers(m_window);
+}
+
+// groupByMaterial 的实现——批渲染的关键
+std::map&lt;Material*, std::vector&lt;GameObject*&gt;&gt;
+groupByMaterial(const std::vector&lt;GameObject*&gt;& objects)
+{
+    std::map&lt;Material*, std::vector&lt;GameObject*&gt;&gt; groups;
+    for (auto* obj : objects) {
+        groups[obj->getMaterial()].push_back(obj);
+    }
+    return groups;
+}</code></pre>
+
+        <h3>渲染循环的执行顺序</h3>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>清屏</h4>
+                    <p>清除颜色缓冲区和深度缓冲区。每帧开始时，屏幕上是上一帧的内容，必须先清除。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>设置渲染状态</h4>
+                    <p>启用深度测试（3D 遮挡）、混合（透明物体）、抗锯齿等。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>更新 Uniform</h4>
+                    <p>将每帧变化的数据（视图矩阵、时间等）上传到 GPU Uniform。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>按材质分组渲染</h4>
+                    <p>将物体按材质分组，同组物体共用相同的着色器和纹理，减少状态切换。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">5</span>
+                <div class="step-content">
+                    <h4>渲染 UI</h4>
+                    <p>UI 通常使用正交投影，叠加在 3D 场景之上。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">6</span>
+                <div class="step-content">
+                    <h4>后处理</h4>
+                    <p>对整帧图像应用泛光、色调映射、景深等效果（可选）。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">7</span>
+                <div class="step-content">
+                    <h4>交换缓冲区</h4>
+                    <p>将渲染好的后台缓冲区交换到前台显示。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+
+        <div class="callout callout-tip">
+            <strong>本章核心知识点回顾</strong>：
+            <ol>
+                <li><strong>渲染管线</strong>：顶点 → 几何 → 光栅化 → 片段 → 帧缓冲。理解每个阶段的职责。</li>
+                <li><strong>可编程管线</strong>：Vertex Shader 负责坐标变换，Fragment Shader 负责颜色计算。</li>
+                <li><strong>Draw Call</strong>：CPU 到 GPU 的桥梁，也是性能瓶颈的主要来源。</li>
+                <li><strong>批渲染</strong>：合并顶点数据，减少状态切换，可将 10000 个物体的 Draw Call 从 10000 降到 1-4。</li>
+                <li><strong>Instancing</strong>：一次 Draw Call 渲染 N 个相同网格的不同实例，适合大量重复物体。</li>
+                <li><strong>2D 优化</strong>：Sprite Batching + Texture Atlas 是 2D 引擎渲染的核心技术。</li>
+            </ol>
+        </div>
+
+        <h2>下一章预告</h2>
+
+        <p>第三章将深入渲染管线的数学基础——<strong>向量、矩阵、四元数</strong>。没有这些数学工具，我们无法实现物体的变换、相机的控制、光照的计算。你会理解为什么 4x4 矩阵是 3D 变换的标准，为什么四元数比欧拉角更适合旋转插值。</p>
+
+        <h2>延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://learnopengl.com/" target="_blank">LearnOpenGL — 从基础渲染到高级技术的完整教程</a></li>
+            <li><a href="https://fgiesen.wordpress.com/2012/08/15/implementing-the-projection-division/" target="_blank">Fedora Dsign — 投影矩阵的深度解析</a></li>
+            <li><a href="https://developer.nvidia.com/content/depth-notice" target="_blank">NVIDIA — Depth Buffer Precision and the Projection Matrix</a></li>
+            <li><a href="https://www.sjbaker.org/steve/omniv/optimization_of_rasterization.html" target="_blank">Steve Baker — Optimization of Rasterization</a></li>
+            <li><a href="https://github.com/overbyte/relive" target="_blank">RELive — 实时渲染实验框架</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="01-engine-overview.html">&larr; 游戏引擎架构全景</a>
+            <a href="03-math-foundations.html">数学基础 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

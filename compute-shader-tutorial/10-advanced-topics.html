@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 - 进阶：Ray Tracing 与 Mesh Shader - Compute Shader 入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-performance-optimization.html">← 上一章</a>
+        <a>→ 完成</a>
+    </nav>
+
+    <main>
+        <h1>进阶：Ray Tracing 与 Mesh Shader</h1>
+
+        <p>最后一章不教新算法，而是带你站在更高的视角看 Compute Shader 在整个 GPU 编程生态中的位置。DXR（光线追踪）和 Mesh Shader 代表了现代可编程 GPU 的两大发展方向。</p>
+
+        <h2>Compute Shader 在现代管线中的角色</h2>
+
+        <p>传统渲染管线和 Compute Shader 曾经是两条平行线。现代 GPU 正在把它们融合：</p>
+
+<pre><code class="language-text">传统 DX11 管线：
+  Vertex → Geometry → Raster → Fragment → Framebuffer
+  Compute Shader（独立通道）
+
+DX12 Ultimate 管线：
+  Mesh Shader → Amplification Shader → Ray Tracing Pipeline
+  │
+  ├─ 光线生成（Compute Shader）
+  ├─ 场景更新（Compute Shader）
+  ├─ 几何处理（Mesh Shader）
+  ├─ 着色（Ray Tracing + Fragment）
+  └─ 后处理（Compute Shader）
+
+Compute Shader 不再是"独立通道"，而是现代管线的胶水——
+它在每个阶段之间提供数据准备和转换。</code></pre>
+
+        <h2>DXR：Compute Shader 与光线追踪的结合</h2>
+
+        <p>DXR（DirectX Ray Tracing）的核心是 BVH（层次包围盒）遍历和光线-三角形相交测试。这两个操作天然适合 Compute Shader：</p>
+
+        <h3>光线生成（Ray Generation）</h3>
+
+        <p>每个像素生成一条（或多条）光线，用 Compute Shader 实现：</p>
+
+<pre><code class="language-hlsl">// 光线生成 Shader（DXR 中的一种 Shader 类型）
+// 类似 Compute Shader，但用 [shader("raygeneration")] 标注
+[shader("raygeneration")]
+void RayGenMain()
+{
+    uint2 pixelCoord = DispatchRaysIndex().xy;
+    uint2 rayDescWidth, rayDescHeight;
+    outputTexture.GetDimensions(rayDescWidth, rayDescHeight);
+
+    if (pixelCoord.x &lt; rayDescWidth && pixelCoord.y &lt; rayDescHeight)
+    {
+        // 根据像素坐标生成光线
+        float2 uv = (float2(pixelCoord) + 0.5) / float2(rayDescWidth, rayDescHeight);
+        RayDesc ray;
+        ray.Origin = cameraPosition;
+        ray.Direction = UnpackHalf2x32(rayBuffer[pixelCoord.xy]);
+        ray.TMin = 0.0f;
+        ray.TMax = 1000.0f;
+
+        // 发射光线
+        TraceRay(
+            sceneBVH,                          // Acceleration Structure
+            RAY_FLAG_NONE,                     // 标志
+            0xFF,                              // 掩码
+            0, 0, 0,                           // 索引、实例掩码
+            ray,                               // 光线描述
+            payload                            // 输出载荷
+        );
+
+        // 写入颜色
+        colorOutput[pixelCoord] = payload.color;
+    }
+}</code></pre>
+
+        <h3>Compute Shader 在 DXR 中的辅助角色</h3>
+
+        <p>除了光线生成，Compute Shader 还负责：</p>
+
+        <ul>
+            <li><strong>BVH 构建</strong>：用 Compute Shader 在 GPU 上动态构建 BVH（如 NV 的 OptiX Denoiser 中的 AOVR）</li>
+            <li><strong>光线过滤</strong>：Post-ray-tracing 的 Compute Shader  pass 过滤/去噪</li>
+            <li><strong>场景更新</strong>：动画场景的顶点变换用 Compute Shader 在 GPU 上完成</li>
+            <li><strong>全局光照迭代</strong>：光线追踪全局光照（RTGI）的多 bounce 传递</li>
+        </ul>
+
+        <h2>Mesh Shader：取代固定功能几何管线的可编程方案</h2>
+
+        <p>Mesh Shader（SM 6.5）是 Compute Shader 的"近亲"——它们的语法几乎一样，只是入口点不同：</p>
+
+        <table>
+            <thead>
+                <tr><th>特性</th><th>Compute Shader</th><th>Mesh Shader</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>输出</td><td>任意 UAV/SRV</td><td>图元（三角形/线/点）</td></tr>
+                <tr><td>线程组织</td><td>[numthreads(x, y, z)]</td><td>[numthreads(x, y, z)]（相同）</td></tr>
+                <tr><td>共享内存</td><td>SharedMemory</td><td>SharedMemory（相同）</td></tr>
+                <tr><td>用途</td><td>通用计算</td><td>几何处理（置换、细分、LOD）</td></tr>
+                <tr><td>标注</td><td>[shader("compute")]</td><td>[shader("mesh")]</td></tr>
+            </tbody>
+        </table>
+
+        <p>Mesh Shader 的入口：</p>
+
+<pre><code class="language-hlsl">// Mesh Shader 入口
+[shader("mesh")]
+void MainMesh(
+    out Payload payload,
+    uint blockThreadId : SV_DispatchThreadID)
+{
+    // 每个线程块处理一个 "Mesh Block"
+    // 可以输出任意数量的顶点/图元
+
+    // 设置输出顶点数
+    SetOutputStreamTopology(primTopology);
+    SetOutputVertexCount(vertexCount);
+    SetOutputPrimitiveCount(primitiveCount);
+
+    // 写入顶点流
+    outputStream[positionSemantic].xyz = computeVertexPosition(blockThreadId);
+    outputStream[colorSemantic].rgb = computeVertexColor(blockThreadId);
+
+    // 写入索引（定义三角形）
+    outputStream[SV_PrimitiveID] = computeTriangleIndices(blockThreadId);
+}</code></pre>
+
+        <h3>Mesh Shader vs Compute Shader：何时用哪个？</h3>
+
+        <p>如果你需要在 GPU 上生成几何体（比如置换贴图），两种方案都可以：</p>
+
+        <ul>
+            <li><strong>Compute Shader + Indirect Draw</strong>：Compute Shader 输出顶点到 Buffer，然后用 <code>DrawIndexedInstancedIndirect</code> 绘制。灵活但需要额外的 Buffer 管理和 Barrier。</li>
+            <li><strong>Mesh Shader</strong>：直接在管线内生成几何体，无需中间 Buffer。更高效，但需要 DX12 Level 6.5 支持。</li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>实际选择</strong>：如果你的项目只需要通用计算（图像处理、物理模拟、算法加速），Compute Shader 就够了。只有当你需要可编程的几何管线（动态 LOD、GPU 驱动的实例化、实时细分）时，才需要 Mesh Shader。
+        </div>
+
+        <h2>Compute Shader 的未来方向</h2>
+
+        <h3>Variable Rate Shading (VRS)</h3>
+
+        <p>VRS 允许你用 Compute Shader 生成"阴影图"，告诉 GPU 哪些区域用高分辨率着色、哪些用低分辨率。这在 VR/AR 中特别有用（foveated rendering）。</p>
+
+        <h3>Sampler Feedback</h3>
+
+        <p>SM 6.2 引入的新特性：Compute Shader 可以查询"哪些 mip level 被采样了"，然后按需加载。大幅减少纹理带宽。</p>
+
+        <h3>Shader Execution Reordering (SER)</h3>
+
+        <p>NVIDIA RTX 40 系列引入：Compute Shader 可以重新排序后续 Shader 的执行顺序，以提高空间局部性。对光线追踪性能提升显著。</p>
+
+        <h3>DirectML：Compute Shader 的机器学习方向</h3>
+
+        <p>DirectML 基于 Compute Shader 构建，让你在 DX12 中运行深度学习推理和训练。这是 Compute Shader 最出人意料的应用方向之一：</p>
+
+        <ul>
+            <li><strong>Real-time Super Resolution</strong>：用 AI 将低分辨率图像放大到高分辨率（类似 DLSS）</li>
+            <li><strong>Image Enhancement</strong>：去噪、色彩校正、风格迁移</li>
+            <li><strong>Physics Simulation</strong>：用神经网络替代物理方程做流体/布料模拟</li>
+        </ul>
+
+        <h2>从 Compute Shader 到其他 GPU 编程模型</h2>
+
+        <p>学完这本教程后，你可能想探索 Compute Shader 之外的 GPU 编程世界：</p>
+
+        <table>
+            <thead>
+                <tr><th>技术</th><th>与 Compute Shader 的关系</th><th>学习建议</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>CUDA</strong></td><td>NVIDIA 专有，语法相似但更丰富的语言特性</td><td>如果用 NVIDIA GPU 做科学计算，学 CUDA</td></tr>
+                <tr><td><strong>OpenCL</strong></td><td>跨平台通用计算标准，类似 Compute Shader 但更古老</td><td>嵌入式/跨平台场景</td></tr>
+                <tr><td><strong>Vulkan Compute</strong></td><td>用 GLSL 写的 Compute Shader，通过 Vulkan API 调度</td><td>多平台（PC/移动/嵌入式）</td></tr>
+                <tr><td><strong>WebGPU Compute</strong></td><td>浏览器中的 GPU 计算，WGSL 语言</td><td>Web 应用、GPU 加速的 Web 游戏</td></tr>
+                <tr><td><strong>SPIR-V</strong></td><td>Vulkan/Metal 的中间表示，Compute Shader 的底层形式</td><td>编译器开发、Shader 优化研究</td></tr>
+            </tbody>
+        </table>
+
+        <h2>教程回顾：知识图谱</h2>
+
+        <p>让我们回顾一下这本教程覆盖的全部知识点：</p>
+
+<pre><code class="language-text">Compute Shader 知识体系
+│
+├── 第 01 章：GPU 架构与并行计算
+│   ├── CPU vs GPU 设计哲学
+│   ├── SIMT 模型
+│   └── Warp/Wavefront 调度
+│
+├── 第 02 章：HLSL/GLSL 语言
+│   ├── 数据类型与精度
+│   ├── 资源绑定语义
+│   └── HLSL vs GLSL 差异
+│
+├── 第 03 章：核心概念
+│   ├── Thread Group / Dispatch
+│   ├── Shared Memory
+│   ├── Barrier 同步
+│   └── SRV / UAV 资源模型
+│
+├── 第 04 章：DX12 Pipeline
+│   ├── Device / Queue / Allocator
+│   ├── Root Signature
+│   ├── Descriptor Heap
+│   └── Resource Barrier
+│
+├── 第 05 章：内存模型
+│   ├── Memory Semantics
+│   ├── Barrier 粒度
+│   ├── Atomic 语义
+│   └── Vulkan 对比
+│
+├── 第 06 章：图像滤镜实战
+│   ├── Tile-based 高斯模糊
+│   ├── Separable Blur
+│   ├── Sobel 边缘检测
+│   └── ACES 色调映射
+│
+├── 第 07 章：粒子系统实战
+│   ├── SoA 数据布局
+│   ├── Velocity Verlet
+│   ├── GPU Instancing
+│   └── Append/Consume Buffer
+│
+├── 第 08 章：GPU 算法
+│   ├── Parallel Reduce
+│   ├── Prefix Sum (Scan)
+│   └── Radix Sort
+│
+├── 第 09 章：性能优化
+│   ├── Profiler 使用
+│   ├── Bank Conflict
+│   ├── Occupancy 调优
+│   └── 指令级优化
+│
+└── 第 10 章：进阶方向
+    ├── DXR 光线追踪
+    ├── Mesh Shader
+    ├── DirectML
+    └── WebGPU Compute</code></pre>
+
+        <h2>下一步：你自己的项目</h2>
+
+        <p>学完这本教程后，你可以尝试以下项目来巩固所学：</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>入门项目：图像后处理管线</h4>
+                    <p>实现一个完整的 HDR 渲染管线：ACES 色调映射 → 高斯模糊（Bloom） → Sobel 边缘检测（Outline） → 最终合成。每个效果都是一个独立的 Compute Shader Pass。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>中级项目：流体模拟</h4>
+                    <p>实现 Jos Stam 的 Stable Fluids 算法。用 Compute Shader 做 Advection + Diffusion + Pressure Solve（Pressure Solve 需要 Prefix Sum 或 Jacobi Iteration）。这是 GPU 计算最经典的应用之一。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>高级项目：GPU 驱动的粒子世界</h4>
+                    <p>100 万粒子，每个粒子有位置、速度、颜色、生命周期。用 Spatial Hash 做碰撞检测，用 GPU Instancing 渲染，用 Compute Shader 做物理模拟和渲染的统一循环。这是 Chapter 6+7+8 的综合应用。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>终极项目：实时光线追踪全局光照</h4>
+                    <p>用 DXR + Compute Shader 实现实时 RTGI。Compute Shader 生成光线、BVH 构建、Denoiser。这是现代游戏引擎（UE5、Unity HDRP）的核心技术栈。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>Compute Shader 是现代图形管线的"胶水"——连接渲染、计算、光线追踪</li>
+            <li>DXR 和 Mesh Shader 代表了 Compute Shader 在可编程管线中的新角色</li>
+            <li>WebGPU Compute、DirectML 扩展了 GPU 计算的应用边界</li>
+            <li>从图像滤镜到百万粒子到算法加速，我们已经走过了完整的知识体系</li>
+        </ul>
+
+        <h2>结语</h2>
+
+        <p>Compute Shader 是 GPU 编程中最基础、最通用的接口。学会了它，你就打开了 GPU 加速计算的大门——无论是图像处理、物理模拟、算法加速还是机器学习推理，底层都是 Compute Shader 的思想。</p>
+
+        <p>记住本章开头的优化方法论：<strong>先测量，再优化</strong>。GPU 的行为往往违反直觉，只有 Profiler 说的是真话。</p>
+
+        <p>祝你在这条路上走得更远。</p>
+
+        <div class="callout callout-info">
+            <strong>恭喜完成教程！</strong>
+            <br><br>
+            如果你对本教程有任何问题、建议或发现错误，欢迎通过以下方式反馈。学习是一个持续改进的过程，你的反馈会让它变得更好。
+        </div>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://learn.microsoft.com/en-us/windows/win32/direct3darticles/dxr-overview" target="_blank">DXR Overview (Microsoft)</a></li>
+                <li><a href="https://www.khronos.org/opengl/wiki/Mesh_Shader" target="_blank">OpenGL Wiki: Mesh Shader</a></li>
+                <li><a href="https://developer.nvidia.com/blog/introduction-nvidia-nsight-systems/" target="_blank">NVIDIA: Introduction to Nsight Systems</a></li>
+                <li><a href="https://github.com/Microsoft/DirectX-Graphics-Samples" target="_blank">DX12 Graphics Samples (GitHub)</a></li>
+                <li><a href="https://developer.nvidia.com/gpugems/GPUGems3" target="_blank">GPU Gems 3 (完整免费在线)</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="09-performance-optimization.html">← 性能优化</a>
+            <a href="index.html">↑ 返回目录</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-hlsl.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

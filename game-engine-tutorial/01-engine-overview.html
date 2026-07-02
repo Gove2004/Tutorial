@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 - 游戏引擎架构全景 - 从零构建游戏引擎入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="#">&larr; 上一章</a>
+        <a href="02-rendering-pipeline.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>第一章：游戏引擎架构全景</h1>
+
+        <div class="callout callout-info">
+            <strong>学习目标</strong>：理解游戏引擎的本质——它到底是什么？和框架有什么区别？引擎内部有哪些子系统？这些子系统如何协作？本章建立全局认知，为后续章节深入每个子系统打下基础。
+        </div>
+
+        <h2>引擎 vs 框架 vs 库：本质区别</h2>
+
+        <p>在开始编写引擎之前，我们必须明确一个根本问题：<strong>游戏引擎到底是什么？</strong> 这个定义看似简单，但实践中经常有人把引擎、框架、库混为一谈。三者的本质区别在于<strong>控制权的归属</strong>。</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>库（Library）</th>
+                        <th>框架（Framework）</th>
+                        <th>引擎（Engine）</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>控制权</strong></td>
+                        <td>你的代码调用库</td>
+                        <td>框架调用你的代码（好莱坞原则）</td>
+                        <td>引擎调度一切，你写内容</td>
+                    </tr>
+                    <tr>
+                        <td><strong>侵入性</strong></td>
+                        <td>低——只引入需要的部分</td>
+                        <td>中——需要遵循框架约定</td>
+                        <td>高——整个项目围绕引擎构建</td>
+                    </tr>
+                    <tr>
+                        <td><strong>典型例子</strong></td>
+                        <td>stb_image、glm</td>
+                        <td>SFML、Raylib</td>
+                        <td>Unreal、Godot、自研引擎</td>
+                    </tr>
+                    <tr>
+                        <td><strong>修改能力</strong></td>
+                        <td>不可修改</td>
+                        <td>有限扩展</td>
+                        <td>完全可控</td>
+                    </tr>
+                    <tr>
+                        <td><strong>学习曲线</strong></td>
+                        <td>陡峭（API 多）</td>
+                        <td>中等（学框架范式）</td>
+                        <td>极陡（学整个系统）</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>库：工具箱</h3>
+        <p>库是最小的代码复用单元。你主动调用它，它被动返回结果。比如 <code>stb_image.h</code> 只有一个函数 <code>stbi_load()</code>，你传给它图片路径，它返回像素数据。你不需要理解它怎么解码 PNG，也不需要遵循任何约定——直接调用即可。库的粒度最小，但最灵活。</p>
+
+        <h3>框架：骨架</h3>
+        <p>框架反转了控制流。不是你的代码调用框架，而是框架调用你的代码。这就是著名的<strong>「好莱坞原则」</strong>：「不要给我们打电话，我们会给你打电话。」比如 SFML 框架会调用你编写的 <code>update()</code> 和 <code>render()</code> 函数。你需要按照框架的约定来组织代码，但框架处理了窗口创建、事件循环、生命周期管理等基础设施。</p>
+
+        <h3>引擎：完整的工业流水线</h3>
+        <p>引擎是最高层级的抽象。它不仅提供代码结构，还提供<strong>内容创作工具</strong>（编辑器）、<strong>运行时系统</strong>（渲染、物理、音频）、<strong>开发工作流</strong>（调试器、性能分析器）。在引擎中，你主要是在「使用」引擎提供的功能，而不是「指挥」引擎做什么。Unreal Engine 中你写蓝图或 C++ 脚本，引擎负责调度所有子系统。</p>
+
+        <div class="callout callout-tip">
+            <strong>核心区分标准</strong>：如果你可以随意替换某个部分而不影响其他部分，那是库；如果你需要遵循特定结构才能使用，那是框架；如果你几乎不能替换任何核心部分，只能在其生态内工作，那就是引擎。
+        </div>
+
+        <h2>引擎架构全景</h2>
+
+        <p>一个完整的游戏引擎由多个子系统组成。这些子系统既独立又相互依赖，构成了引擎的「身体器官」。</p>
+
+        <div class="arch-diagram">
+            <div class="arch-layer">
+                <div class="arch-block">用户内容（游戏逻辑、关卡、资产）</div>
+            </div>
+            <div class="arch-divider">┃ 接口层 ┃</div>
+            <div class="arch-layer">
+                <div class="arch-block">编辑器（可视化创作工具）</div>
+            </div>
+            <div class="arch-divider">┃ 运行时 ┃</div>
+            <div class="arch-layer">
+                <div class="arch-row">
+                    <div class="arch-block wide">场景图（Scene Graph）—— 管理游戏世界中的一切对象</div>
+                </div>
+                <div class="arch-row">
+                    <div class="arch-block">渲染子系统<br><small>OpenGL / Vulkan / DirectX</small></div>
+                    <div class="arch-block">物理引擎<br><small>碰撞检测 + 刚体动力学</small></div>
+                    <div class="arch-block">音频系统<br><small>空间音频 + 混音</small></div>
+                </div>
+                <div class="arch-row">
+                    <div class="arch-block">资源管理器<br><small>加载 / 缓存 / 卸载</small></div>
+                    <div class="arch-block">输入系统<br><small>键盘 / 鼠标 / 手柄</small></div>
+                    <div class="arch-block">网络模块<br><small>多人游戏 / 同步</small></div>
+                </div>
+            </div>
+            <div class="arch-divider">┃ 底层 ┃</div>
+            <div class="arch-layer">
+                <div class="arch-row">
+                    <div class="arch-block">操作系统抽象层（OS Abstraction）</div>
+                    <div class="arch-block">内存管理（Allocator / Pool）</div>
+                    <div class="arch-block">日志系统</div>
+                </div>
+            </div>
+        </div>
+
+        <h3>渲染子系统</h3>
+        <p>将场景图描述的世界转换为屏幕上的像素。这是引擎中最复杂、计算量最大的子系统，涉及 GPU 驱动、着色器编译、帧缓冲区管理、后处理效果等。现代引擎的渲染管线可以产生电影级画质，也可能仅为移动端做极简渲染——取决于目标平台。</p>
+
+        <h3>物理引擎</h3>
+        <p>模拟真实世界的物理行为：重力、碰撞、摩擦力、关节约束。物理引擎分为两个层次——<strong>碰撞检测</strong>（Collision Detection，判断物体是否相交）和<strong>刚体动力学</strong>（Rigid Body Dynamics，计算碰撞后的运动变化）。常用算法包括 SAT（分离轴定理）、GJK（Gilbert-Johnson-Keerthi）、EPA（Expanding Polytope Algorithm）。</p>
+
+        <h3>音频系统</h3>
+        <p>管理所有声音的播放、混合和空间化。3D 音频根据物体与摄像机的距离和方向动态调整音量、频率和多普勒效应。高级引擎还支持音频 occlusion（遮挡）和 reverb（混响），即声音穿过墙壁时会衰减，在洞穴中会有回声。</p>
+
+        <h3>场景图</h3>
+        <p>游戏世界中所有对象的层次化组织结构。场景图决定了物体的父子关系、局部坐标与世界坐标的转换、可见性裁剪等。它是连接渲染、物理、音频等子系统的「中枢神经」——所有子系统都从场景图中获取数据。</p>
+
+        <h3>资源管理</h3>
+        <p>负责所有外部数据的加载、缓存、引用计数和卸载。包括纹理、模型、音频、脚本等资源。优秀的资源管理器需要处理异步加载（避免卡顿）、资源流送（大场景按需加载）、热重载（开发时实时生效）等复杂问题。</p>
+
+        <h3>输入系统</h3>
+        <p>将硬件输入（键盘、鼠标、手柄、触摸屏）转化为引擎可理解的事件。跨平台输入系统需要处理不同操作系统的差异（如 Windows 的 WM_KEYDOWN 和 macOS 的 NSEvent），并提供输入映射（Input Mapping）机制让玩家自定义按键。</p>
+
+        <h3>网络模块</h3>
+        <p>处理多人游戏的网络通信，包括状态同步、预测、插值、延迟补偿等。对于单机游戏来说这个模块可能很简单，但对于在线游戏，网络模块的复杂度甚至超过渲染子系统。</p>
+
+        <h2>单体架构 vs 模块化架构</h2>
+
+        <p>引擎的子系统如何组织在一起，直接决定了引擎的可维护性、可扩展性和性能。主要有两种架构风格。</p>
+
+        <h3>单体架构（Monolithic Engine）</h3>
+        <p>所有子系统紧密耦合在一个代码库中。Unreal Engine 是典型代表——渲染、物理、音频、UI 全部在同一个仓库中，彼此直接调用。</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>优势</th>
+                        <th>劣势</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>子系统间调用开销极小（直接函数调用）</td>
+                        <td>修改一个子系统可能影响所有其他子系统</td>
+                    </tr>
+                    <tr>
+                        <td>数据访问路径最短（共享内存）</td>
+                        <td>编译时间长（全量编译）</td>
+                    </tr>
+                    <tr>
+                        <td>API 设计一致，开发者体验好</td>
+                        <td>难以剥离单个子系统用于其他项目</td>
+                    </tr>
+                    <tr>
+                        <td>便于全局优化（如批量渲染 + 物理）</td>
+                        <td>团队规模受限（代码冲突频繁）</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>模块化架构（Modular Engine）</h3>
+        <p>每个子系统作为独立的模块存在，通过明确的接口通信。Godot Engine 是典型代表——渲染、物理、音频各自独立编译，通过信号（Signal）和节点（Node）机制通信。</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>优势</th>
+                        <th>劣势</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>模块间松耦合，易于替换和升级</td>
+                        <td>模块间接口调用带来额外开销</td>
+                    </tr>
+                    <tr>
+                        <td>可按需启用/禁用模块</td>
+                        <td>接口设计不当会导致模块间数据不一致</td>
+                    </tr>
+                    <tr>
+                        <td>支持热加载单个模块</td>
+                        <td>编译速度快但链接复杂度高</td>
+                    </tr>
+                    <tr>
+                        <td>不同项目可复用相同模块</td>
+                        <td>全局优化难度较大</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>架构选择的真相</strong>：没有绝对正确的架构。单体架构适合追求极致性能的大型项目（如 AAA 游戏），模块化架构适合需要快速迭代和多项目复用的中型项目。你的选择应该基于<strong>团队规模</strong>、<strong>项目周期</strong>和<strong>目标平台</strong>，而不是技术偏好。
+        </div>
+
+        <h2>游戏引擎发展史</h2>
+
+        <p>理解引擎的历史演变，能帮助我们理解为什么现代引擎长这样。每一次技术突破都催生了新的架构范式。</p>
+
+        <div class="timeline">
+            <div class="timeline-item">
+                <div class="timeline-year">1993</div>
+                <div class="timeline-content">
+                    <h4>Doom Engine</h4>
+                    <p>Id Software 的 John Carmack 创造了 BSP（Binary Space Partitioning）树用于可见性裁剪，实现了世界上第一个真正意义的「引擎」——游戏逻辑与渲染完全分离。Doom 的 WAD 文件格式是现代 Asset Pipeline 的雏形。</p>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-year">1998</div>
+                <div class="timeline-content">
+                    <h4>Unreal Engine 1</h4>
+                    <p>Epic Games 引入了可视化脚本系统（后来的 Blueprint）、材质编辑器、关卡编辑器。首次将「编辑器工具链」作为引擎的核心组成部分，而不仅仅是代码运行时代码。</p>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-year">2004</div>
+                <div class="timeline-content">
+                    <h4>Source Engine</h4>
+                    <p>Valve 的 Source 引擎引入了物理系统（Havok 集成）、粒子系统、布料模拟。第一次将物理效果从纯数值计算变为玩家可直观感知的视觉表现。</p>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-year">2014</div>
+                <div class="timeline-content">
+                    <h4>Unreal Engine 4</h4>
+                    <p>全面转向 PBR（Physically Based Rendering）渲染管线、蓝图可视化脚本、Lumen 全局光照的前身技术。UE4 确立了「功能即服务」（Features-as-a-Service）的引擎交付模式。</p>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-year">2022</div>
+                <div class="timeline-content">
+                    <h4>Unreal Engine 5</h4>
+                    <p>Nanite（虚拟几何体）和 Lumen（动态全局光照）彻底改变了渲染方式。引擎开始拥抱「无限细节」的理念——不再需要 LOD、不再需要手动烘焙光照。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>引擎选型指南</h2>
+
+        <p>当你准备开发一个游戏项目时，面临的首要决策就是：用什么引擎？这没有标准答案，但有清晰的决策框架。</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>方案</th>
+                        <th>适合场景</th>
+                        <th>不适合场景</th>
+                        <th>开发效率</th>
+                        <th>性能上限</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>自研引擎</strong></td>
+                        <td>特殊需求（如 VR 定制、嵌入式设备）、学习目的</td>
+                        <td>商业游戏、团队 &lt; 5 人、时间紧迫</td>
+                        <td>极低（6-18 个月搭建基础）</td>
+                        <td>极高（完全针对项目优化）</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Unreal Engine</strong></td>
+                        <td>3A 品质、FPS/TPS、开放世界</td>
+                        <td>2D 游戏、超轻量级移动应用</td>
+                        <td>高（蓝图降低门槛）</td>
+                        <td>极高</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Unity</strong></td>
+                        <td>跨平台、手游、独立游戏、VR/AR</td>
+                        <td>超大型开放世界（内存压力）</td>
+                        <td>很高（C# + 丰富 Asset Store）</td>
+                        <td>中高</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Godot</strong></td>
+                        <td>2D 优先、轻量级 3D、开源项目</td>
+                        <td>高端 3D 画面、AAA 级渲染</td>
+                        <td>高（GDScript 上手快）</td>
+                        <td>中</td>
+                    </tr>
+                    <tr>
+                        <td><strong>自定义框架</strong></td>
+                        <td>特殊渲染需求、学术研究</td>
+                        <td>常规游戏开发</td>
+                        <td>极低</td>
+                        <td>取决于实现</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>自研引擎的决策树</h3>
+
+        <details>
+            <summary>点击展开：你是否真的需要自研引擎？</summary>
+            <div class="callout callout-info">
+                <ol>
+                    <li><strong>你的项目有特殊的技术需求吗？</strong>
+                        <ul>
+                            <li>否 → 使用现有引擎（UE/Unity/Godot）</li>
+                            <li>是 → 继续</li>
+                        </ul>
+                    </li>
+                    <li><strong>这个特殊需求能被现有引擎的插件/扩展满足吗？</strong>
+                        <ul>
+                            <li>是 → 使用现有引擎 + 定制插件</li>
+                            <li>否 → 继续</li>
+                        </ul>
+                    </li>
+                    <li><strong>你有至少 2 名以上的资深 C++ 工程师吗？</strong>
+                        <ul>
+                            <li>否 → 考虑 Unity 或 Godot（C# / GDScript 更友好）</li>
+                            <li>是 → 继续</li>
+                        </ul>
+                    </li>
+                    <li><strong>项目周期是否允许 6 个月以上的基础设施搭建？</strong>
+                        <ul>
+                            <li>否 → 使用现有引擎</li>
+                            <li>是 → 可以考虑自研引擎</li>
+                        </ul>
+                    </li>
+                </ol>
+                <p><strong>结论</strong>：90% 的商业项目都不需要自研引擎。自研引擎的主要价值在于学习和控制力，而非生产力。</p>
+            </div>
+        </details>
+
+        <h2>代码示例：引擎启动循环</h2>
+
+        <p>让我们从一个最简单的引擎启动循环开始，理解引擎的基本运行模式。这个示例展示了引擎的核心结构——初始化、主循环、清理。</p>
+
+        <pre><code class="language-cpp">#include &lt;memory&gt;
+#include &lt;chrono&gt;
+#include &lt;thread&gt;
+#include &lt;functional&gt;
+
+// 引擎核心——管理所有子系统的生命周期
+class Engine {
+public:
+    using Clock = std::chrono::steady_clock;
+    using Duration = std::chrono::duration&lt;float&gt;;
+
+    Engine(const char* name, uint32_t width, uint32_t height)
+        : m_name(name), m_running(false), m_deltaTime(0.0f)
+    {
+        // 1. 按依赖顺序初始化子系统
+        // 底层优先：内存 → 日志 → OS抽象
+        m_memory = std::make_unique&lt;MemoryManager&gt;(128_MB);
+        m_logger = std::make_unique&lt;Logger&gt;("engine.log");
+        m_os = std::make_unique&lt;OSAbstraction&gt;();
+
+        // 中间层：输入 → 资源 → 场景
+        m_input = std::make_unique&lt;InputManager&gt;(*m_os);
+        m_resourceMgr = std::make_unique&lt;ResourceManager&gt;(*m_memory);
+        m_scene = std::make_unique&lt;SceneGraph&gt;();
+
+        // 顶层：渲染 → 物理 → 音频
+        m_renderer = std::make_unique&lt;Renderer&gt;(width, height, *m_os);
+        m_physics = std::make_unique&lt;PhysicsWorld&gt;();
+        m_audio = std::make_unique&lt;AudioSystem&gt;();
+
+        m_logger-&gt;info("{} initialized successfully", m_name);
+    }
+
+    // 启动引擎主循环
+    int run()
+    {
+        m_running = true;
+        auto lastFrame = Clock::now();
+
+        while (m_running) {
+            // 计算帧时间（固定时间步长用于物理）
+            auto now = Clock::now();
+            m_deltaTime = std::chrono::duration_cast&lt;Duration&gt;(now - lastFrame).count();
+            lastFrame = now;
+
+            // 处理输入事件
+            m_input-&gt;pollEvents();
+
+            // 更新场景图（变换传播、脏标记清理）
+            m_scene-&gt;update(m_deltaTime);
+
+            // 物理模拟（在渲染前执行）
+            m_physics-&gt;step(m_deltaTime);
+
+            // 渲染（读取场景图和物理世界状态）
+            m_renderer-&gt;render(*m_scene, *m_physics);
+
+            // 音频更新（根据物体位置更新空间音频）
+            m_audio-&gt;update(*m_scene);
+
+            // 交换前后缓冲区
+            m_renderer-&gt;swapBuffers();
+        }
+
+        return shutdown();
+    }
+
+private:
+    int shutdown()
+    {
+        m_running = false;
+        // 按初始化逆序销毁
+        m_audio.reset();
+        m_physics.reset();
+        m_renderer.reset();
+        m_scene.reset();
+        m_resourceMgr.reset();
+        m_input.reset();
+        m_os.reset();
+        m_logger.reset();
+        m_memory.reset();
+        m_logger-&gt;info("{} shut down cleanly", m_name);
+        return 0;
+    }
+
+    std::string m_name;
+    bool m_running;
+    float m_deltaTime;
+
+    // 子系统指针（实际项目中用智能指针或对象池）
+    std::unique_ptr&lt;MemoryManager&gt; m_memory;
+    std::unique_ptr&lt;Logger&gt; m_logger;
+    std::unique_ptr&lt;OSAbstraction&gt; m_os;
+    std::unique_ptr&lt;InputManager&gt; m_input;
+    std::unique_ptr&lt;ResourceManager&gt; m_resourceMgr;
+    std::unique_ptr&lt;SceneGraph&gt; m_scene;
+    std::unique_ptr&lt;Renderer&gt; m_renderer;
+    std::unique_ptr&lt;PhysicsWorld&gt; m_physics;
+    std::unique_ptr&lt;AudioSystem&gt; m_audio;
+};
+
+// 使用示例
+int main()
+{
+    Engine engine("MyGameEngine", 1920, 1080);
+    return engine.run();
+}</code></pre>
+
+        <h3>关键设计要点</h3>
+
+        <div class="callout callout-info">
+            <ul>
+                <li><strong>初始化顺序</strong>：必须从底层到顶层。OS 抽象层最先初始化（因为其他子系统依赖它），最后销毁。</li>
+                <li><strong>主循环结构</strong>：输入 → 场景更新 → 物理 → 渲染 → 音频 → 缓冲交换。这个顺序很重要——物理必须在渲染前完成，因为渲染需要读取物理世界的位置数据。</li>
+                <li><strong>Delta Time</strong>：每帧的时间差，用于使物理模拟和游戏逻辑与帧率无关。</li>
+                <li><strong>子系统依赖</strong>：渲染依赖场景图和物理世界，音频依赖场景图，输入不依赖任何其他子系统。</li>
+            </ul>
+        </div>
+
+        <h2>本章小结</h2>
+
+        <div class="callout callout-tip">
+            <strong>本章核心知识点回顾</strong>：
+            <ol>
+                <li><strong>引擎 vs 框架 vs 库</strong>：区别在于控制权的归属——谁调用谁。</li>
+                <li><strong>引擎六大子系统</strong>：渲染、物理、音频、场景图、资源管理、输入。</li>
+                <li><strong>单体 vs 模块化</strong>：没有最优解，只有最适合项目规模和需求的解。</li>
+                <li><strong>引擎发展史</strong>：从 Doom 的 BSP 到 UE5 的 Nanite，每一次突破都改变了游戏规则。</li>
+                <li><strong>引擎选型</strong>：90% 的项目应该使用现有引擎，自研引擎主要用于学习和特殊需求。</li>
+                <li><strong>引擎启动循环</strong>：初始化 → 主循环（输入→场景→物理→渲染→音频）→ 清理。</li>
+            </ol>
+        </div>
+
+        <h2>下一章预告</h2>
+
+        <p>第二章我们将深入引擎最核心的子系统——<strong>渲染管线</strong>。你将理解从顶点数据到屏幕像素的完整流程，学习 Draw Call 优化、Batch Rendering、Instancing 等关键技术。这些知识将直接决定你的引擎能渲染多少物体、以什么帧率运行。</p>
+
+        <h2>延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://www.gameengineperspective.com/" target="_blank">Game Engine Perspective — 深度分析各大引擎架构</a></li>
+            <li><a href="https://fgiesen.wordpress.com/" target="_blank">Fedora Dsign's Blog — 渲染技术系列文章</a></li>
+            <li><a href="https://github.com/sgorlinski/GameEngineFromScratch" target="_blank">GameEngineFromScratch — GitHub 开源参考项目</a></li>
+            <li><a href="https://www.amazon.com/Game-Engine-Architecture-Jason-Gregg/dp/1484204151" target="_blank">Game Engine Architecture (Jason Gregory, 2nd Edition)</a></li>
+            <li><a href="https://developer.nvidia.com/gamedev" target="_blank">NVIDIA Game Developer Technology — GPU 架构与渲染技术</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">&larr; 目录</a>
+            <a href="02-rendering-pipeline.html">渲染管线 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

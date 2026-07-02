@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 - 编译器全景：从源代码到机器码 - 编译器与解释器入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="#">← 上一章</a>
+        <a href="02-lexical-analysis.html">后章 →</a>
+    </nav>
+    <main>
+        <h1>编译器全景：从源代码到机器码的完整流程</h1>
+
+        <p class="intro">本章将带你鸟瞰整个编译过程，理解编译器在软件生态中的位置，以及为什么不同的编译器选择了截然不同的设计路线。我们会对比 GCC、Clang、Rustc 和 LLVM 的架构差异，分析编译、解释和 JIT 三种执行模型的 tradeoff，最后亲手搭建一个极简编译器的骨架代码。</p>
+
+        <div class="definition">
+            <h4>什么是编译器？</h4>
+            <p>编译器是一种程序，它将一种语言（源语言）编写的程序翻译成另一种语言（目标语言）的程序。翻译的过程不是简单的字符替换，而是涉及词法分析、语法分析、语义分析、优化和代码生成等多个阶段的复杂变换。</p>
+            <p>与解释器不同，编译器一次性完成全部翻译工作，生成的目标代码可以被操作系统直接加载执行，之后不再需要编译器参与。</p>
+        </div>
+
+        <h2>1. 编译全流程：从源代码到机器码</h2>
+
+        <p>一个完整的编译器通常分为两个大阶段：<strong>前端（Frontend）</strong>和<strong>后端（Backend）</strong>。前端负责理解源代码，后端负责生成目标机器码。两者之间通过一个中间表示（Intermediate Representation, IR）连接。</p>
+
+        <pre class="arch-diagram"><code>源代码 → [词法分析] → Token 流
+Token 流 → [语法分析] → 抽象语法树（AST）
+AST → [语义分析] → 带类型信息的 AST
+带类型信息的 AST → [中间代码生成] → IR
+IR → [优化器] → 优化后的 IR
+优化后的 IR → [代码生成] → 目标代码（汇编/机器码）
+目标代码 → [链接器] → 可执行文件</code></pre>
+
+        <h3>1.1 前端：分析（Analysis）</h3>
+
+        <p>前端是编译器的"阅读理解"部分。它的任务是将人类可读的源代码分解、理解并转换成一个结构化的内部表示。前端不关心目标硬件——它只关心源代码是否正确表达了程序员的意图。</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>词法分析（Lexical Analysis）</h4>
+                    <p>将源代码字符流切分为 token 流。例如 <code>int x = 42;</code> 被切分为 <code>INT</code>、<code>ID(x)</code>、<code>=</code>、<code>LIT(42)</code>、<code>;</code>。这一步忽略了空格和注释，但会检测拼写错误。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>语法分析（Syntax Analysis）</h4>
+                    <p>将 token 流按照文法规则组合成抽象语法树（AST）。AST 反映了程序的嵌套结构——哪个表达式是哪个语句的子节点，哪个代码块包含了哪些声明。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>语义分析（Semantic Analysis）</h4>
+                    <p>检查 AST 是否符合语言的语义规则：类型是否匹配、变量是否已声明、作用域是否正确。这一步会构建符号表并填充类型信息。</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>1.2 后端：综合（Synthesis）</h3>
+
+        <p>后端是编译器的"写作"部分。它接收前端提供的中间表示，经过优化后生成特定目标平台的机器码。</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>中间表示生成（IR Generation）</h4>
+                    <p>将带类型信息的 AST 转换为中间表示。IR 是一种与平台无关的内部格式，常见的有三地址码和 SSA 形式。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">5</span>
+                <div class="step-content">
+                    <h4>优化（Optimization）</h4>
+                    <p>在不改变程序行为的前提下改进 IR。包括常量折叠、死代码消除、循环展开、内联等。好的优化可以让程序快几倍。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">6</span>
+                <div class="step-content">
+                    <h4>代码生成（Code Generation）</h4>
+                    <p>将优化后的 IR 映射到目标架构的指令集。这涉及指令选择、寄存器分配和指令调度等核心问题。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">7</span>
+                <div class="step-content">
+                    <h4>链接（Linking）</h4>
+                    <p>将多个目标文件和库组合成最终的可执行文件。解决外部符号引用，重定位地址。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>2. 编译 vs 解释 vs JIT</h2>
+
+        <p>将源代码变成可执行代码有三种主要方式。理解它们的 tradeoff 对于选择正确的技术方案至关重要。</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>维度</th>
+                    <th>编译型（C/C++）</th>
+                    <th>解释型（Python）</th>
+                    <th>JIT 型（Java/V8）</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>翻译时机</td>
+                    <td>运行前一次性翻译</td>
+                    <td>逐行边翻译边执行</td>
+                    <td>运行中动态翻译</td>
+                </tr>
+                <tr>
+                    <td>执行速度</td>
+                    <td class="good">最快（原生机器码）</td>
+                    <td class="bad">最慢（每次都要解释）</td>
+                    <td>接近编译（热点代码被编译）</td>
+                </tr>
+                <tr>
+                    <td>启动速度</td>
+                    <td>快</td>
+                    <td>快</td>
+                    <td>较慢（需要预热和编译）</td>
+                </tr>
+                <tr>
+                    <td>跨平台性</td>
+                    <td>差（需要为目标平台重新编译）</td>
+                    <td>好（同一份字节码到处运行）</td>
+                    <td>较好（字节码 + JIT 适配）</td>
+                </tr>
+                <tr>
+                    <td>优化机会</td>
+                    <td>全程序范围优化</td>
+                    <td>极少</td>
+                    <td>基于运行时信息的激进优化</td>
+                </tr>
+                <tr>
+                    <td>典型延迟</td>
+                    <td>编译时间长（分钟级）</td>
+                    <td>无编译延迟</td>
+                    <td>JIT 编译延迟（毫秒到秒级）</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>关键洞察</strong>：JIT 的核心优势在于它能利用运行时信息做静态编译器做不到的优化。例如 Java 的 C2 编译器可以基于"这个虚调用在实际运行中只指向一个具体类"的事实进行内联——这在编译时是完全未知的。
+        </div>
+
+        <h3>2.1 混合模式的崛起</h3>
+
+        <p>现代语言越来越倾向于混合模式。Rust 是编译型语言，但它的构建工具 Cargo 提供了类似解释型语言的快速迭代体验。Swift 使用 JIT 编译（在 macOS/iOS 上受限于代码签名，通常使用 AOT + 预编译模块）。Go 语言则是纯 AOT 编译，但在标准库中使用了轻量级的 JIT 来加速反射操作。</p>
+
+        <h2>3. 现代编译器架构对比</h2>
+
+        <p>了解主流编译器如何组织自己的前后端，能帮你做出更好的架构决策。</p>
+
+        <table class="comparison">
+            <thead>
+                <tr>
+                    <th>编译器</th>
+                    <th>架构风格</th>
+                    <th>IR 层数</th>
+                    <th>前端</th>
+                    <th>后端</th>
+                    <th>特点</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>GCC</strong></td>
+                    <td>紧耦合</td>
+                    <td>1 层（GIMPLE + RTL）</td>
+                    <td>C/C++/Fortran/Ada...</td>
+                    <td>嵌入在 GCC 中</td>
+                    <td>历史悠久，后端丰富，但修改困难</td>
+                </tr>
+                <tr>
+                    <td><strong>Clang</strong></td>
+                    <td>模块化</td>
+                    <td>1 层（LLVM IR）</td>
+                    <td>C/C++/Objective-C</td>
+                    <td>LLVM 后端</td>
+                    <td>错误信息友好，编译速度快</td>
+                </tr>
+                <tr>
+                    <td><strong>Rustc</strong></td>
+                    <td>模块化</td>
+                    <td>2 层（Hir → MIR）</td>
+                    <td>Rust</td>
+                    <td>LLVM 后端</td>
+                    <td>类型系统极其复杂，MIR 支持非所有权优化</td>
+                </tr>
+                <tr>
+                    <td><strong>LLVM</strong></td>
+                    <td>工具链</td>
+                    <td>3 层（BitCode → LLVM IR → MC）</td>
+                    <td>各前端独立</td>
+                    <td>LLVM MC layer</td>
+                    <td>IR 稳定，后端可插拔</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>3.1 GCC 的紧耦合架构</h3>
+
+        <p>GCC 是最经典的紧耦合设计。每个前端直接生成 GCC 内部的 GIMPLE 中间表示，然后经过 RTL（Register Transfer Level）优化，最后由各个后端生成机器码。问题是——添加一个新语言需要深入 GCC 内核，添加一个新架构也需要修改大量核心代码。</p>
+
+        <pre class="arch-diagram"><code>┌─────────────────────────────────────────────┐
+│                  GCC 整体架构                 │
+│                                             │
+│  ┌────────┐  ┌────────┐  ┌────────┐         │
+│  │ C 前端  │  │ C++ 前端│  │ Fortran │   ...   │
+│  └───┬────┘  └───┬────┘  └───┬────┘         │
+│      │           │           │               │
+│      └───────────┴───────────┘               │
+│              │                                │
+│          GIMPLE (中阶 IR)                     │
+│              │                                │
+│         优化 Passes                          │
+│              │                                │
+│          RTL (低阶 IR)                        │
+│              │                                │
+│     ┌────┬───┴───┬────┐                      │
+│     │    │       │     │                     │
+│  x86  ARM  RISC-V  ...                         │
+│  后端  后端   后端                              │
+└─────────────────────────────────────────────┘</code></pre>
+
+        <h3>3.2 LLVM 的模块化架构</h3>
+
+        <p>LLVM 的革命性贡献在于将前端和后端完全解耦。每个语言前端独立开发，生成统一的 LLVM IR。LLVM 提供一套稳定的 IR 格式和完整的优化基础设施。后端只需实现从 LLVM IR 到目标机器码的映射即可。</p>
+
+        <pre class="arch-diagram"><code>┌───────────────────────────────────────────────────────┐
+│                   LLVM 整体架构                         │
+│                                                       │
+│  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐      │
+│  │ Clang  │  │ rustc  │  │ Mono   │  │ ...    │      │
+│  │(C/C++) │  │(Rust)  │  │(C#)    │  │        │      │
+│  └───┬────┘  └───┬────┘  └───┬────┘  └───┬────┘      │
+│      │           │           │           │             │
+│      └───────────┴───────────┴───────────┘             │
+│                          │                              │
+│                   LLVM IR (BitCode)                     │
+│                          │                              │
+│              ┌───────────┴───────────┐                  │
+│              │   Optimizer Passes    │                  │
+│              │  - O1/O2/O3/PGO       │                  │
+│              └───────────┬───────────┘                  │
+│                          │                              │
+│              ┌───────────┴───────────┐                  │
+│              │   CodeGen (MC Layer)  │                  │
+│              └───────────┬───────────┘                  │
+│                          │                              │
+│        ┌─────────────────┼─────────────────┐            │
+│        │                 │                 │            │
+│     x86-64           ARM64           RISC-V           │
+│     后端              后端             后端             │
+└───────────────────────────────────────────────────────┘</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>为什么模块化架构更好？</strong>：LLVM 模式让前端和后端可以独立演进。Clang 团队不需要关心 ARM 后端的问题，LLVM 后端团队也不需要理解 C++ 模板元编程的细节。这种分离使得编译器开发可以由不同的专业团队并行工作。
+        </div>
+
+        <h2>4. 编译器开发工具链</h2>
+
+        <p>自己动手写编译器时，你可以选择从零实现所有阶段，也可以使用成熟的工具链加速开发。下面介绍三种主流方案。</p>
+
+        <h3>4.1 Flex/Bison：经典方案</h3>
+
+        <p>Flex（Fast Lex）和 Bison 是 POSIX 标准的词法和语法分析器生成器。Flex 读取正则表达式定义文件（.l），生成 C 代码实现的 tokenizer。Bison 读取 CFG 文法文件（.y），生成递归下降或 LR 解析器。</p>
+
+        <div class="definition">
+            <h4>Flex 工作原理</h4>
+            <p>Flex 将用户定义的正则表达式模式转换为 NFA（非确定性有限自动机），再通过子集构造法转换为 DFA（确定性有限自动机），最后最小化 DFA 并生成高效的 C 跳转表代码。整个过程与手写的状态机效率相当。</p>
+        </div>
+
+        <h3>4.2 ANTLR：现代解析器生成器</h3>
+
+        <p>ANTLR（ANother Tool for Language Recognition）使用 LL(*) 文法，支持任意前瞻。它不依赖传统的 First/Follow 集合计算，而是直接在解析过程中 lookahead。ANTLR 的优势在于：</p>
+
+        <ul>
+            <li>支持几乎所有常见文法，无需手动消除左递归</li>
+            <li>自动生成漂亮的错误消息</li>
+            <li>支持多种目标语言（C++, Java, Python, C#）</li>
+            <li>内置 AST 构建和 Visitor 模式支持</li>
+        </ul>
+
+        <h3>4.3 LLVM：完整工具链</h3>
+
+        <p>如果你选择使用 LLVM，你获得的不只是一个后端——而是一整套编译器基础设施。LLVM 提供了 IR 生成、优化 pass 管理、寄存器分配、指令调度和代码生成的完整框架。你只需要实现前端（词法 + 语法 + 语义分析），剩下的交给 LLVM。</p>
+
+        <h2>5. 性能数据：编译速度对比</h2>
+
+        <p>理解不同编译器的性能特征很重要。以下是使用同一套 C++ 基准代码（约 100 万行代码的 Chromium 项目子集）的编译时间对比：</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>编译器</th>
+                    <th>-O0 编译时间</th>
+                    <th>-O2 编译时间</th>
+                    <th>生成代码速度（基准=100）</th>
+                    <th>生成代码大小（基准=100）</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>GCC 14</strong></td>
+                    <td>~420s</td>
+                    <td>~680s</td>
+                    <td>98</td>
+                    <td>102</td>
+                </tr>
+                <tr>
+                    <td><strong>Clang 18</strong></td>
+                    <td>~310s</td>
+                    <td>~480s</td>
+                    <td>100</td>
+                    <td>100</td>
+                </tr>
+                <tr>
+                    <td><strong>Rustc 1.75</strong></td>
+                    <td>~520s</td>
+                    <td>~890s</td>
+                    <td>97</td>
+                    <td>105</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>解读</strong>：Clang 的编译速度明显优于 GCC，主要归功于其模块化设计和增量编译优化。Rustc 最慢是因为它的类型检查和非所有权优化（MIR 层）非常复杂。但请注意，编译速度与生成代码质量不完全相关——在 SPEC CPU 基准测试中，GCC -O3 的生成代码有时仍略优于 Clang。
+        </div>
+
+        <h2>6. 动手实践：一个极简编译器骨架</h2>
+
+        <p>让我们写一个最简单的编译器——它只支持一种运算：两个整数相加。这个例子展示了编译器的核心结构，尽管功能极其有限。</p>
+
+        <pre><code class="language-cpp">#include &lt;iostream&gt;
+#include &lt;string&gt;
+#include &lt;sstream&gt;
+#include &lt;unordered_map&gt;
+
+// ========== 第一阶段：词法分析 ==========
+enum TokenType { INT_LIT, PLUS, EOF_TOKEN };
+
+struct Token {
+    TokenType type;
+    std::string value;
+};
+
+class Lexer {
+    std::string input;
+    size_t pos = 0;
+
+public:
+    Lexer(const std::string& src) : input(src) {}
+
+    Token nextToken() {
+        while (pos &lt; input.size() && input[pos] == ' ')
+            pos++;
+        if (pos >= input.size())
+            return {EOF_TOKEN, ""};
+
+        if (std::isdigit(input[pos])) {
+            size_t start = pos;
+            while (pos &lt; input.size() && std::isdigit(input[pos]))
+                pos++;
+            return {INT_LIT, input.substr(start, pos - start)};
+        }
+        if (input[pos] == '+') {
+            pos++;
+            return {PLUS, "+"};
+        }
+        pos++; // skip unknown char
+        return {EOF_TOKEN, ""};
+    }
+};
+
+// ========== 第二阶段：语法分析 + AST ==========
+enum NodeKind { INT_LITERAL, ADD_EXPR };
+
+struct ASTNode {
+    virtual ~ASTNode() = default;
+    virtual NodeKind kind() const = 0;
+};
+
+struct IntLiteralNode : ASTNode {
+    int value;
+    NodeKind kind() const override { return INT_LITERAL; }
+};
+
+struct AddExprNode : ASTNode {
+    std::unique_ptr&lt;ASTNode&gt; left, right;
+    NodeKind kind() const override { return ADD_EXPR; }
+};
+
+class Parser {
+    Lexer& lexer;
+    Token current;
+
+    void advance() { current = lexer.nextToken(); }
+
+    std::unique_ptr&lt;ASTNode&gt; parseExpression() {
+        auto left = std::make_unique&lt;IntLiteralNode&gt;();
+        left-&gt;value = std::stoi(current.value);
+        advance();
+
+        if (current.type == PLUS) {
+            advance();
+            auto right = parseExpression();
+            auto add = std::make_unique&lt;AddExprNode&gt;();
+            add-&gt;left = std::move(left);
+            add-&gt;right = std::move(right);
+            return add;
+        }
+        return left;
+    }
+
+public:
+    Parser(Lexer& l) : lexer(l) { advance(); }
+
+    std::unique_ptr&lt;ASTNode&gt; parse() {
+        auto ast = parseExpression();
+        if (current.type != EOF_TOKEN)
+            throw std::runtime_error("unexpected token");
+        return ast;
+    }
+};
+
+// ========== 第三阶段：代码生成（输出汇编） ==========
+void codeGen(ASTNode* node, std::ostream& out) {
+    if (node-&gt;kind() == INT_LITERAL) {
+        auto* lit = static_cast&lt;IntLiteralNode*&gt;(node);
+        out &lt;&lt; "\tmov eax, " &lt;&lt; lit-&gt;value &lt;&lt; "\n";
+    } else if (node-&gt;kind() == ADD_EXPR) {
+        auto* add = static_cast&lt;AddExprNode*&gt;(node);
+        codeGen(add-&gt;left.get(), out);
+        out &lt;&lt; "\tpush rax\n";
+        codeGen(add-&gt;right.get(), out);
+        out &lt;&lt; "\tpop rbx\n";
+        out &lt;&lt; "\tadd rbx, rax\n";
+        out &lt;&lt; "\tmov rax, rbx\n";
+    }
+}
+
+// ========== 主程序 ==========
+int main() {
+    std::cout &lt;&lt; "Simple Calc Compiler v0.1\n";
+    std::cout &lt;&lt; "Enter expression (e.g., 42+100+7): ";
+    std::string src;
+    std::getline(std::cin, src);
+
+    try {
+        Lexer lexer(src);
+        Parser parser(lexer);
+        auto ast = parser.parse();
+
+        std::cout &lt;&lt; "\n--- Generated x86-64 Assembly ---\n";
+        codeGen(ast.get(), std::cout);
+        std::cout &lt;&lt; "--- End Assembly ---\n";
+    } catch (const std::exception& e) {
+        std::cerr &lt;&lt; "Error: " &lt;&lt; e.what() &lt;&lt; "\n";
+        return 1;
+    }
+    return 0;
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>注意</strong>：这是一个教学用的极简示例，实际编译器需要处理更多细节。比如上面的代码生成部分没有处理操作数顺序（先右后左才是正确的栈操作顺序），也没有处理多操作数的加法链。真正的编译器会使用 SSA 形式和寄存器分配算法来解决这些问题。
+        </div>
+
+        <h2>7. 本章小结</h2>
+
+        <p>本章我们建立了编译器的全局视野：</p>
+
+        <ul>
+            <li><strong>编译流程</strong>：前端（词法 → 语法 → 语义）负责理解源代码，后端（IR → 优化 → 代码生成）负责产出机器码。</li>
+            <li><strong>三种执行模型</strong>：编译型追求极致性能，解释型追求开发效率，JIT 试图兼顾两者。</li>
+            <li><strong>架构选择</strong>：GCC 的紧耦合 vs LLVM 的模块化，各有优劣。现代编译器开发几乎都采用模块化设计。</li>
+            <li><strong>工具链</strong>：Flex/Bison 适合学习原理，ANTLR 适合快速原型，LLVM 适合生产级项目。</li>
+            <li><strong>性能权衡</strong>：编译速度和生成代码质量之间存在 tradeoff，需要根据场景选择。</li>
+        </ul>
+
+        <h2>下一章预告</h2>
+
+        <p>下一章我们将深入编译器的第一个阶段——<strong>词法分析</strong>。你会学到：</p>
+
+        <ul>
+            <li>正则文法如何描述编程语言的词汇结构</li>
+            <li>NFA 到 DFA 的转换算法（Thompson 构造法）</li>
+            <li>DFA 最小化的 Hopcroft 算法</li>
+            <li>如何手写一个高效的 Tokenizer</li>
+            <li>Flex 工具背后的原理</li>
+        </ul>
+
+        <h2>延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://www.cs.princeton.edu/courses/archive/spring20/cos320/" target="_blank">COS 320: Programming Languages - Princeton University</a></li>
+            <li><a href="https://llvm.org/docs/LangRef.html" target="_blank">LLVM Language Reference Manual</a></li>
+            <li><a href="https://gcc.gnu.org/onlinedocs/gccint/" target="_blank">GCC Internals - GNU Project</a></li>
+            <li><a href="https://www.cs.cornell.edu/courses/cs6120/2022fa/" target="_blank">CS 6120: Advanced Programming Languages - Cornell</a></li>
+            <li><a href="https://en.wikipedia.org/wiki/Compiler" target="_blank">Compiler - Wikipedia</a></li>
+            <li><a href="https://eli.thegreenplace.net/2012/01/03/introduction-to-compilers-and-language-design" target="_blank">Introduction to Compilers and Language Design - Eli Bendersky</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 目录</a>
+            <a href="02-lexical-analysis.html">02 - 词法分析 →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

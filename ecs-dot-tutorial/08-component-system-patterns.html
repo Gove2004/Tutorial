@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>08 - ChunkIterator 与并行 Job 模式 - ECS 与 Unity DOTS 入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="07-ecs-implementation.html">&larr; 上一章</a>
+        <a href="09-hybrid-ecs.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>08 - ChunkIterator 与并行 Job 模式</h1>
+        <p class="intro">ECS 提供了三种主要的并行 Job 编写模式：ForEach API、IJobChunk 和 IJobEntity。每种模式有不同的性能特征和适用场景。本章深入比较这三种模式，讲解它们的内部实现原理，以及如何根据数据规模和组件复杂度选择最优方案。</p>
+
+        <h2>8.1 ForEach API：最简单的并行语法</h2>
+
+        <p>ForEach 是 ECS 中最接近"自然语言"的并行 Job 语法。它在编译时被转换为高效的 IJobChunk 实现，同时保持了简洁的代码可读性。</p>
+
+        <h3>8.1.1 基本用法</h3>
+
+        <pre><code class="language-cs">// 最基本的 ForEach 写法
+public partial struct MovementSystem : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        float deltaTime = SystemAPI.Time.DeltaTime;
+
+        foreach (var (position, velocity) in
+            SystemAPI.Query&lt;RefRW&lt;Position&gt;, RefRO&lt;Velocity&gt;&gt;())
+        {
+            position.Value += velocity.Value * deltaTime;
+        }
+    }
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>8.1.2 ForEach 的编译时转换</h3>
+
+        <p>ForEach 不是简单的语法糖——它在编译时被转换为完整的 IJobChunk 实现：</p>
+
+        <div class="arch-diagram">
+ForEach 编译过程：
+
+源代码：
+  foreach (var (pos, vel) in SystemAPI.Query&lt;RefRW&lt;Position&gt;, RefRO&lt;Velocity&gt;&gt;())
+  {
+      pos.Value += vel.Value * deltaTime;
+  }
+
+↓ Burst 编译器转换
+
+等效的 IJobChunk 代码：
+  public struct MovementJob : IJobChunk
+  {
+      public ArchetypeChunkArrayType PositionType;
+      public ArchetypeChunkArrayType VelocityType;
+      public float DeltaTime;
+
+      public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
+      {
+          var positions = chunk.GetNativeArray(ref PositionType);
+          var velocities = chunk.GetNativeArray(ref VelocityType);
+
+          for (int i = 0; i &lt; chunk.EntityCount; i++)
+          {
+              positions[i] += velocities[i] * DeltaTime;
+          }
+      }
+  }
+
+关键优化：
+1. ArchetypeChunk 缓存了组件数组的指针
+2. GetNativeArray() 是 O(1) 操作（只是返回缓存的指针）
+3. 循环由 Burst 自动向量化
+</div>
+
+        <h3>8.1.3 ForEach 的过滤选项</h3>
+
+        <pre><code class="language-cs">// WithAll：只处理同时有 Health 和 Shield 的实体
+foreach (var (pos, vel) in SystemAPI.Query&lt;RefRW&lt;Position&gt;, RefRO&lt;Velocity&gt;&gt;()
+    .WithAll&lt;Health, Shield&gt;())
+{
+    pos.Value += vel.Value * deltaTime;
+}
+
+// WithNone：排除有 Dead 标签的实体（无需额外判断）
+foreach (var (pos, vel) in SystemAPI.Query&lt;RefRW&lt;Position&gt;, RefRO&lt;Velocity&gt;&gt;()
+    .WithNone&lt;Dead&gt;())
+{
+    pos.Value += vel.Value * deltaTime;
+}
+
+// WithAny：处理有 Velocity 或 AngularVelocity 的实体
+foreach (var (pos, vel) in SystemAPI.Query&lt;RefRW&lt;Position&gt;&gt;()
+    .WithAny&lt;Velocity, AngularVelocity&gt;())
+{
+    pos.Value += vel.Value * deltaTime;
+}
+
+// WithFragment：处理特定范围内的实体
+foreach (var (pos, vel) in SystemAPI.Query&lt;RefRW&lt;Position&gt;, RefRO&lt;Velocity&gt;&gt;()
+    .WithFragment(0, 100))  // 只处理前 100 个实体
+{
+    pos.Value += vel.Value * deltaTime;
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>8.1.4 ForEach 的性能特点</h3>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>代码简洁度</td><td>★★★★★ 最简洁</td></tr>
+                <tr><td>运行时性能</td><td>★★★★☆ 接近 IJobChunk</td></tr>
+                <tr><td>灵活性</td><td>★★★☆☆ 中等</td></tr>
+                <tr><td>适用场景</td><td>大多数常规 System</td></tr>
+                <tr><td>最大组件数</td><td>~10 个组件（超过后编译时间增加）</td></tr>
+            </tbody>
+        </table>
+
+        <h2>8.2 IJobChunk：原始性能</h2>
+
+        <p>IJobChunk 是 ECS 中性能最高的并行 Job 接口。它直接操作 ArchetypeChunk，允许你以最小的抽象层级访问组件数据。</p>
+
+        <h3>8.2.1 IJobChunk 的基本结构</h3>
+
+        <pre><code class="language-cs">// IJobChunk 的完整实现
+[BurstCompile]
+public struct PhysicsUpdateJob : IJobChunk
+{
+    // 组件类型——在 Job 调度时由引擎填充
+    public ArchetypeChunkComponentType&lt;Position&gt; positionType;
+    public ArchetypeChunkComponentType&lt;Velocity&gt; velocityType;
+    public ArchetypeChunkComponentType&lt;PhysicsBody&gt; physicsBodyType;
+
+    public float DeltaTime;
+    public float Gravity;
+
+    // EntityQuery 用来获取需要处理的 Archetype
+    public EntityQueryDescriptor QueryDescriptor;
+
+    // Execute 是核心方法
+    // chunk: 当前正在处理的 ArchetypeChunk
+    // chunkIndex: 该 Archetype 中的 Chunk 索引
+    // firstEntityIndex: 该 Chunk 中第一个实体的全局索引
+    public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
+    {
+        // 获取组件数组——O(1)，直接返回缓存指针
+        var positions = chunk.GetNativeArray(ref positionType);
+        var velocities = chunk.GetNativeArray(ref velocityType);
+        var physicsBodies = chunk.GetNativeArray(ref physicsBodyType);
+
+        int count = chunk.Count;  // 该 Chunk 中的实体数量
+
+        // 手动循环——Burst 会自动向量化
+        for (int i = 0; i &lt; count; i++)
+        {
+            // 读取物理属性
+            var body = physicsBodies[i];
+            if (!body.Enabled) continue;  // 跳过禁用的物理体
+
+            // 应用重力
+            var vel = velocities[i];
+            vel.Y -= Gravity * DeltaTime;
+
+            // 更新位置
+            var pos = positions[i];
+            pos += vel * DeltaTime;
+
+            // 写回
+            positions[i] = pos;
+            velocities[i] = vel;
+        }
+    }
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>8.2.2 ArchetypeChunk 的内部</h3>
+
+        <p>ArchetypeChunk 是 IJobChunk.Execute 传入的 Chunk 包装器。它提供了高效的组件访问接口：</p>
+
+        <pre><code class="language-cs">// ArchetypeChunk 的关键方法
+public ref struct ArchetypeChunk
+{
+    // 获取组件数组——O(1)，返回缓存的指针
+    public NativeArray&lt;T&gt; GetNativeArray&lt;T&gt;(ref ArchetypeChunkComponentType&lt;T&gt; componentType);
+
+    // 获取 Entity 数组
+    public NativeArray&lt;Entity&gt; GetNativeArray(ref ArchetypeChunkEntityType EntityType);
+
+    // 获取 SharedComponent 的值
+    public T GetSharedComponent&lt;T&gt;();
+
+    // 当前 Chunk 中的实体数量
+    public int Count { get; }
+
+    // 当前 Chunk 所属的 Archetype
+    public Archetype Archetype { get; }
+
+    // 当前 Chunk 中的 Entity 范围
+    public NativeArray&lt;Entity&gt; GetSubsetOfEntities(int start, int count);
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <div class="callout callout-info">
+            <strong>💡 ref struct 的意义</strong>：ArchetypeChunk 被声明为 ref struct，这意味着它不能逃逸到堆上，不能被装箱，不能作为泛型参数。这保证了它只能在使用它的栈帧内有效，防止了悬空指针问题。
+        </div>
+
+        <h3>8.2.3 IJobChunk 的性能优势</h3>
+
+        <p>相比 ForEach，IJobChunk 有以下优势：</p>
+
+        <ol>
+            <li><strong>零抽象层</strong>：没有 foreach 迭代器的分配，直接操作 NativeArray。</li>
+            <li><strong>灵活的组件访问</strong>：可以按需获取组件数组，不必在编译期声明所有组件。</li>
+            <li><strong>更好的 Burst 优化</strong>：Burst 可以更激进地内联和向量化 IJobChunk 中的循环。</li>
+            <li><strong>支持大型组件集</strong>：ForEach 有 ~10 个组件的限制，IJobChunk 没有。</li>
+        </ol>
+
+        <h2>8.3 IJobEntity：中间地带</h3>
+
+        <p>IJobEntity 是 ForEach 和 IJobChunk 之间的折中方案。它提供了比 ForEach 更多的灵活性，同时比 IJobChunk 更简洁。</p>
+
+        <h3>8.3.1 IJobEntity 的基本用法</h3>
+
+        <pre><code class="language-cs">// IJobEntity 自动生成了 Chunk 遍历代码
+// 你只需要写 Execute 方法中的逻辑
+
+[BurstCompile]
+public partial struct DamageSystem : IJobEntity
+{
+    public float deltaTime;
+    public EntityCommandBuffer.Concurrent ecb;
+
+    // Execute 的参数自动对应 Query 中的组件
+    // 不需要手动声明 ArchetypeChunkComponentType
+    public void Execute(in Health health, in DamageRequest damage)
+    {
+        int newHealth = (int)(health.Current - damage.Amount);
+        if (newHealth &lt;= 0)
+        {
+            // 实体死亡——通过 ECB 安全地销毁
+            ecb.DestroyEntity(damage.Target);
+        }
+        else
+        {
+            // 更新生命值
+            // 注意：IJobEntity 自动处理写入权限
+        }
+    }
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>8.3.2 IJobEntity 的组件访问模式</h3>
+
+        <pre><code class="language-cs">// 读取只读组件
+[BurstCompile]
+public partial struct ReadSystem : IJobEntity
+{
+    public NativeArray&lt;float&gt; output;
+    public int index;
+
+    public void Execute(in Position pos)
+    {
+        output[index++] = pos.Value.y;  // 只读访问
+    }
+}
+
+// 读写组件
+[BurstCompile]
+public partial struct WriteSystem : IJobEntity
+{
+    public float deltaTime;
+
+    public void Execute(ref Position pos, in Velocity vel)
+    {
+        pos.Value += vel.Value * deltaTime;  // 读写 Position，只读 Velocity
+    }
+}
+
+// 使用 Entity 作为参数
+[BurstCompile]
+public partial struct TagSystem : IJobEntity
+{
+    public EntityCommandBuffer.Concurrent ecb;
+
+    public void Execute(Entity entity, in Health health)
+    {
+        if (health.Current &lt; 10f)
+        {
+            ecb.AddComponent&lt;WeakTag&gt;(entity);
+        }
+    }
+}
+
+// 使用 WithAll / WithNone / WithAny
+[BurstCompile]
+public partial struct SelectiveSystem : IJobEntity
+{
+    public void Execute(in Position pos, in Velocity vel)
+    {
+        // 只有同时有 Health 和 Shield 的实体才会进入此 Execute
+    }
+}.WithAll&lt;Health, Shield&gt;();</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>8.4 Chunk 遍历的内部原理</h2>
+
+        <p>理解 Chunk 遍历是如何工作的，对于选择正确的 Job 模式至关重要。</p>
+
+        <h3>8.4.1 遍历流程</h3>
+
+        <pre><code class="language-cs">// 一个 Query 可能匹配多个 Archetype
+// 每个 Archetype 可能有多个 Chunk
+// 遍历是两层循环：
+
+// 伪代码：遍历所有匹配的 Chunk
+foreach (Archetype archetype in matchedArchetypes)
+{
+    for (int chunkIdx = 0; chunkIdx &lt; archetype.ChunkCount; chunkIdx++)
+    {
+        Chunk chunk = archetype.Chunks[chunkIdx];
+
+        if (chunk.EntityCount == 0) continue;  // 跳过空 Chunk
+
+        // 获取组件数组（缓存的指针，O(1)）
+        var positions = chunk.GetPositionArray();
+        var velocities = chunk.GetVelocityArray();
+
+        // 处理 Chunk 中的所有实体
+        for (int i = 0; i &lt; chunk.EntityCount; i++)
+        {
+            // 你的逻辑
+            Process(positions[i], velocities[i]);
+        }
+    }
+}
+
+// 关键点：
+// 1. 外层循环遍历 Archetype（通常只有几个）
+// 2. 中层循环遍历 Chunk（每个 Archetype 可能有多个）
+// 3. 内层循环遍历实体（每个 Chunk 最多 2000 个）
+// 4. 内层循环由 Burst 自动向量化
+// 5. 外层和中层循环由 Job System 并行化（Work Stealing）</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>8.4.2 Chunk 并行化</h3>
+
+        <p>Job System 将 Chunk 级别的迭代并行化。每个线程负责处理一个或多个 Chunk：</p>
+
+        <div class="arch-diagram">
+Chunk 并行分配（4 个核心，8 个 Chunk）：
+
+Core 0: [Chunk0, Chunk1, Chunk2]
+Core 1: [Chunk3, Chunk4]
+Core 2: [Chunk5, Chunk6]
+Core 3: [Chunk7]
+
+如果 Core 3 先完成 Chunk7：
+1. Core 3 检查自己的 Deque——空
+2. Core 3 从 Core 0 的 Deque 头部偷取 Chunk0
+3. Core 3 开始处理 Chunk0
+4. 负载均衡完成
+
+这就是 Work Stealing 在 Chunk 级别的运作方式
+        </div>
+
+        <h2>8.5 Read/Write Group 依赖分析</h2>
+
+        <p>Read/Write Group 是 Burst 和 Job System 用来分析 Job 数据访问模式的机制。它决定了 Job 是否可以安全并行执行。</p>
+
+        <h3>8.5.1 数据访问分类</h3>
+
+        <pre><code class="language-cs">// Burst 将每个数据访问归类为：
+// READ：只读访问
+// WRITE：只写访问
+// READ_WRITE：既读又写
+// NONE：不访问
+
+// 示例分析：
+[BurstCompile]
+public struct MixedAccessJob : IJobParallelFor
+{
+    public NativeArray&lt;float&gt; readOnlyArray;     // READ
+    public NativeArray&lt;float&gt; writeOnlyArray;    // WRITE
+    public NativeArray&lt;float&gt; readWriteArray;    // READ_WRITE
+
+    public void Execute(int i)
+    {
+        float val = readOnlyArray[i];       // READ
+        writeOnlyArray[i] = val * 2f;       // WRITE
+        readWriteArray[i] = val + 1f;       // READ_WRITE
+    }
+}
+
+// Burst 分析结果：
+// readOnlyArray:   READ  → 多个 Job 可以同时读取，无竞争
+// writeOnlyArray:  WRITE → 每个索引只能被一个 Job 写入
+// readWriteArray:  READ_WRITE → 每个索引只能被一个 Job 访问</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>8.5.2 依赖分析规则</h3>
+
+        <table>
+            <thead>
+                <tr><th>Job A 访问</th><th>Job B 访问</th><th>能否并行</th><th>原因</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>READ</td><td>READ</td><td>✅ 可以</td><td>纯读操作无竞争</td></tr>
+                <tr><td>READ</td><td>WRITE</td><td>✅ 可以*</td><td>*前提是不重叠的索引范围</td></tr>
+                <tr><td>WRITE</td><td>WRITE</td><td>⚠️ 取决于索引</td><td>不同索引可以，相同索引不行</td></tr>
+                <tr><td>READ_WRITE</td><td>READ_WRITE</td><td>⚠️ 取决于索引</td><td>不同索引可以，相同索引不行</td></tr>
+                <tr><td>WRITE</td><td>READ_WRITE</td><td>❌ 不可以</td><td>存在数据竞争</td></tr>
+            </tbody>
+        </table>
+
+        <h3>8.5.3 索引分区</h3>
+
+        <p>对于 IJobParallelFor，Job System 自动将索引范围分区，确保每个 Job 处理不同的索引：</p>
+
+        <pre><code class="language-cs">// IJobParallelFor 自动分区
+// 10000 个元素，4 个线程：
+// Thread 0: 执行 0-2499
+// Thread 1: 执行 2500-4999
+// Thread 2: 执行 5000-7499
+// Thread 3: 执行 7500-9999
+// 每个线程访问不同的索引范围，无竞争
+
+// 对于 IJobChunk，分区在 Chunk 级别：
+// 每个线程处理不同的 Chunk
+// 不同 Chunk 的 Entity 索引不同，无竞争
+// 同一 Chunk 内的 Entity 由单个线程处理，也无竞争</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>8.6 Work Splitting（工作拆分）</h2>
+
+        <p>Work Splitting 是 Job System 处理超大数据集的核心机制。当数据量超过单帧处理能力时，Job System 自动将工作拆分为多个批次。</p>
+
+        <h3>8.6.1 自动拆分</h3>
+
+        <pre><code class="language-cs">// 当你调度一个 IJobParallelFor 时：
+var job = new LargeDatasetJob
+{
+    data = hugeArray  // 100,000,000 个元素
+}.Schedule(hugeArray.Length, chunkSize: 256);
+
+// Job System 内部：
+// 1. 计算需要多少个 Chunk：100,000,000 / 256 = 390,625 个 Chunk
+// 2. 将 Chunk 分配给可用的工作线程
+// 3. 每个线程维护自己的 Chunk Deque
+// 4. 线程完成任务后从 Deque 取下一个 Chunk
+// 5. 所有线程完成后，返回 JobHandle
+
+// 你可能在同一帧中处理数亿个元素
+// 这完全由 Job System 的 Work Stealing 机制自动管理</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>8.6.2 手动拆分</h3>
+
+        <pre><code class="language-cs">// 对于更细粒度的控制，可以手动拆分工作
+[BurstCompile]
+public struct BatchedJob : IJob
+{
+    public NativeArray&lt;float&gt; inputData;
+    public NativeArray&lt;float&gt; outputData;
+    public int startIndex;
+    public int batchSize;
+
+    public void Execute()
+    {
+        int end = math.min(startIndex + batchSize, inputData.Length);
+        for (int i = startIndex; i &lt; end; i++)
+        {
+            outputData[i] = inputData[i] * 2f;
+        }
+    }
+}
+
+// 在主线程中拆分
+const int BatchSize = 10000;
+JobHandle totalDependency = JobHandle.Null;
+
+for (int i = 0; i &lt; data.Length; i += BatchSize)
+{
+    var job = new BatchedJob
+    {
+        inputData = data,
+        outputData = results,
+        startIndex = i,
+        batchSize = math.min(BatchSize, data.Length - i)
+    };
+    totalDependency = job.Schedule(totalDependency);
+}
+
+totalDependency.Complete();</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>8.7 三种模式的选择指南</h2>
+
+        <table>
+            <thead>
+                <tr><th>场景</th><th>推荐模式</th><th>原因</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>简单的组件读写（&lt; 10 个组件）</td><td>ForEach</td><td>最简洁，性能足够</td></tr>
+                <tr><td>需要访问 Entity ID</td><td>ForEach 或 IJobEntity</td><td>ForEach 可以直接访问 Entity</td></tr>
+                <tr><td>大量组件（&gt; 10 个）</td><td>IJobChunk</td><td>ForEach 有组件数量限制</td></tr>
+                <tr><td>需要 SharedComponent 数据</td><td>IJobChunk</td><td>ForEach 不直接暴露 SharedComponent</td></tr>
+                <tr><td>需要自定义 Chunk 处理逻辑</td><td>IJobChunk</td><td>最灵活的控制</td></tr>
+                <tr><td>需要 ECB.Concurrent</td><td>IJobEntity 或 IJobChunk</td><td>ForEach 也支持 Concurrent</td></tr>
+                <tr><td>原型开发 / 快速迭代</td><td>ForEach</td><td>代码最少，改动最快</td></tr>
+                <tr><td>性能临界路径</td><td>IJobChunk</td><td>零抽象层，最大性能</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-tip">
+            <strong>💡 实用建议</strong>：90% 的场景使用 ForEach 就够了。只有在性能分析（Profiler）显示你的 System 确实是瓶颈时，才需要考虑切换到 IJobChunk。过早优化是万恶之源。
+        </div>
+
+        <h2>本章小结</h2>
+        <p>本章我们比较了 ECS 中的三种并行 Job 模式：ForEach 最简洁，适合日常开发；IJobChunk 性能最高，适合性能临界路径；IJobEntity 是两者的折中。理解 Chunk 遍历的内部原理和 Read/Write Group 依赖分析，可以帮助你写出更安全、更高效并行代码。记住：先写简洁的 ForEach，用 Profiler 找到真正的瓶颈，再针对性优化。</p>
+
+        <h2>下一章预告</h2>
+        <p><a href="09-hybrid-ecs.html">第 09 章 - Hybrid ECS 与 GameObject 集成</a>：Authoring + Baker 转换管线如何将 MonoBehaviour 转换为 IComponentData？Hybrid Renderer V2 如何让 ECS 数据驱动 Unity 的渲染管线？</p>
+
+        <h2>延伸阅读</h2>
+        <ul>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.entities@2.2/manual/components-systems-entity.html" target="_blank">Systems — Unity.Entities 官方文档</a></li>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.entities@2.2/manual/components-systems-job.html" target="_blank">Jobs — Unity.Entities 官方文档</a></li>
+            <li><a href="https://github.com/Unity-Technologies/Entities/blob/dots/Entities/Unity.Entities/IJobChunk.cs" target="_blank">IJobChunk.cs 源码</a></li>
+            <li><a href="https://www.youtube.com/watch?v=3Fq5mENcIbc" target="_blank">GDC 2022 - Unity's DOTS Journey (Performance Patterns)</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="07-ecs-implementation.html">&larr; 第 07 章 - ECS 源码级实现</a>
+            <a href="09-hybrid-ecs.html">第 09 章 - Hybrid ECS 与 GameObject 集成 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cs.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+    function copyCode(btn) {
+        const code = btn.parentElement.querySelector('code');
+        navigator.clipboard.writeText(code.textContent).then(() => {
+            btn.textContent = '已复制!';
+            setTimeout(() => btn.textContent = '复制', 1500);
+        });
+    }
+    </script>
+</body>
+</html>

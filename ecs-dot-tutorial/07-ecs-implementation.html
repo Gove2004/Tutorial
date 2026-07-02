@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 - ECS 源码级实现 - ECS 与 Unity DOTS 入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-job-system-deep-dive.html">&larr; 上一章</a>
+        <a href="08-component-system-patterns.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>07 - ECS 源码级实现</h1>
+        <p class="intro">本章深入 Unity.Entities 包的源码，逐层剖析 Archetype、Chunk、World、Component Type 和 Entity ID 的内部实现。理解这些底层机制后，你就不再是"使用 ECS API"，而是"理解 ECS 如何工作"。</p>
+
+        <h2>7.1 Archetype 内部结构</h2>
+
+        <p>Archetype 是 ECS 数据存储的核心抽象。每个 Archetype 代表一种<strong>组件类型组合</strong>。所有具有相同组件类型的实体都属于同一个 Archetype。</p>
+
+        <h3>7.1.1 Archetype 的定义</h3>
+
+        <pre><code class="language-cs">// 简化版的 Archetype 内部结构（基于 Entities 2.x 源码）
+// 位于 Unity.Entities.Core / Archetype.h (C++ 层)
+// 和 Archetype.cs (C# 管理层)
+
+public sealed class Archetype
+{
+    // 唯一标识：由组件类型 GUID 的哈希生成
+    public readonly ArchetypeGUID Guid;
+
+    // 组件类型列表（按顺序排列）
+    public readonly ComponentType[] ComponentTypes;
+
+    // 组件类型数量
+    public readonly int ComponentCount;
+
+    // 每个 Chunk 的大小（默认 64KB）
+    public readonly int ChunkSizeInBytes;
+
+    // 指向该 Archetype 的所有 Chunk 链表
+    public Chunk HeadChunk;
+
+    // 当前 Archetype 中的实体总数
+    public int EntityCount;
+
+    // 每个实体的数据大小（所有组件大小的总和，含对齐）
+    public int Stride;
+
+    // 组件数据的偏移表（用于快速定位每个组件在 Stride 中的位置）
+    public int[] ComponentOffsets;
+
+    // 位掩码：用于快速判断某个组件是否存在
+    public ulong ComponentBitSet;
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>7.1.2 Archetype GUID 的生成</h3>
+
+        <p>每个 Archetype 都有一个唯一的 GUID，它由该 Archetype 中所有组件类型的 TypeHash 组合而成：</p>
+
+        <div class="arch-diagram">
+Archetype GUID 生成过程：
+
+组件类型列表：[Position, Velocity, Health]
+  ↓
+获取每个组件的 TypeHash:
+  Position → 0xA1B2C3D4E5F60001
+  Velocity → 0xB2C3D4E5F6000102
+  Health   → 0xC3D4E5F600010203
+  ↓
+组合哈希（FNV-1a 变体）:
+  hash = 0xcbf29ce484222325
+  hash ^= Position.Hash  → hash *= 0x100000001b3
+  hash ^= Velocity.Hash  → hash *= 0x100000001b3
+  hash ^= Health.Hash    → hash *= 0x100000001b3
+  ↓
+Archetype GUID = 0x7F3A2B1C9E8D4F56
+
+关键点：
+- 顺序无关：[Position, Velocity] 和 [Velocity, Position] 生成相同的 GUID
+  （因为组件类型列表在创建时已排序）
+- 碰撞概率极低：64 位哈希的碰撞概率约 1/2^64
+</div>
+
+        <h3>7.1.3 Archetype 的创建时机</h3>
+
+        <p>Archetype 不是预先创建的——它在首次需要时被动态创建：</p>
+
+        <pre><code class="language-cs">// 当你创建第一个具有特定组件组合的 Entity 时
+var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+
+// 第一步：查询是否已有匹配的 Archetype
+// EntityManager 内部有一个 Dictionary<ArchetypeGUID, Archetype>
+// 如果找到，直接使用该 Archetype
+
+// 第二步：如果没有，创建新的 Archetype
+var archetype = entityManager.CreateArchetype(
+    typeof(Position),
+    typeof(Velocity),
+    typeof(Health)
+);
+// 内部操作：
+// 1. 计算 Archetype GUID
+// 2. 创建 Archetype 实例
+// 3. 注册到 EntityManager 的 Archetype 字典中
+// 4. 创建一个空的 Chunk 作为 HeadChunk
+
+// 第三步：在 Archetype 中创建 Entity
+var entity = entityManager.CreateEntity(archetype);
+// 内部操作：
+// 1. 在 HeadChunk 中分配 Entity ID
+// 2. 在 HeadChunk 中分配组件数据空间（Stride 字节）
+// 3. 如果 Chunk 满了，创建新的 Chunk 并链接到链表
+// 4. 递增 EntityCount</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>7.2 Chunk 布局</h2>
+
+        <p>Chunk 是 Archetype 内部的固定大小内存块，默认 64KB。它是 ECS 数据存储的最小单位。</p>
+
+        <h3>7.2.1 Chunk 的内存布局</h3>
+
+        <pre><code class="language-cs">// Chunk 的内部结构（简化）
+public sealed class Chunk
+{
+    // 固定大小：64KB（可通过配置修改）
+    public const int DefaultChunkSizeInBytes = 64 * 1024;
+
+    // 指向底层内存的指针（连续分配的 NativeArray）
+    public unsafe void* Data;
+
+    // 实体 ID 数组（在 Data 之前单独分配）
+    public Entity* Entities;
+
+    // 组件数据数组（每个组件类型一个数组）
+    // 这是 SoA 布局的核心
+    public void** ComponentArrays;
+
+    // 当前 Chunk 中的实体数量
+    public int EntityCount;
+
+    // Chunk 的最大容量
+    public int MaxEntityCount;
+
+    // 父 Archetype
+    public Archetype Archetype;
+
+    // 链表指针
+    public Chunk PreviousChunk;
+    public Chunk NextChunk;
+
+    // 活跃标记（用于垃圾回收优化）
+    public bool IsActive;
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>7.2.2 Chunk 内部的 SoA 布局</h3>
+
+        <p>在一个 64KB 的 Chunk 中，数据按以下方式排列：</p>
+
+        <div class="arch-diagram">
+Chunk 内存布局（64KB，假设 1000 个实体）：
+
+┌──────────────────────────────────────────────────────────────┐
+│ Chunk Header (约 256 字节)                                      │
+│  - Entity* Entities 指针                                       │
+│  - void** ComponentArrays 指针数组                             │
+│  - int EntityCount                                             │
+│  - int MaxEntityCount                                          │
+│  - Archetype*                                                │
+│  - Chunk* Previous / Next                                      │
+├──────────────────────────────────────────────────────────────┤
+│ Entity ID 区域 (1000 × 8 字节 = 8KB)                           │
+│  Entity[0]  Entity[1]  Entity[2]  ...  Entity[999]             │
+│  (每个 Entity 是 8 字节的 uint64)                               │
+├──────────────────────────────────────────────────────────────┤
+│ Component Data 区域 (SoA 布局，约 56KB)                        │
+│                                                              │
+│  Position 数组 (1000 × 12 字节 = 12KB)                         │
+│  float3[0]  float3[1]  float3[2]  ...  float3[999]            │
+│                                                              │
+│  Velocity 数组 (1000 × 12 字节 = 12KB)                         │
+│  float3[0]  float3[1]  float3[2]  ...  float3[999]            │
+│                                                              │
+│  Health 数组 (1000 × 4 字节 = 4KB)                             │
+│  float[0]   float[1]   float[2]   ...  float[999]             │
+│                                                              │
+│  ... 其他组件数组                                              │
+└──────────────────────────────────────────────────────────────┘
+
+关键特征：
+1. Entity ID 和组件数据分开存储
+2. 每个组件类型有自己的连续数组（SoA）
+3. 所有数组大小相同（都是 EntityCount 个元素）
+4. 组件数组的顺序与 Archetype.ComponentTypes 一致
+</div>
+
+        <h3>7.2.3 Chunk 容量计算</h3>
+
+        <pre><code class="language-cs">// 一个 64KB Chunk 最多能容纳多少实体？
+
+// 公式：MaxEntityCount = (ChunkSize - HeaderSize) / Stride
+
+// 假设：
+// - ChunkSize = 64 * 1024 = 65536 字节
+// - HeaderSize ≈ 256 字节（Chunk 头部 + Entity 数组）
+// - Stride = sizeof(float3) + sizeof(float3) + sizeof(float)
+//         = 12 + 12 + 4 = 28 字节（Position + Velocity + Health）
+// - 实际对齐到 32 字节
+
+// MaxEntityCount = (65536 - 256) / 32 = 2048 个实体/Chunk
+
+// 如果组件更多：
+// Position(float3) + Velocity(float3) + Health(float) +
+// Color(float4) + Tag(bool)
+// Stride = 12 + 12 + 4 + 16 + 1 = 45 → 对齐到 48 字节
+// MaxEntityCount = (65536 - 256) / 48 = 1360 个实体/Chunk
+
+// 如果只有 Position：
+// Stride = 12 字节
+// MaxEntityCount = (65536 - 256) / 12 = 5445 个实体/Chunk</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>7.3 World 内部</h2>
+
+        <h3>7.3.1 World 的结构</h3>
+
+        <pre><code class="language-cs">// World 的简化内部结构
+public sealed class World : IDisposable
+{
+    // 世界名称
+    public string Name;
+
+    // EntityManager：管理所有 Entity 和 Archetype
+    public EntityManager EntityManager;
+
+    // SystemStore：注册的所有 System
+    public SystemStore SystemStore;
+
+    // JobHandle 的完成状态追踪
+    public JobHandle CompletedJobHandle;
+
+    // EntityQueryCache：缓存的查询结果
+    public EntityQueryCache QueryCache;
+
+    // World 之间的隔离：
+    // - 每个 World 有独立的 EntityManager
+    // - 不同 World 的 Entity ID 不共享
+    // - 不同 World 的 System 不互相调用
+
+    // 与 Unity 主线程的同步点
+    public bool IsCreated;
+    public bool IsFinalIZero;  // 是否可以进行 GC
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>7.3.2 EntityManager 的内部</h3>
+
+        <p>EntityManager 是 World 中最重要的组件，它管理着 Entity、Archetype 和 Chunk 的所有操作：</p>
+
+        <pre><code class="language-cs">// EntityManager 的关键内部结构
+public sealed class EntityManager
+{
+    // Entity 分配计数器
+    private uint m_EntityIndex;       // 当前使用的 Entity Index
+    private uint m_EntityCapacity;    // 已分配的 Entity 槽位数
+
+    // Entity 池（复用的 Entity ID）
+    private Entity* m_Entities;       // 所有已创建/已删除的 Entity
+    private uint* m_EntityVersions;   // 每个 Entity 的 Version（Generation ID）
+
+    // Archetype 管理
+    private Archetype** m_AllArchetypes;  // 所有 Archetype 的数组
+    private int m_ArchetypeCount;
+
+    // Archetype GUID → Archetype 的映射
+    private Dictionary<ulong, Archetype*> m_ArchetypeMap;
+
+    // Chunk 管理
+    private Chunk** m_ChunkPool;      // 空闲 Chunk 池
+    private Chunk** m_ActiveChunks;   // 活跃 Chunk 列表
+}</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>7.4 Component Type 系统</h2>
+
+        <h3>7.4.1 TypeHash vs GUID</h3>
+
+        <p>ECS 中有两种标识组件类型的方式：</p>
+
+        <table>
+            <thead>
+                <tr><th>特性</th><th>TypeHash (ulong)</th><th>ArchetypeGUID (ArchetypeGUID)</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>来源</td><td>typeof(T).GetHashCode64()</td><td>由 ComponentType 列表组合生成</td></tr>
+                <tr><td>用途</td><td>标识单个组件类型</td><td>标识一组组件类型（Archetype）</td></tr>
+                <tr><td>稳定性</td><td>跨 AppDomain 不稳定</td><td>跨版本稳定（如果组件列表不变）</td></tr>
+                <tr><td>碰撞</td><td>极低（64 位 FNV-1a）</td><td>极低（64 位组合哈希）</td></tr>
+                <tr><td>示例</td><td>Position → 0xA1B2C3D4E5F60001</td><td>[Position, Velocity] → 0x7F3A2B1C9E8D4F56</td></tr>
+            </tbody>
+        </table>
+
+        <h3>7.4.2 ComponentType 的版本管理</h3>
+
+        <p>每个 ComponentType 都有一个版本号，用于检测组件结构的变化：</p>
+
+        <pre><code class="language-cs">// 当组件结构改变时，Version 自动递增
+// 例如：
+
+// 版本 1：
+public struct Position : IComponentData { public float3 Value; }
+// TypeHash: 0xA1B2...
+
+// 版本 2（添加了字段）：
+public struct Position : IComponentData
+{
+    public float3 Value;
+    public float3 PreviousValue;  // 新增字段！
+}
+// TypeHash: 0xB3C4...（完全不同）
+
+// ECS 检测到 TypeHash 变化后：
+// 1. 创建新的 Archetype（包含新版本 Position）
+// 2. 将现有 Entity 迁移到新 Archetype（如果可能）
+// 3. 或报错要求手动迁移
+
+// 这就是为什么 IComponentData 的结构改变是破坏性更新的原因</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>7.5 Entity Generation ID</h2>
+
+        <p>Entity 不是一个引用类型，而是一个 64 位的无符号整数（uint64）。它的位布局精心设计，用于高效管理和防止 ID 复用冲突。</p>
+
+        <h3>7.5.1 Entity 的精确位布局</h3>
+
+        <pre><code class="language-cs">// Entity 的内部结构（64 位）
+//
+// Bit 63-48  |  Bit 47-0
+// ───────────┼──────────────
+// Generation │     Index
+// (16 bits)  │   (48 bits)
+//
+// Generation: 实体被复用时的代数（第几次被创建）
+// Index: 实体在 Entity 池中的槽位索引
+
+// 示例：
+// Entity e = new Entity { Generation = 3, Index = 12345 }
+// e.Data = (3UL << 48) | 12345
+// e.Data = 0x0003000000003039
+
+// 为什么需要 Generation？
+// 假设 Entity A 被创建后又删除了，它的 Index=0 被重新分配给 Entity B。
+// 如果有代码持有 Entity A 的引用（比如缓存），它可能会错误地操作 Entity B。
+// Generation 解决了这个问题：
+// - Entity A: Generation=0, Index=0
+// - Entity A 被删除
+// - Entity B: Generation=1, Index=0
+// - 即使 Index 相同，Generation 不同，Entity A ≠ Entity B
+
+// 48 位 Index 意味着：
+// 每个槽位最多可以被复用 2^48 = 281,474,976,710,656 次
+// 这基本上是不可能的——在 60fps 下需要运行数千年才会用完
+
+// 16 位 Generation 意味着：
+// 最多可以同时存在 2^48 = 281,474,976,710,656 个实体
+// 每个实体最多被复用 2^16 = 65,536 次</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>7.5.2 Entity 的创建与销毁</h3>
+
+        <pre><code class="language-cs">// Entity 创建流程：
+// 1. 检查是否有已删除 Entity 的空闲槽位
+// 2. 如果有，复用该槽位，Generation +1
+// 3. 如果没有，分配新的槽位，Index +1，Generation = 1
+// 4. 返回新的 Entity ID
+
+// Entity 销毁流程：
+// 1. 提取 Entity.Index
+// 2. 将该 Index 标记为"空闲"（加入空闲池）
+// 3. 清除该 Entity 的所有组件数据
+// 4. 注意：不重置 Index 或 Generation
+//    （Generation 在下次创建时自动递增）
+
+// 代码层面：
+var entity = entityManager.CreateEntity(typeof(Position), typeof(Velocity));
+// entity.Index = 0, entity.Generation = 1
+
+entityManager.DestroyEntity(entity);
+// entity 变为无效，Index=0 进入空闲池
+
+var entity2 = entityManager.CreateEntity(typeof(Position), typeof(Velocity));
+// entity2.Index = 0, entity2.Generation = 2
+// entity2 != entity（尽管 Index 相同）</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>7.6 Query 的内部实现</h2>
+
+        <p>Query 是 ECS 中最强大的抽象之一。它根据组件类型组合筛选 Entity，返回匹配的结果。但 Query 的内部实现远比看起来复杂。</p>
+
+        <h3>7.6.1 Query 的编译过程</h3>
+
+        <pre><code class="language-cs">// 当你写：
+foreach (var (pos, vel) in SystemAPI.Query&lt;RefRO&lt;Position&gt;, RefRO&lt;Velocity&gt;&gt;())
+{
+    pos.ValueRW += vel.ValueRW * delta;
+}
+
+// 内部发生了什么？
+
+// 第一步：Query 编译
+// SystemAPI.Query&lt;Position, Velocity&gt;() 返回一个 EntityQuery
+// EntityQuery 内部：
+// 1. 计算 Position 的 TypeHash
+// 2. 计算 Velocity 的 TypeHash
+// 3. 生成 ArchetypeBitSet：{Position: 1, Velocity: 1}
+// 4. 遍历 EntityManager 的所有 Archetype
+// 5. 对每个 Archetype 检查位掩码是否匹配
+// 6. 收集所有匹配的 Archetype
+
+// 第二步：Chunk 遍历
+// 对于每个匹配的 Archetype：
+// 1. 遍历 Archetype 的所有 Chunk
+// 2. 对于每个 Chunk：
+//    a. 获取 Chunk 的 ComponentArrays 指针
+//    b. 根据 ComponentOffsets 定位 Position 和 Velocity 数组
+//    c. 遍历 Chunk 中的每个 Entity
+//    d. 调用回调函数（你的 lambda）
+
+// 第三步：缓存
+// EntityQuery 的结果会被缓存
+// 只有当 Archetype 结构发生变化时（新增/删除组件类型），缓存才会失效
+// 这使得重复查询的成本几乎为零</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h3>7.6.2 Query 的 With 过滤</h3>
+
+        <p>Query 支持多种过滤条件，它们在编译时被组合为位掩码：</p>
+
+        <pre><code class="language-cs">// WithAll：必须包含所有指定组件
+var query1 = SystemAPI.Query&lt;Position, Velocity&gt;().WithAll&lt;Health&gt;();
+// Archetype 必须同时有 Position + Velocity + Health
+
+// WithNone：不能包含任何指定组件
+var query2 = SystemAPI.Query&lt;Position, Velocity&gt;().WithNone&lt;Health&gt;();
+// Archetype 有 Position + Velocity，但没有 Health
+
+// WithAny：至少包含一个指定组件
+var query3 = SystemAPI.Query&lt;Position&gt;().WithAny&lt;Velocity, AngularVelocity&gt;();
+// Archetype 有 Position，并且有 Velocity 或 AngularVelocity 或两者都有
+
+// 这些过滤在编译期就转换为位掩码操作
+// 查询时只需要一次位运算即可判断匹配
+// 时间复杂度：O(1) 每个 Archetype，与组件数量无关</code><button class="copy-button" onclick="copyCode(this)">复制</button></pre>
+
+        <h2>7.7 Chunk 遍历优化</h2>
+
+        <p>Chunk 遍历是 ECS 性能的关键。让我们看看底层是如何优化的：</p>
+
+        <div class="arch-diagram">
+Chunk 遍历的优化策略：
+
+1. 预计算 ComponentOffsets
+   - 编译期计算每个组件在 Stride 中的偏移
+   - 遍历时直接通过指针算术访问，无需查找
+
+2. Chunk 内循环展开
+   - Burst 自动将 Chunk 内循环展开为 SIMD 批次
+   - 每个批次处理 8-16 个实体
+
+3. 空 Chunk 快速跳过
+   - 如果 Chunk.EntityCount == 0，直接跳过
+   - 不需要检查组件数据
+
+4. Archetype 级别预过滤
+   - Query 编译时已经过滤掉不匹配的 Archetype
+   - 遍历时不需要再检查组件类型
+
+5. 缓存行对齐
+   - Chunk 数据按 64 字节对齐
+   - 每个 Cache Line 包含多个实体的同类型组件数据
+
+6. 零分配
+   - Query 结果不创建任何新对象
+   - 所有数据通过指针直接访问
+</div>
+
+        <h2>本章小结</h2>
+        <p>本章我们深入 ECS 的源码级实现。Entity 只是一个 64 位 ID（16 位 Generation + 48 位 Index），Archetype 由组件类型 GUID 唯一标识，Chunk 是 64KB 的固定大小内存块，采用 SoA 布局存储组件数据。EntityManager 通过 ArchetypeBitSet 快速过滤匹配的 Archetype，再通过 ComponentOffsets 直接定位每个组件的内存位置。理解这些机制后，你就能解释为什么 ECS 的查询如此高效，以及如何针对底层实现优化你的代码。</p>
+
+        <h2>下一章预告</h2>
+        <p><a href="08-component-system-patterns.html">第 08 章 - ChunkIterator 与并行 Job 模式</a>：ForEach API、IJobChunk、IJobEntity 三种并行模式的对比与选择。Chunk 遍历的内部原理。Read/Write Group 依赖分析。</p>
+
+        <h2>延伸阅读</h2>
+        <ul>
+            <li><a href="https://github.com/Unity-Technologies/Entities/blob/dots/Entities/Unity.Entities/Archetype.cs" target="_blank">Unity.Entities Archetype.cs 源码</a></li>
+            <li><a href="https://github.com/Unity-Technologies/Entities/blob/dots/Entities/Unity.Entities/Chunk.cs" target="_blank">Unity.Entities Chunk.cs 源码</a></li>
+            <li><a href="https://github.com/Unity-Technologies/Entities/blob/dots/Entities/Unity.Entities/Entity.cs" target="_blank">Unity.Entities Entity.cs 源码</a></li>
+            <li><a href="https://github.com/Unity-Technologies/Entities/blob/dots/Entities/Unity.Entities/EntityManager.cs" target="_blank">Unity.Entities EntityManager.cs 源码</a></li>
+            <li><a href="https://fgiesen.wordpress.com/2015/02/24/entity-arithmetic-1/" target="_blank">The Mysterious March of the Entities — Edy's Progressive Gaming</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="06-job-system-deep-dive.html">&larr; 第 06 章 - Job System 深入</a>
+            <a href="08-component-system-patterns.html">第 08 章 - ChunkIterator 与并行 Job 模式 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cs.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+    function copyCode(btn) {
+        const code = btn.parentElement.querySelector('code');
+        navigator.clipboard.writeText(code.textContent).then(() => {
+            btn.textContent = '已复制!';
+            setTimeout(() => btn.textContent = '复制', 1500);
+        });
+    }
+    </script>
+</body>
+</html>

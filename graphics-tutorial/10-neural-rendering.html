@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 - 神经渲染 - 计算机图形学入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-real-time-rendering.html">&larr; 上一章</a>
+        <a href="index.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>第十章：神经渲染</h1>
+
+        <p>神经渲染（Neural Rendering）是近年来计算机图形学领域最具颠覆性的方向之一。它将深度学习与传统渲染技术融合，用神经网络替代或增强传统管线中的各个组件——从场景表示、光照计算到图像合成。2020 年以来，NeRF 和 3D Gaussian Splatting 的相继突破，标志着图形学正式进入"数据驱动"时代。</p>
+
+        <div class="callout-info">
+            <strong>核心思想：</strong>传统渲染用数学公式描述世界（光线、材质、光照），神经渲染用数据拟合世界（从图像中学习场景的隐式表示）。两者不是替代关系，而是互补关系——神经渲染提供表达能力，传统渲染提供物理约束。
+        </div>
+
+        <h2 id="nerf">一、Neural Radiance Fields（NeRF）</h2>
+
+        <p>NeRF 是 MIT 在 2020 年提出的开创性工作，它用神经网络隐式地表示 3D 场景。给定一组已知相机位姿的 2D 图像，NeRF 可以合成任意新视角的照片级真实图像。</p>
+
+        <h3>1.1 场景表示</h3>
+
+        <p>NeRF 的核心是一个 MLP（多层感知机），输入是 3D 空间中的一个坐标 $(x, y, z)$ 和一个 viewing direction $(\theta, \phi)$，输出是该点的体积密度 $\sigma$ 和沿该方向的辐射颜色 $C = (r, g, b)$：</p>
+
+        <pre><code class="language-python">import torch
+import torch.nn as nn
+
+class NeRF(nn.Module):
+    def __init__(self, D=8, W=256, skips=[4]):
+        super().__init__()
+        self.D = D
+        self.W = W
+        self.skips = skips
+
+        # 几何网络：坐标 → 密度 + 中间特征
+        self.linear = nn.ModuleList([nn.Linear(3, W)])
+        for i in range(1, D):
+            if i in skips:
+                self.linear.append(nn.Linear(W + 3, W))
+            else:
+                self.linear.append(nn.Linear(W, W))
+
+        # 颜色网络：中间特征 + 视角方向 → RGB
+        self.linear_color = nn.Linear(W, 3)
+        self.beta = nn.Parameter(torch.ones(1) * 0.1)
+
+    def forward(self, x, dirs):
+        """
+        x: (N, 3) 3D 坐标
+        dirs: (N, 3) 观察方向
+        返回: (N, 4) (density, RGB)
+        """
+        input = torch.cat([x, dirs], dim=-1)
+        h = input
+
+        for i, layer in enumerate(self.linear):
+            h = layer(h)
+            h = torch.relu(h)
+            if i in self.skips:
+                h = torch.cat([h, input], -1)
+
+        # 密度
+        sigma = self.linear_sigma(h[..., :self.W])
+        sigma = torch.relu(sigma)
+
+        # 颜色
+        h_feature = h[..., self.W:]
+        rgb = self.linear_color(h_feature)
+        rgb = torch.sigmoid(rgb)  # 归一化到 [0, 1]
+
+        return torch.cat([sigma, rgb], -1)</code></pre>
+
+        <h3>1.2 位置编码（Positional Encoding）</h3>
+
+        <p>标准 MLP 倾向于学习低频函数（smooth prior），但场景细节往往是高频的。NeRF 使用<strong>位置编码</strong>将原始坐标映射到高维空间，使网络能够捕捉高频细节：</p>
+
+        <pre><code class="language-python">def positional_encoding(x, min_deg=0, max_deg=15):
+    """
+    将坐标 x 编码为 [sin(2^0 π x), cos(2^0 π x),
+                       sin(2^1 π x), cos(2^1 π x),
+                       ...,
+                       sin(2^(D-1] π x), cos(2^(D-1) π x)]
+
+    原始 3D 坐标 → 编码后 90 维 (D=15)
+    """
+    scales = torch.tensor([2**i for i in range(min_deg, max_deg+1)],
+                          device=x.device, dtype=x.dtype)
+    xb = torch.reshape((x[..., None, :] * xb[:, :, None])
+                       .reshape(*x.shape[:-1], -1)
+    return torch.cat([x] + [torch.sin(xb), torch.cos(xb)], dim=-1)
+
+# 输入: (N, 3) → 输出: (N, 90)
+# 方向也做同样的编码: (N, 3) → (N, 90)
+# 总输入维度: 90 + 90 = 180</code></pre>
+
+        <div class="callout-warning">
+            <strong>为什么需要位置编码？</strong>考虑一个 100×100 的像素图像，如果用普通 MLP 学习，网络需要自己"发现"每个像素的频率特征。位置编码相当于告诉网络："请用这些正弦波基函数来表示你的信号"。这类似于傅里叶变换的思想——将数据转换到更适合学习的频域。
+        </div>
+
+        <h3>1.3 体积渲染（Volume Rendering）</h3>
+
+        <p>NeRF 使用经典的体积渲染公式将沿光线的采样点合成像素颜色。对于每条光线，沿相机方向采样 N 个点，计算每个点的透射率和颜色贡献：</p>
+
+        <pre><code class="language-python">def volume_rendering(ray_o, ray_d, net_fn, N_samples):
+    """
+    ray_o: (B, 3) 光线原点
+    ray_d: (B, 3) 光线方向
+    net_fn: NeRF 网络
+    N_samples: 每条光线上的采样点数
+
+    返回: colors (B, 3), depths (B,)
+    """
+    # 沿光线采样
+    t_vals = torch.linspace(0., 1., N_samples)
+    z_vals = near_plane * (1. - t_vals) + far_plane * t_vals
+
+    # 采样 3D 点
+    pts = ray_o[:, None, :] + ray_d[:, None, :] * z_vals[None, :, None]
+    pts = pts.reshape(-1, 3)
+
+    # 方向（所有点沿同一条光线，方向相同）
+    dirs = ray_d.repeat_interleave(N_samples, dim=0).view(-1, 3)
+
+    # 位置编码
+    encoded_pts = positional_encoding(pts)
+    encoded_dirs = positional_encoding(dirs)
+    encoded_input = torch.cat([encoded_pts, encoded_dirs], dim=-1)
+
+    # NeRF 预测
+    raw = net_fn(encoded_input)
+    sigma_raw = raw[..., 0]
+    rgb_raw = raw[..., 1:]
+
+    # 计算每个区间的 delta（采样点间距）
+    dists = z_vals[1:] - z_vals[:-1]
+    dists = torch.cat([dists, dists[-1:]], dim=0)
+
+    # 体积衰减: α = 1 - exp(-σ·δ)
+    alpha = 1. - torch.exp(-torch.relu(sigma_raw) * dists)
+    transmittance = torch.cumprod(1. - alpha + 1e-10, dim=0)
+    transmittance = torch.cat([torch.ones_like(transmittance[:, :1]),
+                                transmittance[:-1]], dim=1)
+
+    # 加权颜色合成
+    weights = alpha * transmittance
+    colors = torch.sum(weights[:, :, None] * rgb_raw, dim=1)
+    depths = torch.sum(weights * z_vals, dim=1) / torch.sum(weights, dim=1)
+
+    return colors, depths</code></pre>
+
+        <h3>1.4 NeRF 训练流程</h3>
+
+        <pre><code class="language-python">def train_nerf(scene_dir, n_epochs=300):
+    # 1. 加载训练图像和相机位姿
+    images, poses = load_llff_data(scene_dir)
+
+    # 2. 初始化 NeRF 网络
+    nerf = NeRF(D=8, W=256).cuda()
+
+    # 3. 多尺度采样策略
+    for epoch in range(n_epochs):
+        for batch_idx in range(len(images)):
+            ray_o, ray_d = sample_rays(poses[batch_idx], H, W)
+
+            # 主网络
+            C_rgb, _ = volume_rendering(ray_o, ray_d, nerf, N_main)
+
+            #  coarse-to-fine: 在主网络附近密集采样
+            ray_o2, ray_d2 = resample(ray_o, ray_d, depths)
+            C_rgb2, _ = volume_rendering(ray_o2, ray_d2, nerf, N_fine)
+
+            # 损失: L1 + 正则化
+            loss = F.l1_loss(C_rgb2, images[batch_idx].cuda())
+            loss += 0.01 * torch.mean(nerf.sigma)  # 密度正则
+
+            # 反向传播
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            if epoch % 100 == 0:
+                print(f"Epoch {epoch}: loss = {loss.item():.4f}")
+
+    return nerf</code></pre>
+
+        <h3>1.5 进阶：Instant NGP</h3>
+
+        <p>原始 NeRF 训练一张场景需要数小时。Instant NGP（2022）通过引入<strong>可学习的哈希编码（Learned Hash Encoding）</strong>将训练时间缩短到几分钟：</p>
+
+        <pre><code class="language-python"># Instant NGP 核心: Hash Grid Encoding
+class HashEncoding(nn.Module):
+    def __init__(self, num_levels=16, level_dim=2, base_resolution=16):
+        super().__init__()
+        self.num_levels = num_levels
+        self.grid = nn.ParameterDict()
+        for i in range(num_levels):
+            resolution = base_resolution * (2**i - 1) + 1
+            self.grid[str(i)] = nn.Embedding(resolution**3, level_dim)
+
+    def forward(self, x):
+        """
+        x: (N, 3) 归一化到 [0, 1]
+        返回: (N, num_levels * level_dim) 拼接的多尺度编码
+        """
+        outputs = []
+        for i in range(self.num_levels):
+            embedding = self.grid[str(i)]
+            # 双线性插值采样
+            scaled_x = x * (2**i * base_resolution)
+            outputs.append(trilinear_sample(embedding, scaled_x))
+        return torch.cat(outputs, dim=-1)
+
+# 效果: 训练时间从 3 小时 → 3 分钟
+#     推理速度从 1ms/像素 → 0.1ms/像素</code></pre>
+
+        <h2 id="3dgs">二、3D Gaussian Splatting</h2>
+
+        <p>3D Gaussian Splatting（3DGS）是 2023 年的突破性工作，它用显式的 3D 高斯椭球替代 NeRF 的隐式表示，实现了 <strong>实时渲染速度</strong>（1080p 下 60-144fps）和 <strong>超越 NeRF 的渲染质量</strong>。</p>
+
+        <h3>2.1 核心概念</h3>
+
+        <p>3DGS 将场景表示为一组 3D 高斯分布，每个高斯由以下参数定义：</p>
+
+        <ul>
+            <li><strong>均值 μ</strong>：高斯中心位置 (x, y, z)</li>
+            <li><strong>协方差 Σ</strong>：形状和朝向（用旋转矩阵 R 和缩放矩阵 S 参数化）</li>
+            <li><strong>不透明度 α</strong>：高斯的透明度</li>
+            <li><strong>球谐系数 SH</strong>：描述各向异性的颜色（D 阶球谐函数）</li>
+        </ul>
+
+        <h3>2.2 可微分光栅化</h3>
+
+        <p>3DGS 的关键创新是<strong>可微分光栅化（Differentiable Rasterization）</strong>：将 3D 高斯投影到屏幕空间，然后像传统光栅化一样将椭圆"涂抹"到像素上，整个过程可求导。</p>
+
+        <pre><code class="language-glsl">// GLSL: 3D Gaussian Splatting 光栅化片段着色器
+#version 460 core
+layout(location = 0) out vec4 fragColor;
+
+in vec2 uv;              // 像素相对于椭圆中心的归一化坐标
+in float opacity;        // 高斯不透明度
+in vec3 shCoeffs[9];     // 球谐系数 (3阶 = 9个系数/通道)
+in vec3 meanColor;       // 基础颜色
+
+uniform vec2 resolution;
+
+vec3 evalSH(vec2 uv, vec3 shCoeffs[9]) {
+    // 球谐函数评估
+    float x = uv.x, y = uv.y;
+    vec3 color = shCoeffs[0]; // DC term (常数)
+    color += shCoeffs[1] * y;      // L1, -
+    color += shCoeffs[2] * z;      // L1, 0
+    color += shCoeffs[3] * x;      // L1, +
+    color += shCoeffs[4] * y * x;  // L2, -
+    color += shCoeffs[5] * y * z;  // L2, 0
+    color += shCoeffs[6] * (3.0*z*z - 1.0); // L2, +
+    color += shCoeffs[7] * x * z;  // L2, ++
+    color += shCoeffs[8] * (x*x - y*y); // L2, +++
+    return color;
+}
+
+void main() {
+    // 计算高斯值
+    float gaussian = exp(-0.5 * dot(uv, uv));
+    float alpha = opacity * gaussian;
+
+    if (alpha < 1e-4) discard;
+
+    // 球谐颜色
+    vec3 shColor = evalSH(uv, shCoeffs);
+    vec3 finalColor = shColor * meanColor;
+
+    fragColor = vec4(finalColor, alpha);
+}</code></pre>
+
+        <h3>2.3 训练：从图像重建 3D 场景</h3>
+
+        <p>3DGS 的训练过程与 NeRF 类似，但更高效。从 SfM（Structure from Motion）初始化的稀疏点云开始，每个点作为一个 3D 高斯，通过梯度下降优化其参数：</p>
+
+        <pre><code class="language-python">def train_3dgs(points, images, cameras, n_steps=30000):
+    # 初始化高斯: 位置 + 协方差 + 不透明度 + SH 系数
+    gaussians = GaussianPointCloud(points)
+
+    for step in range(n_steps):
+        # 随机采样一个相机视角
+        cam_idx = random.randint(0, len(cameras))
+        camera = cameras[cam_idx]
+        gt_image = images[cam_idx]
+
+        # 前向: 渲染当前高斯集合
+        rendered_image = splat_render(gaussians, camera)
+
+        # 损失: L1 + SSIM
+        loss = 0.8 * l1_loss(rendered_image, gt_image) + \
+               0.2 * ssim_loss(rendered_image, gt_image)
+
+        # 自适应密度控制
+        if step % 100 == 0:
+            gaussians.densify_and_prune(
+                position_gradients,   # 从反向传播获得
+                screen_sizes,         # 屏幕空间大小
+                opacity_threshold=0.005
+            )
+            # densify: 复制高膨胀、低不透明度的高斯
+            # prune: 删除不透明度太低的高斯
+
+        # 反向传播
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        if step % 1000 == 0:
+            psnr = compute_psnr(rendered_image, gt_image)
+            print(f"Step {step}: PSNR = {psnr:.2f} dB")
+
+    return gaussians</code></pre>
+
+        <div class="callout-tip">
+            <strong>球谐函数（Spherical Harmonics）：</strong>球谐函数是球面上的正交基函数，类似于傅里叶级数但在球面上。3DGS 使用 3 阶球谐（9 个系数 per channel = 27 个标量）来近似每个高斯的各向异性颜色。低阶捕捉全局光照变化（阴影、环境光），高阶捕捉局部细节（高光、反射）。
+        </div>
+
+        <h2 id="diffusion-3d">三、Diffusion 模型生成 3D</h2>
+
+        <h3>3.1 DreamFusion——Text-to-3D</h3>
+
+        <p>DreamFusion（2022）是第一个将文本扩散模型应用于 3D 生成的开创性工作。它的核心洞察是：<strong>不需要 3D 训练数据，仅用 2D 扩散模型的先验就可以优化出 3D 场景</strong>。</p>
+
+        <pre><code class="language-python">def dreamfusion(text_prompt, n_steps=2500):
+    # 初始化: 随机 NeRF 或随机高斯点云
+    scene = RandomNeRF()
+
+    for step in range(n_steps):
+        # 1. 随机采样相机视角
+        theta = random.uniform(0, 2*pi)
+        phi = random.uniform(0, pi)
+        camera = spherical_camera(theta, phi)
+
+        # 2. 用 NeRF 渲染图像
+        rendered_img = render_nef(scene, camera)
+
+        # 3. 添加噪声（DDIM 采样步骤）
+        noise_level = schedule[step]
+        noisy_img = add_gaussian_noise(rendered_img, noise_level)
+
+        # 4. 用预训练的 Stable Diffusion 估计噪声
+        #    并计算梯度: ∇_x L ≈ ε_θ(noisy_img)
+        noise_pred = stable_diffusion.predict_noise(noisy_img, step)
+
+        # 5. 梯度回传到 NeRF 参数
+        loss = (noise_pred - actual_noise).pow(2).mean()
+        loss.backward()
+        optimizer.step()
+
+        # 6. 正则化: 避免过度优化
+        scene.regularize()
+
+    return scene</code></pre>
+
+        <h3>3.2 后续进展</h3>
+
+        <p>DreamFusion 之后出现了大量改进方案：</p>
+
+        <ul>
+            <li><strong>NeRF-Dreamer</strong>：用 Consistency Model 替代 DDPM，将 2500 步优化减少到 4 步</li>
+            <li><strong>Zero123</strong>：用单张参考图像生成多角度一致的新视图</li>
+            <li><strong>Magic3D</strong>：DreamFusion + 3DGS，先用 NeRF 粗生成，再用 3DGS 精细化</li>
+            <li><strong>Stable Diffusion 3D</strong>：端到端的 text-to-3D 模型，直接输出 3D 表示</li>
+        </ul>
+
+        <h2 id="ai-rendering">四、AI 辅助渲染管线</h2>
+
+        <h3>4.1 Super Resolution（超分辨率）</h3>
+
+        <p>超分辨率技术让 GPU 以较低分辨率渲染，然后通过 AI 模型 upscale 到目标分辨率。这可以在几乎不损失视觉质量的前提下大幅提升帧率。</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr><th>技术</th><th>原理</th><th>训练数据</th><th>质量</th><th>延迟</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>DLSS (NVIDIA)</td><td>Temporal RL + AI Upscale</td><td>专用超分辨率数据集</td><td>⭐⭐⭐⭐⭐</td><td>1-3ms</td></tr>
+                    <tr><td>FSR (AMD)</td><td>RCAN Spatial Upscale</td><td>无（开源）</td><td>⭐⭐⭐⭐</td><td>0.5-1ms</td></tr>
+                    <tr><td>XeSS (Intel)</td><td>MCST (多尺度 CNN)</td><td>通用游戏数据集</td><td>⭐⭐⭐⭐</td><td>1-2ms</td></tr>
+                    <tr><td>Native (原分辨率)</td><td>无</td><td>N/A</td><td>⭐⭐⭐⭐⭐</td><td>0ms</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>4.2 DLSS 工作原理</h3>
+
+        <p>DLSS（Deep Learning Super Sampling）的核心是<strong>时间超分辨率</strong>：不仅利用当前帧的低分辨率图像，还利用历史帧的深度信息和运动矢量，将多帧信息融合后重建出高质量图像。</p>
+
+        <pre><code class="language-python">def dlss_reconstruction(current_frame, history_frames, depth_maps, motion_vectors):
+    """
+    DLSS 重建管线:
+
+    1. Low-res render (1/4 分辨率)
+    2. Temporal accumulation (多帧累积)
+    3. Spatial upscaling (CNN upscale)
+    4. Anti-aliasing + sharpening
+    """
+    # 步骤 1: 低分辨率渲染
+    lr_image = render_at_resolution(current_frame, resolution=0.25)
+
+    # 步骤 2: 时间累积
+    accumulated = temporal_accumulate(
+        lr_image,
+        history_frames[-1],
+        motion_vectors,
+        depth_maps
+    )
+
+    # 步骤 3: AI 超分辨率
+    hr_image = cnn_upscale(accumulated, target_resolution=1.0)
+
+    # 步骤 4: 锐化
+    output = sharpen(hr_image, strength=0.3)
+
+    return output</code></pre>
+
+        <h3>4.3 性能数据</h3>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr><th>场景</th><th>原生 4K</th><th>DLSS Quality</th><th>DLSS Balanced</th><th>DLSS Performance</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Cyberpunk 2077 (RT On)</td><td>28 fps</td><td>48 fps (+71%)</td><td>65 fps (+132%)</td><td>92 fps (+229%)</td></tr>
+                    <tr><td>Hogwarts Legacy</td><td>35 fps</td><td>55 fps (+57%)</td><td>72 fps (+106%)</td><td>105 fps (+200%)</td></tr>
+                    <tr><td>Alan Wake 2</td><td>22 fps</td><td>42 fps (+91%)</td><td>58 fps (+164%)</td><td>85 fps (+286%)</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="nerf-vs-traditional">五、NeRF vs 传统渲染对比</h2>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr><th>维度</th><th>传统渲染 (Rasterization)</th><th>离线渲染 (Path Tracing)</th><th>NeRF</th><th>3DGS</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>训练/构建时间</td><td>无</td><td>无</td><td>数小时</td><td>几分钟</td></tr>
+                    <tr><td>渲染速度</td><td>实时 (60+ fps)</td><td>秒/帧</td><td>1-10ms/像素</td><td>0.1-1ms/帧</td></tr>
+                    <tr><td>几何精度</td><td>无限（由模型定义）</td><td>无限</td><td>受限于采样</td><td>受限于高斯数量</td></tr>
+                    <tr><td>反射/折射</td><td>需要特殊处理</td><td>物理精确</td><td>自动学习</td><td>自动学习</td></tr>
+                    <tr><td>动画支持</td><td>原生支持</td><td>原生支持</td><td>困难（4D NeRF）</td><td>中等（动态 3DGS）</td></tr>
+                    <tr><td>编辑性</td><td>容易（修改网格）</td><td>困难</td><td>困难（隐式表示）</td><td>中等（可删改高斯）</td></tr>
+                    <tr><td>文件大小</td><td>KB-MB</td><td>N/A</td><td>MB-GB（网络权重）</td><td>MB-GB（高斯参数）</td></tr>
+                    <tr><td>典型应用场景</td><td>游戏、VR</td><td>电影、广告</td><td>场景重建、摄影测量</td><td>场景重建、AR</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="chapter-summary">六、本章小结</h2>
+
+        <p>本章介绍了神经渲染领域的核心技术和最新进展：</p>
+
+        <ul>
+            <li><strong>NeRF</strong> 用 MLP 隐式表示 3D 场景，通过体积渲染合成新视角，开创了神经场景表示的新范式</li>
+            <li><strong>位置编码</strong> 是 NeRF 能够捕捉高频细节的关键，<strong>Instant NGP</strong> 用哈希编码进一步加速到分钟级训练</li>
+            <li><strong>3D Gaussian Splatting</strong> 用显式高斯点云替代隐式网络，实现了实时渲染速度和照片级质量的双重突破</li>
+            <li><strong>球谐函数</strong> 为每个高斯编码了各向异性的颜色信息，是 3DGS 渲染质量的重要保障</li>
+            <li><strong>DreamFusion</strong> 证明了仅用 2D 扩散先验即可优化出高质量 3D 内容</li>
+            <li><strong>DLSS/FSR</strong> 等 AI 超分辨率技术已成为现代游戏性能优化的标配</li>
+        </ul>
+
+        <p>神经渲染正在重新定义"渲染"的含义。从 NeRF 到 3DGS，从 Text-to-3D 到 AI Upscaling，数据驱动的方法正在从研究实验室走向工业生产线。未来，我们很可能会看到传统渲染管线与神经表示深度融合的全新架构——既有物理精确性，又有数据驱动的表达能力。</p>
+
+        <h2 id="further-reading">七、延伸阅读</h2>
+
+        <ul>
+            <li>B. Mildenhall et al., "NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis" (ECCV 2020) — <a href="https://github.com/yenchenlin/nerf-pytorch" target="_blank">GitHub: nerf-pytorch</a></li>
+            <li>T. Müller et al., "Instant Neural Graphics Primitives with a Multiresolution Hash Encoding" (SIGGRAPH 2022) — <a href="https://github.com/NVlabs/instant-ngp" target="_blank">github.com/NVlabs/instant-ngp</a></li>
+            <li>J.T. Barron et al., "Mip-NeRF: A Multiscale Representation for Anti-Aliasing Neural Radiance Fields" (ICCV 2021) — <a href="https://jonbarron.info/mipnerf/" target="_blank">jonbarron.info/mipnerf</a></li>
+            <li>B. Kerbl et al., "3D Gaussian Splatting for Real-Time Radiance Field Rendering" (SIGGRAPH 2023) — <a href="https://github.com/graphdeco-inria/gaussian-splatting" target="_blank">github.com/graphdeco-inria/gaussian-splatting</a></li>
+            <li>A. Chen et al., "NeRF-Dreamer: Generating Volumes in Minutes" (2022) — <a href="https://nerf-dreamer.github.io/" target="_blank">nerf-dreamer.github.io</a></li>
+            <li>Jack Brunell et al., "DreamFusion: Text-to-3D using 2D Diffusion" (2022) — <a href="https://dreamfusion3d.github.io/" target="_blank">dreamfusion3d.github.io</a></li>
+            <li>NVIDIA, "DLSS 3 Technical Overview" — <a href="https://developer.nvidia.com/dlss" target="_blank">developer.nvidia.com/dlss</a></li>
+            <li>AMD, "FidelityFX Super Resolution 3" — <a href="https://www.amd.com/en/technologies/radeon-software-fidelityfx" target="_blank">amd.com</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="09-real-time-rendering.html">&larr; 第九章：实时渲染</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-glsl.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rust 系统编程入门到精通</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <h1>Rust 系统编程入门到精通</h1>
+        <p class="intro">从零开始系统掌握 Rust 系统编程。不只是语法速成，而是深入理解所有权系统、借用检查器、生命周期、并发模型、宏系统和 unsafe Rust 的每一个细节。学完后能够独立编写高性能、内存安全的系统级程序。</p>
+
+        <div class="callout callout-info">
+            <strong>关于本教程</strong>：
+            <ul>
+                <li><strong>前置知识</strong>：任何一门编程语言的基礎（C/C++/Java/Python 均可），了解指针和内存的基本概念</li>
+                <li><strong>学习深度</strong>：系统掌握 + 源码级剖析 + 实战项目</li>
+                <li><strong>Rust 版本</strong>：Rust 1.80+（2024 年 LTS）</li>
+                <li><strong>主题风格</strong>：技术蓝（适合编程类教程）</li>
+            </ul>
+        </div>
+
+        <div class="version-info">
+            <p><strong>版本：</strong>v1.0 | <strong>更新日期：</strong>2026-07-02</p>
+            <p><strong>适用环境：</strong>Rust 1.80+ / Cargo / Clippy / rustfmt</p>
+        </div>
+
+        <h2>课程目录</h2>
+
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-rust-philosophy.html">01 - Rust 哲学与设计理念</a></h3>
+                <p>为什么选择 Rust？所有权系统如何消除空指针和数据竞争，零成本抽象，以及 Rust 与其他系统语言的根本区别。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-borrow-checker.html">02 - 借用检查器深度解析</a></h3>
+                <p>生命周期标注、借用规则、NLL（非词法生命周期）、Region Inference、借用检查器的算法原理。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-type-system.html">03 - 类型系统与模式匹配</a></h3>
+                <p>Enum 与 Trait 的深度结合、Pattern Matching、类型别名、零成本抽象、Newtype 模式。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-standard-library.html">04 - 标准库深入</a></h3>
+                <h3><a href="04-standard-library.html">04 - 标准库深入：Vec、HashMap、Option、Result</a></h3>
+                <p>Vec 的内存布局与扩容策略、HashMap 的哈希碰撞处理、Option/Result 的错误处理范式、Iterator 的零成本抽象。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-error-handling.html">05 - 错误处理</a></h3>
+                <p>Result vs panic、anyhow 与 thiserror、自定义错误类型、Error _trait、try! 宏、? 操作符的展开机制。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-concurrency.html">06 - 并发编程</a></h3>
+                <p>Send/Sync 的精确语义、Arc/Mutex/RwLock、Channel、async/await 底层机制、Tokio 运行时。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="07-macros.html">07 - 宏系统</a></h3>
+                <p>Declarative Macro（macro_rules!）、Proc Macro（derive/function）、Token Tree 解析、编译期代码生成。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="08-ffi.html">08 - FFI 与 C 互操作</a></h3>
+                <p>cbindgen/bindgen、extern "C"、ABI 兼容性、安全 FFI 边界、与 C/C++ 库的集成。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="09-cli-tool.html">09 - 实战：构建命令行工具</a></h3>
+                <h3><a href="09-cli-tool.html">09 - 实战：从零构建高性能日志分析器</a></h3>
+                <p>从需求分析到架构设计：参数解析、文件 IO、多线程处理、性能基准测试。完整的工程项目。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="10-unsafe-system.html">10 - 进阶：Unsafe Rust 与系统编程</a></h3>
+                <h3><a href="10-unsafe-system.html">10 - 进阶：Unsafe Rust 与内核级编程</a></h3>
+                <p>unsafe 的六个超能力、raw pointer、align_of、ManuallyDrop、自定义 Drop、与操作系统交互。</p>
+            </div>
+        </div>
+
+        <h2>学习路线建议</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>第一阶段：理解所有权（第 1-3 章）</h4>
+                    <p>这是 Rust 最难跨越的门槛。花足够的时间理解所有权和借用检查器，后面的章节会轻松很多。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>第二阶段：掌握标准库与并发（第 4-6 章）</h4>
+                    <p>学会使用 Vec、HashMap、Option、Result 的正确姿势。理解 Send/Sync 的语义，编写安全的并发代码。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>第三阶段：工程化与底层（第 7-10 章）</h4>
+                    <p>宏系统、FFI、完整项目实战、unsafe Rust。这些是区分"会用 Rust"和"精通 Rust"的分水岭。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>开发环境</h2>
+
+        <ul>
+            <li><strong>安装</strong>：使用 rustup（官方推荐）— <code>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</code></li>
+            <li><strong>编辑器</strong>：VS Code + rust-analyzer（推荐）或 JetBrains Rust（RustRover）</li>
+            <li><strong>必备工具</strong>：cargo（构建）、rustfmt（格式化）、clippy（linting）、rustdoc（文档）</li>
+            <li><strong>推荐工具</strong>：cargo-expand（宏展开）、cargo-udeps（未使用依赖）、miri（UB 检测）</li>
+            <li><strong>操作系统</strong>：Linux/macOS/Windows（WSL2 推荐）均可，本教程以 Linux 为主</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://doc.rust-lang.org/book/" target="_blank">The Rust Programming Language（官方书）</a></li>
+                <li><a href="https://doc.rust-lang.org/std/" target="_blank">Rust 标准库文档</a></li>
+                <li><a href="https://github.com/rust-lang/rust" target="_blank">Rust 编译器源码（GitHub）</a></li>
+                <li><a href="https://blog.rust-lang.org/" target="_blank">Rust 官方博客</a></li>
+            </ul>
+        </div>
+    </main>
+</body>
+</html>

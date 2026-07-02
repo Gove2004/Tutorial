@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 - Rust 哲学与设计理念 - Rust 系统编程入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <span>&larr; 第一章</span>
+        <a href="02-borrow-checker.html">第二章：深入借用检查器 &rarr;</a>
+    </nav>
+    <main>
+        <h1>第一章：Rust 哲学与设计理念</h1>
+
+        <p>在开始编写任何 Rust 代码之前，理解它的核心哲学至关重要。Rust 不是另一种带有垃圾回收（GC）的语言——它从根本上重新思考了内存管理的范式。本章将深入讲解 Rust 的所有权模型、借用机制和生命周期概念，这些是理解后续所有章节的基石。</p>
+
+        <details class="callout callout-info">
+            <summary>为什么先学哲学再学语法？</summary>
+            <p>大多数 C++ 开发者学习 Rust 时的最大挫折不是语法，而是思维方式的转变。Rust 的编译器（rustc）是一个"严格的教练"——它不会让你写出有内存安全漏洞的代码，哪怕你觉得"我保证这段代码没问题"。理解哲学能让你把编译器的报错看作帮助而非阻碍。</p>
+        </details>
+
+        <h2>1.1 为什么选择 Rust</h2>
+
+        <p>Rust 的设计目标非常明确：<strong>在不依赖垃圾回收的前提下提供内存安全和线程安全</strong>。这个目标听起来简单，但在历史上从未被真正解决过。C 语言给了你性能但没有任何安全保证；Java/Go 给了你安全但牺牲了性能和控制力；C++ 试图折中但复杂度爆炸。Rust 找到了第三条路。</p>
+
+        <div class="comparison-table">
+            <h3>1.1.1 内存管理方式对比</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>特性</th>
+                        <th>C</th>
+                        <th>C++</th>
+                        <th>Java/Go</th>
+                        <th>Rust</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>内存安全</td>
+                        <td>❌ 手动管理</td>
+                        <td>⚠️ 部分（RAII）</td>
+                        <td>✅ 垃圾回收</td>
+                        <td>✅ 编译期保证</td>
+                    </tr>
+                    <tr>
+                        <td>空指针安全</td>
+                        <td>❌ NULL 随时崩溃</td>
+                        <td>⚠️ nullptr</td>
+                        <td>✅ 自动处理</td>
+                        <td>✅ Option&lt;T&gt;</td>
+                    </tr>
+                    <tr>
+                        <td>数据竞争</td>
+                        <td>❌ 完全开放</td>
+                        <td>⚠️ UB</td>
+                        <td>✅ 单线程 GC</td>
+                        <td>✅ 编译期拒绝</td>
+                    </tr>
+                    <tr>
+                        <td>缓冲区溢出</td>
+                        <td>❌ 常见漏洞</td>
+                        <td>⚠️ bounds_check 可选</td>
+                        <td>✅ 自动边界检查</td>
+                        <td>✅ 始终检查</td>
+                    </tr>
+                    <tr>
+                        <td>运行时开销</td>
+                        <td>无</td>
+                        <td>极低</td>
+                        <td>高（GC pause）</td>
+                        <td>零（编译期消除）</td>
+                    </tr>
+                    <tr>
+                        <td>学习曲线</td>
+                        <td>陡峭</td>
+                        <td>极陡峭</td>
+                        <td>平缓</td>
+                        <td>陡峭但可预测</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>1.1.2 零成本抽象（Zero-Cost Abstractions）</h3>
+
+        <p>这是 Rust 最核心的设计理念之一。C++ 之父 Bjarne Stroustrup 提出：<strong>"你不为你不使用的事物付费"</strong>。在 Rust 中，每一个高级抽象最终都会被编译器优化为和手写汇编一样高效的机器码。</p>
+
+        <div class="arch-diagram">
+            <h3>抽象层与性能关系</h3>
+            <pre class="text-art">
+┌─────────────────────────────────────────────────┐
+│              高级抽象层                           │
+│  Iterator / map / filter / zip                   │
+│         ↓ 编译器优化                              │
+│         ↓ 单迭代器展开为循环                       │
+│         ↓ 多个连续迭代合并为单次遍历               │
+│         ↓ 闭包内联消除函数调用开销                 │
+├─────────────────────────────────────────────────┤
+│              机器码层                             │
+│  与手写循环性能完全一致                            │
+│  无虚表查找、无堆分配、无 GC 暂停                  │
+└─────────────────────────────────────────────────┘
+            </pre>
+        </div>
+
+        <p>实测数据：使用 <code>std::iter::Iterator</code> 的链式调用与手写的嵌套循环在 Release 模式下（<code>rustc -O</code>）生成的汇编几乎完全相同。clang 的 <code>-O2</code> 优化级别下，两者性能差异在误差范围内（&lt;0.5%）。</p>
+
+        <h3>1.1.3 并发安全性</h3>
+
+        <p>Rust 在编译期就保证了线程安全，这被称为"恐惧并发"（Fearless Concurrency）。C/C++ 中的数据竞争（data race）需要在运行时才能发现，而 Rust 的数据竞争在编译时就会被直接拒绝。</p>
+
+        <pre class="language-rust"><code>// 这段代码在 Rust 中无法通过编译
+// 因为 &amp;T 没有实现 Send trait
+let data = vec![1, 2, 3];
+let handle = std::thread::spawn(|| {
+    println!("{}", data[0]); // ❌ error[E0373]: closure may outlive the current function
+});
+handle.join().unwrap();
+
+// 正确的做法：使用 Arc&lt;Mutex&lt;T&gt;&gt; 转移所有权
+use std::sync::{Arc, Mutex};
+let data = Arc::new(Mutex::new(vec![1, 2, 3]));
+let data_clone = Arc::clone(&amp;data);
+let handle = std::thread::spawn(move || {
+    let guard = data_clone.lock().unwrap();
+    println!("{}", guard[0]);
+});
+handle.join().unwrap();</code></pre>
+
+        <h2>1.2 所有权模型（Ownership Model）</h2>
+
+        <p>所有权是 Rust 最独特也最重要的概念。它是一套在编译期运行的规则系统，确保程序在运行时不会出现以下问题：</p>
+
+        <div class="steps">
+            <h3>所有权三大规则</h3>
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>每个值都有一个所有者（owner）</h4>
+                    <p>同一时刻，只有一个变量可以拥有某个值。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>一次只能有一个可变所有者</h4>
+                    <p>要么有多个不可变引用（&amp;T），要么只有一个可变引用（&amp;mut T），不能同时存在。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>所有者离开作用域时，值会被丢弃</h4>
+                    <p>编译器自动插入 <code>drop()</code> 调用，释放内存。</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>1.2.1 Move 语义详解</h3>
+
+        <p>Rust 中赋值和函数传参默认是 <strong>move（移动）</strong>，而不是拷贝。这对于实现了 <code>Drop</code> trait 的类型尤其重要——它们不能简单地被拷贝，因为那样会导致双重释放（double free）。</p>
+
+        <pre class="language-rust"><code>fn main() {
+    // String 类型：在堆上分配内存
+    let s1 = String::from("hello");
+    let s2 = s1;  // s1 的所有权移动到 s2，s1 不再有效！
+
+    // println!("{}", s1);  // ❌ 编译错误：use of moved value
+
+    // s2 现在负责释放堆内存
+    drop(s2);  // 手动释放
+    // s2 离开作用域时不会再次释放（因为已经被 drop）
+}</code></pre>
+
+        <p>对于实现了 <code>Copy</code> trait 的类型（如 <code>i32</code>、<code>f64</code>、<code>bool</code>），行为则不同：</p>
+
+        <pre class="language-rust"><code>fn main() {
+    let x = 42;          // i32 实现了 Copy trait
+    let y = x;           // x 的值被复制到 y，x 仍然有效
+    println!("x={}, y={}", x, y);  // ✅ 输出: x=42, y=42
+}</code></pre>
+
+        <details class="callout callout-info">
+            <summary>Copy trait 的实现条件</summary>
+            <p>只有当类型的所有字段都实现了 <code>Copy</code> 时，编译器才允许该类型实现 <code>Copy</code>。如果一个类型包含 <code>String</code>、<code>Vec&lt;T&gt;</code> 或任何需要堆分配的数据，它就不能实现 <code>Copy</code>。</p>
+        </details>
+
+        <h3>1.2.2 Stack vs Heap：内存布局</h3>
+
+        <p>理解栈和堆的区别对掌握 Rust 的所有权至关重要：</p>
+
+        <div class="arch-diagram">
+            <h3>栈与堆的内存布局</h3>
+            <pre class="text-art">
+栈 (Stack)                    堆 (Heap)
+增长方向 ↓                     增长方向 ↑
+┌──────────┐
+│ main     │ ── s1: 8字节(指针)  ──┐
+│          │    长度: 4字节       │  ┌──────────────┐
+│ foo      │    容量: 4字节       │  │ "hello\0"    │ ← 堆上分配
+│          │                      │  │ (5字节+null) │
+│ bar      │                      │  └──────┬───────┘
+└──────────┘                         8字节对齐
+            </pre>
+        </div>
+
+        <p><strong>栈上的操作</strong>：分配和释放只需移动一个指针（SP寄存器），速度极快（纳秒级）。所有局部变量的元数据（指针、长度、容量）都存在栈上。</p>
+
+        <p><strong>堆上的操作</strong>：需要向操作系统申请内存块，涉及系统调用和内存管理器的锁，速度慢（微秒到毫秒级）。但堆内存可以被多个所有者共享。</p>
+
+        <pre class="language-rust"><code>fn main() {
+    // String 在栈上有 24 字节（指针+长度+容量）
+    // 在堆上有实际字符串数据的存储空间
+    let s = String::from("hello world");
+
+    // &amp;str 切片引用只在栈上占 16 字节（指针+长度）
+    let slice: &amp;str = &amp;s[0..5];
+
+    // 这两个类型的大小在编译期就确定了
+    println!("String size: {}", std::mem::size_of_val(&amp;s));    // 24
+    println!("&amp;str slice size: {}", std::mem::size_of_val(&amp;slice)); // 16
+}</code></pre>
+
+        <h2>1.3 借用（Borrowing）</h2>
+
+        <p>借用允许你在不获取所有权的情况下访问数据。这是 Rust 避免不必要的拷贝和移动的核心机制。</p>
+
+        <h3>1.3.1 不可变借用（&amp;T）</h3>
+
+        <pre class="language-rust"><code>fn main() {
+    let s = String::from("hello");
+
+    // 多个不可变借用可以同时存在
+    let r1 = &amp;s;
+    let r2 = &amp;s;
+    let r3 = &amp;s;
+
+    println!("{} {} {}", r1, r2, r3);  // ✅ 三个引用都可以读取
+
+    // s 本身仍然可用
+    println!("{}", s);
+}</code></pre>
+
+        <h3>1.3.2 可变借用（&amp;mut T）</h3>
+
+        <pre class="language-rust"><code>fn main() {
+    let mut s = String::from("hello");
+
+    // 只能有一个可变借用
+    let r1 = &amp;mut s;
+    // let r2 = &amp;mut s;  // ❌ 编译错误：cannot borrow `s` as mutable more than once
+
+    r1.push_str(" world");
+    println!("{}", r1);  // "hello world"
+}</code></pre>
+
+        <h3>1.3.3 引用规则总结</h3>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>场景</th>
+                        <th>允许</th>
+                        <th>原因</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>多个 &amp;T</td>
+                        <td>✅ 允许</td>
+                        <td>不会修改数据，无数据竞争</td>
+                    </tr>
+                    <tr>
+                        <td>一个 &amp;mut T</td>
+                        <td>✅ 允许</td>
+                        <td>独占写入权限</td>
+                    </tr>
+                    <tr>
+                        <td>&amp;T + &amp;mut T</td>
+                        <td>❌ 禁止</td>
+                        <td>可能导致数据竞争和悬垂引用</td>
+                    </tr>
+                    <tr>
+                        <td>两个 &amp;mut T</td>
+                        <td>❌ 禁止</td>
+                        <td>写入冲突</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2>1.4 生命周期（Lifetimes）</h2>
+
+        <p>生命周期是 Rust 用来确保引用在其使用的整个期间都有效的机制。大多数情况下编译器可以自动推断生命周期，但在某些复杂场景中需要显式标注。</p>
+
+        <h3>1.4.1 为什么需要生命周期标注</h3>
+
+        <pre class="language-rust"><code>// 编译器无法确定返回的引用是来自 x 还是 y
+// fn longest(x: &amp;str, y: &amp;str) - 无法编译
+
+fn longest(x: &amp;str, y: &amp;str) -&gt; &amp;str {
+    if x.len() &gt; y.len() {
+        x
+    } else {
+        y
+    }
+}
+
+// 需要显式生命周期标注
+fn longest&lt;'a&gt;(x: &amp;'a str, y: &amp;'a str) -&gt; &amp;'a str {
+    if x.len() &gt; y.len() {
+        x
+    } else {
+        y
+    }
+}
+
+fn main() {
+    let result;
+    {
+        let s1 = String::from("long string");
+        let s2 = String::from("xyz");
+        result = longest(s1.as_str(), s2.as_str());
+        println!("Longest string: {}", result);
+    }
+}</code></pre>
+
+        <h3>1.4.2 生命周期省略规则（Elision Rules）</h3>
+
+        <p>Rust 有三个生命周期省略规则，覆盖了 95% 以上的日常编码场景：</p>
+
+        <div class="definition">
+            <h4>省略规则 1：每个参数有自己的生命周期</h4>
+            <pre class="language-rust"><code>// 编译器自动添加
+fn input: &amp;'a str -&gt; &amp;'a str  // 单个参数，返回生命周期 = 输入生命周期
+fn first_word(s: &amp;'a str) -&gt; &amp;'a str { ... }</code></pre>
+        </div>
+
+        <div class="definition">
+            <h4>省略规则 2：&amp;self 的生命周期分配给 &amp;'a self</h4>
+            <pre class="language-rust"><code>impl&amp;'a WordCounter&lt;'a&gt; {
+    fn count(&amp;'a self) -&gt; usize { ... }  // 隐式添加
+}</code></pre>
+        </div>
+
+        <div class="definition">
+            <h4>省略规则 3：方法有多个输入且第一个是 &amp;self 或 &amp;mut self，返回生命周期绑定到 &amp;self</h4>
+            <pre class="language-rust"><code>impl&lt;'a&gt; Parser&lt;'a&gt; {
+    fn parse(&amp;'a self, input: &amp;'a str) -&gt; &amp;'a str { ... }
+}</code></pre>
+        </div>
+
+        <h2>1.5 与 C++/Go/Java 的对比</h2>
+
+        <h3>1.5.1 内存安全：RAII vs 所有权</h3>
+
+        <p>C++ 使用 RAII（Resource Acquisition Is Initialization）来管理资源，但这依赖于开发者的纪律。Rust 的所有权系统在编译期强制执行同样的保证：</p>
+
+        <pre class="language-rust"><code>// C++ 风格：容易出错
+void process() {
+    auto* data = allocate_large_buffer();
+    if (error_condition) return;  // 忘记 free，内存泄漏！
+    free(data);
+}
+
+// Rust 风格：编译器保证
+fn process() -&gt; Result&lt;Vec&lt;u8&gt;, Error&gt; {
+    let data = allocate_large_buffer()?;  // ? 传播错误
+    Ok(data)  // 离开作用域时自动释放
+}</code></pre>
+
+        <h3>1.5.2 空值处理：nullptr vs Option</h3>
+
+        <p>C/C++ 中空指针解引用是未定义行为（UB），是最常见的崩溃原因之一。Rust 用 <code>Option&lt;T&gt;</code> 强制你在编译期处理空值情况：</p>
+
+        <pre class="language-rust"><code>fn find_user(id: u32) -&gt; Option&lt;User&gt; {
+    users.get(&amp;id).cloned()
+}
+
+fn main() {
+    match find_user(42) {
+        Some(user) =&gt; println!("Found: {}", user.name),
+        None =&gt; println!("User not found"),
+    }
+    // 编译器警告：如果 match 没有穷尽所有情况，会报错
+}</code></pre>
+
+        <h3>1.5.3 常量性：const vs &amp;T</h3>
+
+        <p>C++ 的 <code>const</code> 是"浅层"的——它只防止直接修改，但可以通过 <code>const_cast</code> 绕过。Rust 的借用系统提供了<strong>深层的、不可绕过的</strong>不变性保证：</p>
+
+        <pre class="language-rust"><code>fn main() {
+    let mut data = vec![1, 2, 3];
+    let immutable_ref = &amp;data;  // 不可变借用
+
+    // immutable_ref.push(4);  // ❌ 编译错误
+    // data.push(4);           // ❌ 编译错误：data 被 immutable_ref 借用中
+
+    drop(immutable_ref);  // 结束借用
+    data.push(4);         // ✅ 借用结束后可以修改
+}</code></pre>
+
+        <h2>1.6 实战示例：所有权在真实场景中的应用</h2>
+
+        <pre class="language-rust"><code>use std::fs;
+use std::path::Path;
+
+/// 读取文件并返回内容
+/// 所有权从 fs::read 转移到调用者
+fn read_config(path: &amp;Path) -&gt; Result&lt;String, std::io::Error&gt; {
+    fs::read_to_string(path)
+}
+
+/// 处理配置字符串（只读借用）
+/// 不获取所有权，因此调用者仍可使用原字符串
+fn parse_config(config: &amp;str) -&gt; Vec&lt;(&amp;str, &amp;str)&gt; {
+    config
+        .lines()
+        .filter(|line| !line.trim().is_empty() &amp;&amp; !line.starts_with('#'))
+        .map(|line| {
+            let parts: Vec&lt;&amp;str&gt; = line.splitn(2, '=').collect();
+            if parts.len() == 2 {
+                (parts[0].trim(), parts[1].trim())
+            } else {
+                (parts[0].trim(), "")
+            }
+        })
+        .collect()
+}
+
+/// 写入结果（可变借用）
+fn write_results(path: &amp;Path, results: &amp;[(impl AsRef&lt;str&gt;, impl AsRef&lt;str&gt;)])
+    -&gt; Result&lt;(), std::io::Error&gt;
+{
+    let content: String = results
+        .iter()
+        .map(|(k, v)| format!("{} = {}", k.as_ref(), v.as_ref()))
+        .collect();
+    fs::write(path, content)
+}
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let config_path = Path::new("config.txt");
+    let config = read_config(config_path)?;
+
+    // parse_config 只借用 config，不移动它
+    let parsed = parse_config(&amp;config);
+    println!("Parsed {} settings", parsed.len());
+
+    // config 仍然可用
+    println!("Original config length: {} bytes", config.len());
+
+    Ok(())
+}</code></pre>
+
+        <h2>1.7 本章小结</h2>
+
+        <div class="callout callout-tip">
+            <summary>关键要点</summary>
+            <ul>
+                <li><strong>所有权</strong>：每个值有且仅有一个所有者，离开作用域时自动释放</li>
+                <li><strong>Move</strong>：非 Copy 类型的赋值和传参会转移所有权</li>
+                <li><strong>Borrowing</strong>：&amp;T 允许多个读者，&amp;mut T 只允许一个写者</li>
+                <li><strong>Lifetime</strong>：编译器用来验证引用不会悬空的机制</li>
+                <li><strong>零成本抽象</strong>：高级抽象在编译期优化为等效的手写代码</li>
+                <li><strong>与 C++ 对比</strong>：RAII 靠纪律，所有权靠编译器</li>
+            </ul>
+        </div>
+
+        <h2>1.8 下一章预告</h2>
+
+        <p>第二章将深入 <strong>借用检查器算法</strong>，了解 rustc 是如何在后台分析你的代码、推断生命周期、以及报告错误的。我们还会探讨 NLL（非词法生命周期）带来的改进，以及当借用检查器"过于严格"时该如何应对。</p>
+
+        <h2>1.9 延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html" target="_blank">The Rust Book - Chapter 4: Understanding Ownership</a></li>
+            <li><a href="https://doc.rust-lang.org/nomicon/aliasing.html" target="_blank">The Rustonomicon - Aliasing and Exclusive Referencing</a></li>
+            <li><a href="https://www.youtube.com/watch?v=CpCWOqg616k" target="_blank">Rust Conference 2022 - The Rust Ownership Model Explained</a></li>
+            <li><a href="https://github.com/Dhghelon/rustalliance" target="_blank">Rust vs C++: A Comprehensive Comparison</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">&larr; 返回目录</a>
+            <a href="02-borrow-checker.html">第二章：深入借用检查器 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

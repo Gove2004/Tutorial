@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 - 数学基础 - 从零构建游戏引擎入门到精通</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-rendering-pipeline.html">&larr; 上一章</a>
+        <a href="04-scene-graph.html">后章 &rarr;</a>
+    </nav>
+    <main>
+        <h1>第三章：数学基础——向量、矩阵与四元数</h1>
+
+        <div class="callout callout-info">
+            <strong>学习目标</strong>：掌握 3D 图形学的所有核心数学工具。不只是记住公式，而是理解每个运算的物理意义和性能特征。学会用数学思维解决空间变换、插值、碰撞检测等问题。
+        </div>
+
+        <h2>向量：空间中的箭头</h2>
+
+        <p>向量是 3D 图形学最基本的概念。它不是一个数字，而是一个<strong>有方向的箭头</strong>——从原点指向空间中的某个点。在 C++ 中，我们用一个结构体来表示：</p>
+
+        <pre><code class="language-cpp">struct Vec3 {
+    float x, y, z;
+
+    // 加法：两个箭头的合成
+    Vec3 operator+(const Vec3& other) const {
+        return {x + other.x, y + other.y, z + other.z};
+    }
+
+    // 减法：从一个点到另一个点的方向
+    Vec3 operator-(const Vec3& other) const {
+        return {x - other.x, y - other.y, z - other.z};
+    }
+
+    // 标量乘法：拉伸或压缩箭头
+    Vec3 operator*(float s) const {
+        return {x * s, y * s, z * s};
+    }
+
+    // 长度（模）
+    float length() const {
+        return std::sqrt(x*x + y*y + z*z);
+    }
+
+    // 归一化：变成单位长度（方向不变）
+    Vec3 normalized() const {
+        float len = length();
+        if (len > 0.0f) return *this / len;
+        return {0, 0, 0};
+    }
+};</code></pre>
+
+        <h3>点积（Dot Product）</h3>
+        <p>点积的结果是一个<strong>标量</strong>（单个数字），表示两个向量的「相似度」。</p>
+
+        <pre><code class="language-cpp">float dot(Vec3 a, Vec3 b) {
+    return a.x*b.x + a.y*b.y + a.z*b.z;
+}</code></pre>
+
+        <p><strong>几何意义</strong>：<code>dot(a, b) = |a| * |b| * cos(theta)</code>。其中 theta 是两个向量的夹角。</p>
+
+        <ul>
+            <li><code>dot(a, b) &gt; 0</code>：夹角小于 90 度，方向大致相同</li>
+            <li><code>dot(a, b) == 0</code>：夹角等于 90 度，互相垂直</li>
+            <li><code>dot(a, b) &lt; 0</code>：夹角大于 90 度，方向相反</li>
+        </ul>
+
+        <p><strong>引擎中的应用</strong>：</p>
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr><th>应用场景</th><th>原理</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>光照计算</td><td>漫反射强度 = max(dot(法线, 光照方向), 0)</td></tr>
+                    <tr><td>摄像机朝向</td><td>判断物体是否在摄像机前方</td></tr>
+                    <tr><td>碰撞检测</td><td>判断两个表面的朝向关系</td></tr>
+                    <tr><td>角度检测</td><td>玩家是否面向目标（FPS 瞄准辅助）</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3>叉积（Cross Product）</h3>
+        <p>叉积的结果是一个<strong>新的向量</strong>，垂直于输入的两个向量。</p>
+
+        <pre><code class="language-cpp">Vec3 cross(Vec3 a, Vec3 b) {
+    return {
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x
+    };
+}</code></pre>
+
+        <p><strong>几何意义</strong>：结果向量的方向遵循右手定则，大小等于两个向量构成的平行四边形面积。</p>
+
+        <p><strong>引擎中的应用</strong>：</p>
+        <ul>
+            <li><strong>计算法线</strong>：三角形两条边的叉积就是该三角形的法线方向</li>
+            <li><strong>构建坐标系</strong>：给定前向向量和上方向，叉积可以得到右方向向量</li>
+            <li><strong>遮挡检测</strong>：判断一个点是否在平面的某一侧</li>
+        </ul>
+
+        <h3>归一化与插值</h3>
+        <p><strong>归一化</strong>（Normalize）将向量变成单位长度，保留方向。这在计算光照方向、移动方向时必不可少——你不希望玩家按下「前进」键时，斜着走比直着走更快。</p>
+
+        <p><strong>Lerp（线性插值）</strong>在两个值之间 smoothly 过渡：</p>
+
+        <pre><code class="language-cpp">// 在 a 和 b 之间插值，t ∈ [0, 1]
+Vec3 lerp(Vec3 a, Vec3 b, float t) {
+    return a + (b - a) * t;
+    // 等价于：a * (1 - t) + b * t
+}
+
+// 实际应用：平滑相机跟随
+Vec3 cameraTarget = playerPos + forward * 5.0f;
+cameraPos = lerp(cameraPos, cameraTarget, deltaTime * 5.0f);
+// 相机不会瞬间跳到目标位置，而是以 5.0 的速度平滑接近</code></pre>
+
+        <h2>矩阵：变换的数学表达</h2>
+
+        <p>矩阵是 3D 变换的核心工具。一个 4x4 矩阵可以同时表达平移、旋转、缩放三种变换。这就是为什么 3D 引擎统一使用 4x4 矩阵而不是分别存储位置、旋转、缩放。</p>
+
+        <pre><code class="language-cpp">struct Mat4 {
+    float m[4][4];
+
+    // 单位矩阵（恒等变换）
+    static Mat4 identity() {
+        Mat4 result;
+        for (int i = 0; i < 4; ++i)
+            for (int j = 0; j < 4; ++j)
+                result.m[i][j] = (i == j) ? 1.0f : 0.0f;
+        return result;
+    }
+
+    // 平移矩阵
+    static Mat4 translation(float x, float y, float z) {
+        Mat4 t = identity();
+        t.m[3][0] = x;  // 第四行第一列
+        t.m[3][1] = y;
+        t.m[3][2] = z;
+        return t;
+    }
+
+    // 缩放矩阵
+    static Mat4 scale(float sx, float sy, float sz) {
+        Mat4 s = identity();
+        s.m[0][0] = sx;  // 对角线元素
+        s.m[1][1] = sy;
+        s.m[2][2] = sz;
+        return s;
+    }
+
+    // 矩阵乘法（变换的组合）
+    Mat4 operator*(const Mat4& other) const {
+        Mat4 result = {{0}};
+        for (int i = 0; i < 4; ++i)
+            for (int j = 0; j < 4; ++j)
+                for (int k = 0; k < 4; ++k)
+                    result.m[i][j] += m[k][j] * other.m[i][k];
+        return result;
+    }
+};</code></pre>
+
+        <h3>变换矩阵的组合</h3>
+        <p>多个变换的组合通过矩阵乘法实现。注意乘法顺序很重要——<strong>矩阵乘法不满足交换律</strong>。</p>
+
+        <pre><code class="language-cpp">// 正确的变换顺序：先缩放，再旋转，最后平移
+Mat4 modelMatrix = Mat4::translation(tx, ty, tz)
+                 * Mat4::rotationY(angle)
+                 * Mat4::scale(sx, sy, sz);
+
+// 错误：先平移再缩放会导致物体被移到远处后再放大
+Mat4 wrong = Mat4::scale(sx, sy, sz)
+           * Mat4::translation(tx, ty, tz);
+// 结果：物体不仅被缩放了，还被移到了奇怪的位置</code></pre>
+
+        <div class="callout callout-info">
+            <strong>为什么是反序？</strong>：因为矩阵乘法是右结合的。model * vertex 中，最右边的变换最先执行。所以代码中写的顺序（translation * rotation * scale）对应的是实际执行的逆序（先 scale，再 rotation，最后 translation）。这种「写入顺序与执行顺序相反」的特性是初学者最容易困惑的地方。
+        </div>
+
+        <h3>视图矩阵（View Matrix）</h3>
+        <p>视图矩阵将世界坐标转换为相机坐标。它的本质是相机位置的<strong>逆变换</strong>——想象把整个世界反向移动到相机的位置。</p>
+
+        <pre><code class="language-cpp">// 从相机参数构建视图矩阵
+Mat4 lookAt(Vec3 eye, Vec3 center, Vec3 up) {
+    // 1. 计算相机的三个正交轴
+    Vec3 forward = (center - eye).normalized();
+    Vec3 right = cross(forward, up).normalized();
+    Vec3 actualUp = cross(right, forward);
+
+    // 2. 构建旋转部分
+    Mat4 rot;
+    rot.m[0][0] = right.x;     rot.m[0][1] = right.y;   rot.m[0][2] = right.z;
+    rot.m[1][0] = actualUp.x;  rot.m[1][1] = actualUp.y; rot.m[1][2] = actualUp.z;
+    rot.m[2][0] = -forward.x;  rot.m[2][1] = -forward.y; rot.m[2][2] = -forward.z;
+
+    // 3. 构建平移部分（将相机移到原点）
+    Mat4 trans = Mat4::translation(-eye.x, -eye.y, -eye.z);
+
+    // 4. 组合
+    return rot * trans;
+}</code></pre>
+
+        <h3>投影矩阵（Projection Matrix）</h3>
+        <p>投影矩阵将 3D 场景映射到 2D 屏幕。有两种主要类型：</p>
+
+        <ul>
+            <li><strong>透视投影</strong>（Perspective）：近大远小，模拟人眼。用于 3D 游戏。</li>
+            <li><strong>正交投影</strong>（Orthographic）：没有透视变形。用于 2D 游戏、UI、CAD。</li>
+        </ul>
+
+        <pre><code class="language-cpp">// 透视投影矩阵
+Mat4 perspective(float fov, float aspect, float near, float far) {
+    Mat4 proj = {{0}};
+    float tanHalfFov = std::tan(fov / 2.0f);
+    proj.m[0][0] = 1.0f / (aspect * tanHalfFov);
+    proj.m[1][1] = 1.0f / tanHalfFov;
+    proj.m[2][2] = -(far + near) / (far - near);
+    proj.m[2][3] = -1.0f;
+    proj.m[3][2] = -(2.0f * far * near) / (far - near);
+    proj.m[3][3] = 0.0f;
+    return proj;
+}</code></pre>
+
+        <h2>四元数：旋转的正确方式</h2>
+
+        <h3>为什么需要四元数？</h3>
+        <p>旋转是 3D 图形中最容易出错的部分。很多人直觉上使用欧拉角（Euler Angles：绕 X/Y/Z 轴的三个角度），但欧拉角有三个致命问题：</p>
+
+        <ol>
+            <li><strong>Gimbal Lock（万向节死锁）</strong>：当两个旋转轴对齐时，丢失一个自由度。想象飞机的俯仰角达到 90 度时，偏航和滚转变成了同一个轴。</li>
+            <li><strong>插值困难</strong>：两个欧拉角的线性插值会产生非均匀旋转，看起来像抖动。</li>
+            <li><strong>累积误差</strong>：多次旋转后，基向量不再正交，需要反复重新正交化。</li>
+        </ol>
+
+        <h3>四元数的数学定义</h3>
+        <p>四元数是复数的扩展，由一个实部和三个虚部组成：</p>
+
+        <pre><code class="language-cpp">struct Quaternion {
+    float w, x, y, z;  // w 是标量部分，(x,y,z) 是向量部分
+
+    // 从轴角构造四元数
+    // axis: 旋转轴（单位向量）
+    // angle: 旋转角度（弧度）
+    static Quaternion fromAxisAngle(Vec3 axis, float angle) {
+        float halfAngle = angle / 2.0f;
+        float sinHalf = std::sin(halfAngle);
+        return {
+            std::cos(halfAngle),    // w
+            axis.x * sinHalf,       // x
+            axis.y * sinHalf,       // y
+            axis.z * sinHalf        // z
+        };
+    }
+
+    // 四元数乘法（组合旋转）
+    Quaternion operator*(const Quaternion& other) const {
+        return {
+            w*other.w - x*other.x - y*other.y - z*other.z,
+            w*other.x + x*other.w + y*other.z - z*other.y,
+            w*other.y - x*other.z + y*other.w + z*other.x,
+            w*other.z + x*other.y - y*other.x + z*other.w
+        };
+    }
+
+    // 共轭（逆旋转）
+    Quaternion conjugate() const {
+        return {w, -x, -y, -z};
+    }
+
+    // 归一化
+    Quaternion normalized() const {
+        float len = std::sqrt(w*w + x*x + y*y + z*z);
+        return {w/len, x/len, y/len, z/len};
+    }
+};</code></pre>
+
+        <h3>SLERP 球面线性插值</h3>
+        <p>四元数的最大优势之一是可以在两个旋转之间做平滑插值（SLERP），这对于动画、相机跟随、平滑转向至关重要。</p>
+
+        <pre><code class="language-cpp">// SLERP：在 q1 和 q2 之间插值，t ∈ [0, 1]
+Quaternion slerp(Quaternion q1, Quaternion q2, float t) {
+    // 1. 计算点积
+    float dot = q1.w*q2.w + q1.x*q2.x + q1.y*q2.y + q1.z*q2.z;
+
+    // 2. 如果点积为负，翻转 q2 以保证最短路径
+    if (dot < 0.0f) {
+        q2 = {-q2.w, -q2.x, -q2.y, -q2.z};
+        dot = -dot;
+    }
+
+    // 3. 如果接近平行，使用线性插值
+    if (dot > 0.995f) {
+        return Quaternion{
+            q1.w + t*(q2.w - q1.w),
+            q1.x + t*(q2.x - q1.x),
+            q1.y + t*(q2.y - q1.y),
+            q1.z + t*(q2.z - q1.z)
+        }.normalized();
+    }
+
+    // 4. 标准 SLERP
+    float theta_0 = std::acos(dot);
+    float theta = theta_0 * t;
+    float sinTheta = std::sin(theta_0);
+    float s0 = std::cos(theta) - dot * std::sin(theta) / sinTheta;
+    float s1 = std::sin(theta) / sinTheta;
+
+    return Quaternion{
+        s0 * q1.w + s1 * q2.w,
+        s0 * q1.x + s1 * q2.x,
+        s0 * q1.y + s1 * q2.y,
+        s0 * q1.z + s1 * q2.z
+    };
+}</code></pre>
+
+        <p>SLERP 的视觉效果：两个旋转之间的过渡是<strong>匀速且沿最短路径</strong>的。而欧拉角的线性插值会在中间某个时刻出现旋转加速或减速的异常现象。</p>
+
+        <h3>四元数 vs 旋转矩阵 vs 欧拉角：性能对比</h3>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>指标</th>
+                        <th>四元数</th>
+                        <th>旋转矩阵 (3x3)</th>
+                        <th>欧拉角</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>存储</strong></td><td>4 个浮点数</td><td>9 个浮点数</td><td>3 个浮点数</td></tr>
+                    <tr><td><strong>组合旋转</strong></td><td>28 次乘 + 7 次加</td><td>18 次乘 + 9 次加</td><td>3 次加</td></tr>
+                    <tr><td><strong>归一化</strong></td><td>1 次 sqrt</td><td>需要 QR 分解（昂贵）</td><td>无需</td></tr>
+                    <tr><td><strong>旋转向量</strong></td><td>18 次乘 + 15 次加</td><td>9 次乘 + 6 次加</td><td>3 次矩阵乘法</td></tr>
+                    <tr><td><strong>插值</strong></td><td>SLERP（平滑匀速）</td><td>复杂（需要先转四元数）</td><td>线性插值（不均匀）</td></tr>
+                    <tr><td><strong>Gimbal Lock</strong></td><td>无</td><td>无</td><td>有</td></tr>
+                    <tr><td><strong>可读性</strong></td><td>低</td><td>中</td><td>高</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>最佳实践</strong>：内部用四元数存储旋转，用欧拉角做 UI 显示（人类可读），用旋转矩阵做 GPU 传输（着色器原生支持）。转换公式：四元数 → 旋转矩阵是标准操作，几乎所有数学库都提供了。
+        </div>
+
+        <h2>齐次坐标：为什么用 4D 表示 3D</h2>
+
+        <p>你可能会疑惑：3D 世界为什么需要用 4 个分量来表示？答案在于<strong>仿射变换的统一表达</strong>。</p>
+
+        <p>平移操作不能用 3x3 矩阵表示——矩阵乘法只能表达线性变换（旋转、缩放、剪切），而平移是非线性的（加法）。解决方案是使用<strong>齐次坐标</strong>：</p>
+
+        <pre><code class="language-cpp">// 3D 点 (x, y, z) → 齐次坐标 (x, y, z, w)
+// w = 1 表示点，w = 0 表示方向向量
+
+// 在 3x3 矩阵中无法表达平移：
+// [a b c]   [x]   [ax + by + cz]
+// [d e f] * [y] = [dx + ey + fz]
+// [g h i]   [z]   [gx + hy + iz]
+// 没有地方放平移量 tx, ty, tz！
+
+// 但在 4x4 矩阵中可以统一表达所有变换：
+// [R  t]   [v]   [R*v + t]    ← R 是 3x3 旋转缩放，t 是 3x1 平移
+// [0  1] * [1] = [    1   ]</code></pre>
+
+        <p>这就是为什么 3D 引擎统一使用 4x4 矩阵——它同时包含了旋转（3x3 部分）、平移（最后一列的前三个元素）、缩放（对角线）和剪切（非对角线元素），用一个数据结构搞定所有仿射变换。</p>
+
+        <h2>空间划分：BVH / Octree / BSP</h2>
+
+        <p>当场景中有成千上万个物体时，逐一检查每个物体会导致 O(n) 的复杂度。空间划分数据结构将空间分成区域，只检查与查询相关的区域，可以将复杂度降到 O(log n)。</p>
+
+        <h3>BVH（Bounding Volume Hierarchy）</h3>
+        <p>包围体层次结构。每个节点包含一个包围体（通常是 AABB），叶子节点包含实际几何体。</p>
+
+        <pre><code class="language-cpp">struct BVHNode {
+    AABB boundingBox;
+    BVHNode* children[2];  // 内部节点有两个子节点
+    Mesh* mesh;             // 叶子节点存储网格指针
+
+    // 构建：递归地将物体分成两组
+    static BVHNode* build(const std::vector&lt;Mesh*&gt;& meshes, int depth = 0) {
+        if (meshes.empty()) return nullptr;
+
+        // 找到最小包围盒
+        AABB bounds = computeBounds(meshes);
+
+        if (meshes.size() <= MAX_LEAF_SIZE || depth >= MAX_DEPTH) {
+            // 叶子节点
+            return new BVHNode{{bounds, nullptr, nullptr, meshes.data()}};
+        }
+
+        // 按最长轴分割
+        Axis axis = bounds.longestAxis();
+        std::sort(meshes.begin(), meshes.end(), [axis](Mesh* a, Mesh* b) {
+            return getCenter(a, axis) < getCenter(b, axis);
+        });
+
+        auto mid = meshes.begin() + meshes.size() / 2;
+        BVHNode* node = new BVHNode;
+        node->boundingBox = bounds;
+        node->children[0] = build(std::vector&lt;Mesh*&gt;(meshes.begin(), mid), depth + 1);
+        node->children[1] = build(std::vector&lt;Mesh*&gt;(mid, meshes.end()), depth + 1);
+        return node;
+    }
+
+    // 光线追踪：递归检查射线是否与节点相交
+    bool intersect(const Ray& ray) const {
+        if (!boundingBox.intersects(ray)) return false;
+
+        if (!children[0]) {
+            // 叶子节点：检查所有网格
+            for (auto* mesh : meshes) {
+                if (mesh->intersect(ray)) return true;
+            }
+            return false;
+        }
+
+        // 内部节点：递归检查子节点
+        return children[0]->intersect(ray) || children[1]->intersect(ray);
+    }
+};</code></pre>
+
+        <h3>Octree（八叉树）</h3>
+        <p>将空间均匀分成 8 个子区域，每个子区域可以再分。适合分布均匀的物体集合。</p>
+
+        <h3>BSP（Binary Space Partitioning）</h3>
+        <p>用平面递归地将空间分成两半。适合室内场景（如 Doom 引擎），可以精确判断可见性。</p>
+
+        <div class="comparison-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>数据结构</th>
+                        <th>构建复杂度</th>
+                        <th>查询复杂度</th>
+                        <th>适用场景</th>
+                        <th>内存开销</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>BVH</strong></td><td>O(n log n)</td><td>O(log n)</td><td>光线追踪、动态场景</td><td>中</td></tr>
+                    <tr><td><strong>Octree</strong></td><td>O(n log n)</td><td>O(log n)</td><td>均匀分布的静态场景</td><td>高（空节点）</td></tr>
+                    <tr><td><strong>BSP</strong></td><td>O(n²)</td><td>O(log n)</td><td>室内场景、可见性裁剪</td><td>中</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2>本章小结</h2>
+
+        <div class="callout callout-tip">
+            <strong>本章核心知识点回顾</strong>：
+            <ol>
+                <li><strong>向量运算</strong>：点积判断方向/角度，叉积计算法线/正交向量，归一化保证速度一致，Lerp 实现平滑过渡。</li>
+                <li><strong>矩阵变换</strong>：4x4 矩阵统一表达平移、旋转、缩放。乘法顺序重要（先缩放→旋转→平移）。</li>
+                <li><strong>四元数</strong>：解决 Gimbal Lock、支持 SLERP 插值、存储紧凑（4 浮点数 vs 9 浮点数）。</li>
+                <li><strong>齐次坐标</strong>：w 分量让平移可以用矩阵乘法表示，是 4x4 矩阵的基础。</li>
+                <li><strong>空间划分</strong>：BVH 适合光线追踪，Octree 适合均匀场景，BSP 适合室内可见性。</li>
+            </ol>
+        </div>
+
+        <h2>下一章预告</h2>
+
+        <p>第四章我们将学习<strong>场景图（Scene Graph）</strong>——引擎的「神经系统」。场景图管理着游戏中所有对象的层次关系、坐标变换、可见性。你会看到数学（矩阵、四元数）如何在场景图中实际运用，以及从 OOP 到 ECS 的架构演进。</p>
+
+        <h2>延伸阅读</h2>
+
+        <ul>
+            <li><a href="https://fgiesen.wordpress.com/2012/08/15/implementing-the-projection-division/" target="_blank">Fedora Dsign — Homogeneous Coordinates and Projection</a></li>
+            <li><a href="https://github.com/g-truc/glm" target="_blank">GLM — OpenGL Mathematics 数学库官方文档</a></li>
+            <li><a href="https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation" target="_blank">Wikipedia — Quaternions and Spatial Rotation（四元数旋转的数学证明）</a></li>
+            <li><a href="https://developer.nvidia.com/content/phase-space-part-1" target="_blank">NVIDIA — Phase Space, Part 1（四元数的几何解释）</a></li>
+            <li><a href="https://www.realtimerendering.com/" target="_blank">Real-Time Rendering (4th Ed.) — Chapter 2: Linear Algebra for Computer Graphics</a></li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="02-rendering-pipeline.html">&larr; 渲染管线</a>
+            <a href="04-scene-graph.html">场景图 &rarr;</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

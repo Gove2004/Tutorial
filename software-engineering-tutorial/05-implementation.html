@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>编码实践 - 软件工程完整教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-design.html">← 上一章</a>
+        <a href="06-testing.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>编码实践</h1>
+
+        <p>编码实践是软件工程中最"接地气"的部分。设计再漂亮，代码写得烂也白搭。这一章我们不讲语法，讲的是<strong>写出好代码的习惯和方法</strong>。</p>
+
+        <div class="definition">
+            <h4>什么是"好代码"？</h4>
+            <p>好代码不是"没有 bug 的代码"。好代码是<strong>别人能看懂、能修改、能扩展</strong>的代码。一句话总结：<strong>好代码是可维护的。</strong></p>
+        </div>
+
+        <h2>编码规范</h2>
+
+        <p>编码规范不是"代码长得好看"，而是<strong>团队有一致的代码风格</strong>。当 10 个人在同一个项目里写代码，如果每个人的缩进、命名、文件结构都不一样，那维护成本会指数级增长。</p>
+
+        <h3>规范的核心维度</h3>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>说明</th><th>工具支持</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>命名</td><td>变量名、函数名、类名的风格</td><td>IDE 内置</td></tr>
+                <tr><td>格式</td><td>缩进、换行、空格</td><td>Prettier / black / gofmt</td></tr>
+                <tr><td>文件结构</td><td>模块如何组织、文件如何命名</td><td>团队约定</td></tr>
+                <tr><td>注释</td><td>什么时候写注释、写什么风格的注释</td><td>ESLint / Pylint</td></tr>
+                <tr><td>错误处理</td><td>异常怎么处理、日志怎么记</td><td>代码审查</td></tr>
+            </tbody>
+        </table>
+
+        <h3>命名是软件工程中最被低估的技能</h3>
+
+        <pre><code class="language-python"># 差的命名
+def calc(a, b):
+    return a * b
+
+# 好的命名
+def calculate_order_total(subtotal, tax_rate):
+    return subtotal * (1 + tax_rate)
+</code></pre>
+
+        <p>Bjarne Stroustrup（C++ 之父）说过：<strong>"There are only two hard things in Computer Science: cache invalidation and naming things."</strong></p>
+
+        <h2>代码审查 (Code Review)</h2>
+
+        <p>代码审查是保证代码质量的最有效手段之一。它的价值不仅仅是"找 bug"，更重要的是<strong>知识共享</strong>和<strong>质量文化</strong>。</p>
+
+        <h3>代码审查的四个层次</h3>
+
+        <table>
+            <thead>
+                <tr><th>层次</th><th>检查什么</th><th>谁来做</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>语法/格式</strong></td><td>缩进、分号、引号风格</td><td>自动化工具（lint）</td></tr>
+                <tr><td><strong>逻辑正确性</strong></td><td>算法是否正确、边界条件是否处理</td><td>同行审查者</td></tr>
+                <tr><td><strong>架构一致性</strong></td><td>是否符合设计、是否引入了不该有的依赖</td><td>架构师 / Tech Lead</td></tr>
+                <tr><td><strong>可读性</strong></td><td>命名是否清晰、注释是否到位、结构是否合理</td><td>所有审查者</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-danger">
+            <strong>致命错误</strong>：把代码审查变成"挑错大会"——审查者逐行检查语法错误、缩进问题。这些应该交给 linter 去做。代码审查的重点应该是<strong>逻辑、架构、可读性</strong>。
+        </div>
+
+        <h3>代码审查的检查清单</h3>
+
+        <div class="checklist">
+            <ul>
+                <li>[ ] 代码是否实现了需求？（功能正确性）</li>
+                <li>[ ] 有没有更简单的写法？（简洁性）</li>
+                <li>[ ] 命名是否清晰表达了意图？（可读性）</li>
+                <li>[ ] 异常和边界情况是否处理了？（鲁棒性）</li>
+                <li>[ ] 有没有硬编码的魔法数字/字符串？（可配置性）</li>
+                <li>[ ] 测试是否充分？（可测试性）</li>
+                <li>[ ] 有没有引入新的依赖？这个依赖值得吗？（依赖性）</li>
+                <li>[ ] 这段代码 6 个月后还能看懂吗？（可维护性）</li>
+            </ul>
+        </div>
+
+        <h2>重构 (Refactoring)</h2>
+
+        <div class="definition">
+            <h4>什么是重构？</h4>
+            <p>重构是<strong>在不改变外部行为的前提下，改善代码的内部结构</strong>。它是"代码消毒"的过程——把烂代码慢慢变成好代码。</p>
+            <p>关键原则：<strong>小步重构</strong>。每次只做一个小改动，跑测试，确认没问题再做下一个。</p>
+        </div>
+
+        <h3>常见代码异味 (Code Smells)</h3>
+
+        <table>
+            <thead>
+                <tr><th>代码异味</th><th>症状</th><th>重构手法</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>过长函数</strong></td>
+                    <td>一个函数超过 20 行</td>
+                    <td>提取函数（Extract Method）</td>
+                </tr>
+                <tr>
+                    <td><strong>过大类</strong></td>
+                    <td>一个类超过 500 行</td>
+                    <td>提取类、提取接口</td>
+                </tr>
+                <tr>
+                    <td><strong>过长参数列表</strong></td>
+                    <td>函数参数超过 3 个</td>
+                    <td>引入参数对象（Introduce Parameter Object）</td>
+                </tr>
+                <tr>
+                    <td><strong>发散式变化</strong></td>
+                    <td>一个类经常被不同原因修改</td>
+                    <td>拆分类（Single Responsibility）</td>
+                </tr>
+                <tr>
+                    <td><strong>霰弹式修改</strong></td>
+                    <td>改一个需求要动多个文件</td>
+                    <td>合并到同一模块</td>
+                </tr>
+                <tr>
+                    <td><strong>依恋情结</strong></td>
+                    <td>函数对某个局部变量的关注多于对自身所在类的关注</td>
+                    <td>提取函数或引入类</td>
+                </tr>
+                <tr>
+                    <td><strong>数据泥团</strong></td>
+                    <td>同一组数据总是一起出现</td>
+                    <td>提取为对象</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>重构实战示例</h3>
+
+        <pre><code class="language-python"># 重构前：一个函数做了太多事
+def process_order(data):
+    # 验证
+    if not data.get('items'):
+        return None
+    for item in data['items']:
+        if item['quantity'] &lt;= 0:
+            return None
+
+    # 计算
+    total = 0
+    for item in data['items']:
+        price = item['price']
+        qty = item['quantity']
+        discount = 0.1 if item.get('is_vip') else 0
+        total += price * qty * (1 - discount)
+
+    # 格式化
+    result = "Order total: $" + str(round(total, 2))
+
+    # 记录日志
+    print("Order processed")
+
+    return result
+
+# 重构后：职责分离
+def validate_order(data):
+    if not data.get('items'):
+        return False
+    for item in data['items']:
+        if item['quantity'] &lt;= 0:
+            return False
+    return True
+
+def calculate_order_total(items):
+    total = 0.0
+    for item in items:
+        discount = 0.1 if item.get('is_vip') else 0.0
+        total += item['price'] * item['quantity'] * (1 - discount)
+    return round(total, 2)
+
+def format_order_result(total):
+    return f"Order total: ${total}"
+
+def process_order(data):
+    if not validate_order(data):
+        return None
+    total = calculate_order_total(data['items'])
+    logger.info("Order processed")
+    return format_order_result(total)
+</code></pre>
+
+        <h2>技术债务 (Technical Debt)</h2>
+
+        <p>技术债务是软件工程中最形象的比喻之一。它说的是：<strong>你选择了"快速但粗糙"的方案，未来需要花更多时间来偿还这个"债务"。</strong></p>
+
+        <h3>技术债务的分类</h3>
+
+        <div class="definition">
+            <h4>故意 vs 无意</h4>
+            <ul>
+                <li><strong>故意的</strong>：明知不好，但为了赶deadline 先这么写了。比如：硬编码配置、跳过测试、不用异常处理。</li>
+                <li><strong>无意的</strong>：不知道有更好的做法。比如：用了过时的 API、没注意到代码重复。</li>
+            </ul>
+        </div>
+
+        <div class="definition">
+            <h4>谨慎 vs 轻率</h4>
+            <ul>
+                <li><strong>谨慎的</strong>：权衡之后选择的短期方案，有明确的偿还计划。比如：MVP 阶段用 SQLite 而不是 PostgreSQL。</li>
+                <li><strong>轻率的</strong>：完全不负责任的代码。比如：不写注释、不处理异常、变量名全是 x/y/z。</li>
+            </ul>
+        </div>
+
+        <h3>技术债务的管理策略</h3>
+
+        <table>
+            <thead>
+                <tr><th>策略</th><th>做法</th><th>适用场景</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>定期偿还</strong></td>
+                    <td>每个 Sprint 预留 20% 时间还债</td>
+                    <td>成熟团队、长期维护的项目</td>
+                </tr>
+                <tr>
+                    <td><strong>重构驱动开发</strong></td>
+                    <td>写代码前先写测试，然后逐步重构</td>
+                    <td>新功能开发</td>
+                </tr>
+                <tr>
+                    <td><strong>Boy Scout Rule</strong></td>
+                    <td>离开时让代码比你来时更好</td>
+                    <td>任何团队文化</td>
+                </tr>
+                <tr>
+                    <td><strong>债务看板</strong></td>
+                    <td>用 Issue Tracker 记录技术债务，定期清理</td>
+                    <td>大型项目</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>警惕</strong>：技术债务本身不是坏事——有时候"先跑起来再说"是正确的策略。危险的是<strong>不还债</strong>。当技术债务超过某个阈值，代码变得无法修改，新功能开发速度归零——这就是"停滞点"（Stagnation Point）。
+        </div>
+
+        <h2>编程习惯</h2>
+
+        <h3>每日编程习惯清单</h3>
+
+        <div class="checklist">
+            <ul>
+                <li><strong>提交前跑测试</strong>：确保你没有破坏已有功能</li>
+                <li><strong>提交信息有意义</strong>：不要写 "fix" 或 "update"，写 "fix: 修复订单金额为负数时的计算错误"</li>
+                <li><strong>小步提交</strong>：每次提交只做一件事，方便回滚和审查</li>
+                <li><strong>每天至少读 30 分钟好代码</strong>：看优秀开源项目的源码，学别人的写法</li>
+                <li><strong>遇到 bug 先写复现测试</strong>：再修 bug，而不是直接改代码</li>
+                <li><strong>代码写完后问自己</strong>："如果我是第一次看到这个代码的人，能看懂吗？"</li>
+            </ul>
+        </div>
+
+        <h3>调试思维</h3>
+
+        <p>调试不是"猜哪里错了然后试一下"。好的调试方法是系统性的：</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>复现问题</h4>
+                    <p>写一个最小化的测试用例，能稳定复现问题。如果做不到，说明你对问题的理解还不够。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>隔离范围</h4>
+                    <p>二分法缩小问题范围。问题在左边还是右边？在上层还是下层？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>定位根因</h4>
+                    <p>找到导致问题的具体代码行。不是"大概"，而是"精确到那一行"。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>修复并验证</h4>
+                    <p>修完之后，跑一遍测试，确保没有引入回归。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>编码规范让团队代码风格一致，减少认知负担</li>
+            <li>代码审查是知识共享和质量控制的利器，但要用对重点</li>
+            <li>重构是持续的过程，小步慢走比一次性大重构更可靠</li>
+            <li>技术债务是必要的恶——可以借，但要还</li>
+            <li>好的编程习惯（小步提交、有意义的 commit message、先写测试再修 bug）比任何工具都重要</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.amazon.cn/dp/711529105X" target="_blank">《重构：改善既有代码的设计》— Martin Fowler</a></li>
+                <li><a href="https://www.amazon.cn/dp/7115374247" target="_blank">《代码大全 2》— Steve McConnell（第 21 章：高效编程）</a></li>
+                <li><a href="https://refactoring.guru/" target="_blank">Refactoring.Guru — 重构手法百科</a></li>
+                <li><a href="https://www.amazon.cn/dp/711547313X" target="_blank">《程序员修炼之道》— Andrew Hunt & David Thomas</a></li>
+            </ul>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>下一步</strong>：代码写好了，怎么保证它是对的？下一章我们学习<strong>软件测试</strong>——单元测试、集成测试、TDD、测试覆盖率。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="04-design.html">← 上一章：软件设计</a>
+            <a href="06-testing.html">软件测试 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

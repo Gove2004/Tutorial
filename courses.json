@@ -12,18 +12,6 @@
     "updated": "2026-07-01"
   },
   {
-    "dir": "browser-tutorial",
-    "title": "Web 浏览器内部入门到精通",
-    "chapters": 10,
-    "updated": "2026-07-03"
-  },
-  {
-    "dir": "compiler-tutorial",
-    "title": "编译器与解释器入门到精通",
-    "chapters": 10,
-    "updated": "2026-07-02"
-  },
-  {
     "dir": "compute-shader-tutorial",
     "title": "Compute Shader 入门到精通",
     "chapters": 10,
@@ -36,27 +24,9 @@
     "updated": "2026-07-02"
   },
   {
-    "dir": "game-engine-tutorial",
-    "title": "从零构建游戏引擎入门到精通",
-    "chapters": 10,
-    "updated": "2026-07-02"
-  },
-  {
-    "dir": "gdc-tech-tutorial",
-    "title": "GDC 2025 高技术讲座深度教程",
+    "dir": "software-engineering-tutorial",
+    "title": "软件工程完整教程",
     "chapters": 10,
     "updated": "2026-07-03"
-  },
-  {
-    "dir": "graphics-tutorial",
-    "title": "计算机图形学入门到精通",
-    "chapters": 10,
-    "updated": "2026-07-03"
-  },
-  {
-    "dir": "rust-system-tutorial",
-    "title": "Rust 系统编程入门到精通",
-    "chapters": 10,
-    "updated": "2026-07-02"
   }
 ]

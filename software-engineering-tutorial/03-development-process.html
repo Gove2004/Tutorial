@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>软件开发过程模型 - 软件工程完整教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-software-overview.html">← 上一章</a>
+        <a href="04-design.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>软件开发过程模型</h1>
+
+        <p>过程模型回答了一个根本问题：<strong>我们该怎么一步一步地把软件做出来？</strong></p>
+
+        <p>这不是"先画流程图再写代码"那么简单。过程模型决定了团队的协作方式、交付节奏、质量控制策略，以及最重要的——<strong>面对变化时，你的流程是在帮助你还是在拖你后腿？</strong></p>
+
+        <h2>为什么需要过程模型</h2>
+
+        <p>想象一个场景：10 个开发者同时开发一个项目，没有人规定谁先做哪部分、谁做完交给谁、怎么保证质量、出了问题谁负责。结果会怎样？——每个人都在写代码，但 nobody 知道系统在整体长什么样。</p>
+
+        <p>过程模型的价值不在于"走流程"，而在于<strong>建立共识和秩序</strong>。好的过程模型让团队知道：</p>
+
+        <ul>
+            <li>每个阶段产出什么？（交付物）</li>
+            <li>谁负责什么？（角色分工）</li>
+            <li>怎么保证质量？（检查点）</li>
+            <li>出了问题怎么办？（反馈机制）</li>
+        </ul>
+
+        <div class="callout callout-warning">
+            <strong>重要提醒</strong>：过程模型不是教条。选错模型比没有模型更糟——它会让你用"流程"的名义做蠢事，而且没人敢质疑。
+        </div>
+
+        <h2>主流过程模型一览</h2>
+
+        <h3>1. 瀑布模型 (Waterfall Model)</h3>
+
+        <div class="arch-diagram">
+瀑布模型
+需求分析 → 概要设计 → 详细设计 → 编码 → 测试 → 部署
+  ↑                                          |
+  └──────────────── 反馈 ──────────────────────┘
+        </div>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>核心思想</strong></td><td>阶段分明，前一阶段完成后才能进入下一阶段</td></tr>
+                <tr><td><strong>优点</strong></td><td>结构清晰、文档齐全、容易管理、适合合规审计</td></tr>
+                <tr><td><strong>缺点</strong></td><td>无法应对需求变更、用户直到最后才看到产品、问题发现太晚</td></tr>
+                <tr><td><strong>适用场景</strong></td><td>需求非常明确且稳定的项目（嵌入式、军工、医疗）</td></tr>
+                <tr><td><strong>不适用场景</strong></td><td>互联网产品、创业公司、需求模糊的创新项目</td></tr>
+            </tbody>
+        </table>
+
+        <h3>2. 增量模型 (Incremental Model)</h3>
+
+        <p>把系统分成多个"增量"，每次交付一个可用的子集。第一个增量通常是核心功能，后续增量逐步添加更多功能。</p>
+
+        <div class="arch-diagram">
+增量模型
+增量 1: 核心功能 ───→ 交付可用版本 v1.0
+增量 2: 扩展功能 ───→ 交付可用版本 v1.5
+增量 3: 高级功能 ───→ 交付可用版本 v2.0
+        </div>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>核心思想</strong></td><td>分批交付，每批都是一个完整的可运行系统</td></tr>
+                <tr><td><strong>优点</strong></td><td>早期交付价值、降低风险、用户能尽早使用</td></tr>
+                <tr><td><strong>缺点</strong></td><td>需要良好的架构设计来支持增量拆分</td></tr>
+                <tr><td><strong>适用场景</strong></td><td>大型系统、需要快速验证市场的项目</td></tr>
+            </tbody>
+        </table>
+
+        <h3>3. 螺旋模型 (Spiral Model)</h3>
+
+        <p>Boehm 在 1986 年提出的模型，核心特征是<strong>每个迭代都包含风险分析</strong>。它不是线性流程，而是螺旋式上升。</p>
+
+        <div class="arch-diagram">
+螺旋模型（每圈 = 一个迭代）
+         ┌─────────┐
+    ┌────│ 风险分析 │────┐
+    │    └─────────┘    │
+    │  ┌─────────┐     │
+    └──│ 开发计划 │─────┘
+       └─────────┘
+       ┌─────────┐
+──────│ 工程实现 │──────
+       └─────────┘
+       ┌─────────┐
+──────│  客户评审  │──────
+       └─────────┘
+        </div>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>核心思想</strong></td><td>每个迭代都经过：目标设定 → 风险分析 → 开发 → 评审</td></tr>
+                <tr><td><strong>优点</strong></td><td>风险驱动、适合大型高风险项目、持续改进</td></tr>
+                <tr><td><strong>缺点</strong></td><td>复杂、需要风险评估专业能力、文档量大</td></tr>
+                <tr><td><strong>适用场景</strong></td><td>大型、高风险、需求不完全明确的项目</td></tr>
+            </tbody>
+        </table>
+
+        <h3>4. 敏捷开发 (Agile Development)</h3>
+
+        <p>2001 年，17 位行业专家在 Utah 开会，签署了 <strong>《敏捷宣言》</strong>。这不是一个具体的方法论，而是一套价值观和原则。</p>
+
+        <div class="definition">
+            <h4>敏捷宣言的四个价值观</h4>
+            <ul>
+                <li><strong>个体和互动</strong> 高于 流程和工具</li>
+                <li><strong>可工作的软件</strong> 高于 详尽的文档</li>
+                <li><strong>客户合作</strong> 高于 合同谈判</li>
+                <li><strong>响应变化</strong> 高于 遵循计划</li>
+            </ul>
+            <p style="margin-top:1em"><em>注：右项也有价值，但我们更重视左项。</em></p>
+        </div>
+
+        <p>敏捷不是"不做计划"，而是"做有效的计划"。它通过短迭代（Sprint，通常 2 周）快速交付、快速反馈、快速调整。</p>
+
+        <h4>主流敏捷方法对比</h4>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>Scrum</th><th>Kanban</th><th>XP (极限编程)</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>核心机制</strong></td><td>固定长度 Sprint (2-4 周)</td><td>持续流动，不限迭代</td><td>工程实践驱动</td></tr>
+                <tr><td><strong>角色</strong></td><td>PO / SM / Dev Team</td><td>无固定角色</td><td>无固定角色</td></tr>
+                <tr><td><strong>变更</strong></td><td>Sprint 期间不变更</td><td>随时可变更</td><td>通过重构应对变更</td></tr>
+                <tr><td><strong>关键实践</strong></td><td>每日站会、回顾会</td><td>限制 WIP、看板上墙</td><td>TDD、结对编程、CI</td></tr>
+                <tr><td><strong>适用</strong></td><td>需求稳定迭代、团队成熟</td><td>运维/支持团队、持续交付</td><td>代码质量要求高、小团队</td></tr>
+            </tbody>
+        </table>
+
+        <h3>5. DevOps 与持续交付</h3>
+
+        <p>DevOps 不是工具，不是岗位，而是一种<strong>文化和实践</strong>。它的核心目标是缩短"从代码提交到生产部署"的周期。</p>
+
+        <div class="arch-diagram">
+DevOps 飞轮
+     ┌─────────────────────────────────────┐
+     │                                     │
+  ←─│  Monitor (监控/反馈)               │←─
+     │                                     │
+     │  Deploy → Release → Test → Build   │
+     │                                     │
+     └─────────────────────────────────────┘
+          ↑_______________________________↑
+                    持续反馈循环
+        </div>
+
+        <p>DevOps 的关键指标来自 DORA (DevOps Research and Assessment) 研究：</p>
+
+        <table>
+            <thead>
+                <tr><th>指标</th><th>卓越团队</th><th>高绩效团队</th><th>低绩效团队</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>部署频率</strong></td><td>On-demand (一天多次)</td><td>每周多次</td><td>每月不到一次</td></tr>
+                <tr><td><strong>变更前置时间</strong></td><td>&lt; 1 小时</td><td>1-7 天</td><td>&gt; 6 个月</td></tr>
+                <tr><td><strong>变更失败率</strong></td><td>0-15%</td><td>16-30%</td><td>&gt; 46%</td></tr>
+                <tr><td><strong>服务恢复时间</strong></td><td>&lt; 1 小时</td><td>1-7 天</td><td>&gt; 一个月</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>数据来源</strong>：DORA State of DevOps Report 是业界最有影响力的 DevOps 基准研究，每年发布一次。卓越团队的部署频率是高绩效团队的 <strong>1680 倍</strong>，变更失败率低 <strong>7 倍</strong>。
+        </div>
+
+        <h2>过程模型的选择策略</h2>
+
+        <p>没有最好的过程模型，只有最适合的。选择的关键维度：</p>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>选瀑布</th><th>选敏捷</th><th>选混合</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>需求清晰度</td><td>非常清晰且稳定</td><td>模糊或会变</td><td>核心需求清晰，边缘需求模糊</td></tr>
+                <tr><td>项目规模</td><td>中小型</td><td>任意</td><td>大型</td></tr>
+                <tr><td>合规要求</td><td>高（军工/医疗）</td><td>低</td><td>中等</td></tr>
+                <tr><td>客户参与</td><td>不需要</td><td>高度参与</td><td>阶段性参与</td></tr>
+                <tr><td>团队成熟度</td><td>低（流程驱动）</td><td>高（自组织）</td><td>中等</td></tr>
+            </tbody>
+        </table>
+
+        <h3>混合模型：现实中的最优解</h3>
+
+        <p>大多数成熟团队不会只用一种模型。常见的组合：</p>
+
+        <ul>
+            <li><strong>Scrum + DevOps</strong>：Scrum 管迭代节奏，DevOps 管交付效率</li>
+            <li><strong>瀑布式立项 + 敏捷式开发</strong>：高层规划用瀑布（里程碑、预算），具体开发用 Scrum</li>
+            <li><strong>Kanban + XP</strong>：持续流动的工作方式 + 严格的工程实践</li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>实战建议</strong>：如果你是初创团队，先选 Scrum，快速迭代验证产品方向。当你有了稳定的产品和用户群，再引入 DevOps 提升交付效率。当团队扩大到 50+ 人，可能需要 SAFe 或 LeSS 这样的规模化框架。
+        </div>
+
+        <h2>过程模型的演进</h2>
+
+        <p>软件工程的过程模型不是静止的。它随着技术和市场的变化在不断进化：</p>
+
+        <div class="arch-diagram">
+过程模型演进时间线
+
+1950s    手工编程，无过程
+1960s    瀑布模型萌芽（Royce 1970 年论文正式提出）
+1970s    螺旋模型（Boehm 1988）、增量模型
+1980s    原型法、V 模型
+1990s    RUP (Rational Unified Process)、Scrum 成型
+2001     敏捷宣言签署
+2007     Lean Software Development
+2010     DevOps 运动兴起
+2015     平台工程、GitOps
+2020     AI 辅助开发、ChatDev
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>过程模型是"怎么做软件"的方法论，决定了团队的协作方式和交付节奏</li>
+            <li>瀑布模型适合需求稳定的项目，敏捷开发适合需求多变的项目</li>
+            <li>DevOps 不是工具而是文化，核心指标是 DORA 四项</li>
+            <li>没有"最好"的模型，只有"最适合"的组合</li>
+            <li>现实中的成熟团队通常采用混合模型</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://agilemanifesto.org/" target="_blank">Agile Manifesto（敏捷宣言原文）</a></li>
+                <li><a href="https://www.devops.com/resources/state-of-devops-report/" target="_blank">DORA State of DevOps Report</a></li>
+                <li><a href="https://www.amazon.cn/dp/7115253653" target="_blank">《敏捷软件开发：原则、模式与实践》— Robert C. Martin</a></li>
+                <li><a href="https://www.amazon.cn/dp/7115303116" target="_blank">《持续交付》— Jez Humble</a></li>
+            </ul>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>下一步</strong>：过程定了，接下来就要动手设计了。下一章我们进入<strong>软件设计</strong>——架构选型、模块划分、接口设计。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="02-requirements.html">← 上一章：需求工程</a>
+            <a href="04-design.html">软件设计 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

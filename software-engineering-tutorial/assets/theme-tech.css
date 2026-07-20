@@ -1,0 +1,24 @@
+:root {
+    --primary: #007acc;
+    --primary-dark: #005a9e;
+    --bg-main: #ffffff;
+    --bg-aside: #f8f9fa;
+    --text: #1a1a1a;
+}
+
+body {
+    background: var(--bg-aside);
+    color: var(--text);
+}
+
+main {
+    background: var(--bg-main);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+a { color: var(--primary); }

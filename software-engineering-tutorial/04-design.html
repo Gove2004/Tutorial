@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>软件设计 - 软件工程完整教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-development-process.html">← 上一章</a>
+        <a href="05-implementation.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>软件设计</h1>
+
+        <p>软件设计是软件工程的"骨架"。它决定了一个系统的组织结构、模块划分、接口约定和数据流向。<strong>好的设计让系统易于理解和修改，差的设计让每改一行代码都像拆炸弹。</strong></p>
+
+        <h2>设计的两个层次</h2>
+
+        <p>软件设计分为两个层次，它们关注的问题完全不同：</p>
+
+        <div class="arch-diagram">
+软件设计层次
+┌──────────────────────────────────────────┐
+│  架构设计 (Architecture)                  │  ← 宏观：系统由哪些部分组成？它们怎么交互？
+│  - 模块划分                               │
+│  - 技术选型                               │
+│  - 部署拓扑                               │
+│  - 通信机制                               │
+├──────────────────────────────────────────┤
+│  详细设计 (Detailed Design)               │  ← 微观：每个模块内部怎么实现？
+│  - 类设计                                 │
+│  - 算法设计                               │
+│  - 数据结构选择                           │
+│  - 接口定义                               │
+└──────────────────────────────────────────┘
+        </div>
+
+        <div class="callout callout-danger">
+            <strong>常见错误</strong>：很多团队跳过架构设计直接进入编码，或者反过来——花三个月做 PPT 级别的架构设计，但从不落地。设计必须在"够好"和"够用"之间找到平衡。
+        </div>
+
+        <h2>架构设计模式</h2>
+
+        <p>架构风格决定了系统的组织方式。选择哪种架构，直接影响系统的可维护性、可扩展性和团队的组织方式。</p>
+
+        <h3>1. 分层架构 (Layered Architecture)</h3>
+
+        <div class="arch-diagram">
+分层架构（最常见）
+┌─────────────────────┐
+│   Presentation Layer│  ← UI / API 层
+├─────────────────────┤
+│   Application Layer │  ← 业务逻辑
+├─────────────────────┤
+│   Domain Layer      │  ← 核心领域模型
+├─────────────────────┤
+│   Infrastructure    │  ← 数据库、消息队列、外部服务
+└─────────────────────┘
+        </div>
+
+        <p>分层架构是最常见的架构模式。每个层只能依赖它下面的层，不能跨层调用。优点是职责清晰、易于测试；缺点是容易变成"面条代码"——每层都塞一堆逻辑，导致层与层之间的界限模糊。</p>
+
+        <h3>2. 微服务架构 (Microservices)</h3>
+
+        <div class="arch-diagram">
+微服务架构
+         ┌──────────┐
+         │  API Gateway│
+         └─────┬──────┘
+          ┌────┼────┬───────┐
+          ▼    ▼    ▼       ▼
+     ┌──────┐┌──────┐┌──────┐┌──────┐
+     │用户服务││订单服务││支付服务││通知服务│
+     └──────┘└──────┘└──────┘└──────┘
+          ▲        ▲        ▲        ▲
+          └────────┴────────┴────────┘
+                  消息队列 / 事件总线
+        </div>
+
+        <p>微服务的核心思想是<strong>单一职责</strong>：每个服务只做一件事，并且做好。服务之间通过 API 或消息队列通信，可以独立部署、独立扩展。</p>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>单体架构</th><th>微服务架构</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>部署</strong></td><td>一次部署整个应用</td><td>每个服务独立部署</td></tr>
+                <tr><td><strong>扩展</strong></td><td>整体扩展</td><td>按需扩展单个服务</td></tr>
+                <tr><td><strong>技术栈</strong></td><td>统一</td><td>每个服务可以用不同技术</td></tr>
+                <tr><td><strong>故障隔离</strong></td><td>一个模块挂，整个应用挂</td><td>服务级隔离</td></tr>
+                <tr><td><strong>复杂度</strong></td><td>低</td><td>高（分布式事务、网络延迟、服务发现）</td></tr>
+                <tr><td><strong>适用规模</strong></td><td>小团队、小系统</td><td>大团队、大系统</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>微服务不是银弹</strong>：Martin Fowler 的原话说得很清楚——"微服务的前提是你需要一个足够大的团队来管理它们的复杂度"。如果你的团队只有 5 个人，单体架构通常更合适。
+        </div>
+
+        <h3>3. 事件驱动架构 (Event-Driven)</h3>
+
+        <div class="arch-diagram">
+事件驱动架构
+┌──────────┐    ┌──────────┐    ┌──────────┐
+│ 生产者    │───→│ 消息中间件 │───→│ 消费者    │
+│ (Order    │    │ (Kafka / │    │ (Inventory│
+│  Service) │    │  RabbitMQ)│    │  Service) │
+└──────────┘    └──────────┘    └──────────┘
+                         │
+                    ┌────┴────┐
+                    ▼         ▼
+              ┌─────────┐ ┌─────────┐
+              │ 通知服务  │ │ 分析服务  │
+              └─────────┘ └─────────┘
+        </div>
+
+        <p>事件驱动架构的核心是<strong>解耦</strong>：生产者不知道谁会消费消息，消费者不知道消息从哪里来。通过消息中间件（Kafka、RabbitMQ）实现异步通信。</p>
+
+        <h2>设计原则</h2>
+
+        <p>设计原则是前人踩坑总结出来的"经验法则"。它们不是法律，但违反它们的时候，你应该有充分的理由。</p>
+
+        <h3>SOLID 五大原则</h3>
+
+        <div class="definition">
+            <h4>S - Single Responsibility Principle (单一职责原则)</h4>
+            <p>一个类/模块只负责一个功能领域中的相应职责。判断标准：如果需求变更只影响这个类的某一部分，那它就是单一职责的。</p>
+            <pre><code class="language-python"># 反例：一个类干了三件事
+class UserService:
+    def get_user(self, user_id): ...      # 数据访问
+    def send_welcome_email(self, user): ... # 邮件发送
+    def calculate_premium(self, user): ...  # 业务计算
+
+# 正例：职责分离
+class UserRepository:
+    def get_by_id(self, user_id): ...
+
+class EmailService:
+    def send_welcome(self, user): ...
+
+class PricingService:
+    def calculate_premium(self, user): ...
+</code></pre>
+        </div>
+
+        <div class="definition">
+            <h4>O - Open/Closed Principle (开闭原则)</h4>
+            <p>对扩展开放，对修改关闭。新增功能应该通过扩展实现，而不是修改已有代码。</p>
+            <pre><code class="language-python"># 反例：用 if-elif 链扩展
+def calculate_discount(order):
+    if order.type == "VIP":
+        return order.amount * 0.8
+    elif order.type == "NEW_USER":
+        return order.amount * 0.9
+    elif order.type == "FLASH":  # 每次加新类型都要改这个函数
+        return order.amount * 0.7
+
+# 正例：用多态扩展
+from abc import ABC, abstractmethod
+
+class DiscountStrategy(ABC):
+    @abstractmethod
+    def apply(self, amount: float) -> float: ...
+
+class VIPDiscount(DiscountStrategy):
+    def apply(self, amount: float) -> float:
+        return amount * 0.8
+
+class NewUserDiscount(DiscountStrategy):
+    def apply(self, amount: float) -> float:
+        return amount * 0.9
+
+# 新增折扣类型只需加一个新类，不改任何已有代码
+</code></pre>
+        </div>
+
+        <div class="definition">
+            <h4>L - Liskov Substitution Principle (里氏替换原则)</h4>
+            <p>子类必须能够替换父类，而不改变程序的正确性。判断标准：子类是否可以不破坏不变式地增加功能。</p>
+            <pre><code class="python"># 反例：子类破坏了父类的契约
+class Rectangle:
+    def set_width(self, w): self._width = w
+    def set_height(self, h): self._height = h
+    def area(self): return self._width * self._height
+
+class Square(Rectangle):
+    def set_width(self, w):
+        self._width = self._height = w  # 副作用：改了 height！
+    def set_height(self, h):
+        self._width = self._height = h  # 同上
+# Square 不能替换 Rectangle —— 违反了里氏替换原则
+</code></pre>
+        </div>
+
+        <div class="definition">
+            <h4>I - Interface Segregation Principle (接口隔离原则)</h4>
+            <p>客户端不应被迫依赖它不使用的方法。接口应该小而专一。</p>
+            <pre><code class="python"># 反例：胖接口
+class Worker:
+    def work(self): ...
+    def eat(self): ...       # Robot 不需要这个方法
+    def sleep(self): ...     # Robot 也不需要
+
+# 正例：拆分成小接口
+class Workable:
+    def work(self): ...
+
+class Eatable:
+    def eat(self): ...
+
+class Robot(Workable):
+    def work(self): ...
+    # 不需要实现 eat() 和 sleep()
+</code></pre>
+        </div>
+
+        <div class="definition">
+            <h4>D - Dependency Inversion Principle (依赖倒置原则)</h4>
+            <p>高层模块不应依赖低层模块，二者都应依赖抽象。抽象不应依赖细节，细节应依赖抽象。</p>
+            <pre><code class="python"># 反例：直接依赖具体实现
+class OrderService:
+    def __init__(self):
+        self.db = MySQLDatabase()  # 硬编码依赖
+
+# 正例：依赖抽象（依赖注入）
+class OrderService:
+    def __init__(self, db: DatabaseInterface):  # 依赖接口
+        self.db = db
+
+# 测试时可以注入 MockDatabase
+service = OrderService(MockDatabase())
+</code></pre>
+        </div>
+
+        <h2>其他重要设计原则</h2>
+
+        <h3>DRY (Don't Repeat Yourself)</h3>
+        <p>每个知识点在系统中必须有唯一、明确的表示。重复代码意味着：改一处，忘一处——bug 的温床。</p>
+
+        <h3>KISS (Keep It Simple, Stupid)</h3>
+        <p>系统应该尽量简单，而不是尽量简洁。简单意味着容易理解和修改。</p>
+
+        <h3>YAGNI (You Aren't Gonna Need It)</h3>
+        <p>不要为了实现"可能将来会用到的功能"而提前写代码。只做当前需要的东西。</p>
+
+        <h3>Composition Over Inheritance (组合优于继承)</h3>
+        <p>继承是紧耦合的——子类强依赖于父类的实现细节。组合更灵活，可以在运行时动态改变行为。</p>
+
+        <pre><code class="python"># 反例：深层继承链
+class Animal:
+    def fly(self): ...
+
+class Bird(Animal):
+    def fly(self): ...
+
+class Penguin(Bird):
+    def fly(self): ...  # 企鹅不会飞！但继承了 Bird 的接口
+
+# 正例：行为组合
+class Flyer:
+    def fly(self): ...
+
+class Swimmer:
+    def swim(self): ...
+
+class Sparrow(Flyer):  # 麻雀会飞
+    def fly(self): ...
+
+class Penguin(Swimmer):  # 企鹅会游泳
+    def swim(self): ...
+</code></pre>
+
+        <h2>架构风格对比</h2>
+
+        <table>
+            <thead>
+                <tr><th>架构风格</th><th>核心思想</th><th>优点</th><th>缺点</th><th>典型场景</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>MVC</strong></td>
+                    <td>Model-View-Controller 分离</td>
+                    <td>职责清晰、易于测试</td>
+                    <td>Controller 可能变胖</td>
+                    <td>Web 应用、桌面应用</td>
+                </tr>
+                <tr>
+                    <td><strong>Clean Architecture</strong></td>
+                    <td>依赖向内，业务逻辑在最中心</td>
+                    <td>技术栈无关、易测试</td>
+                    <td>学习曲线陡</td>
+                    <td>企业级应用</td>
+                </tr>
+                <tr>
+                    <td><strong>Hexagonal (Ports &amp; Adapters)</strong></td>
+                    <td>核心与外部通过端口通信</td>
+                    <td>外部依赖可插拔</td>
+                    <td>增加了间接层</td>
+                    <td>需要频繁切换外部依赖的系统</td>
+                </tr>
+                <tr>
+                    <td><strong>CQRS</strong></td>
+                    <td>命令和查询分开</td>
+                    <td>读写各自优化</td>
+                    <td>最终一致性、复杂度增加</td>
+                    <td>高并发读写系统</td>
+                </tr>
+                <tr>
+                    <td><strong>Event Sourcing</strong></td>
+                    <td>状态由事件序列推导</td>
+                    <td>完整审计日志、可回放</td>
+                    <td>事件迁移复杂</td>
+                    <td>金融、物流等需要审计的系统</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>设计工具与方法</h2>
+
+        <h3>UML 实用指南</h3>
+
+        <p>UML 不是"画图强迫症"。好的架构图能帮团队达成共识。但记住：<strong>图是手段，不是目的。</strong></p>
+
+        <table>
+            <thead>
+                <tr><th>图类型</th><th>用途</th><th>什么时候用</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>用例图</td><td>系统功能概览</td><td>需求阶段，和利益相关者沟通</td></tr>
+                <tr><td>时序图</td><td>对象间的交互顺序</td><td>设计复杂业务流程</td></tr>
+                <tr><td>类图</td><td>类结构和关系</td><td>设计核心领域模型</td></tr>
+                <tr><td>活动图</td><td>业务流程</td><td>梳理审批流、订单状态流转</td></tr>
+                <tr><td>组件图</td><td>模块依赖</td><td>大型项目的模块划分</td></tr>
+                <tr><td>部署图</td><td>物理部署拓扑</td><td>运维架构设计</td></tr>
+            </tbody>
+        </table>
+
+        <h3>Mermaid 快速绘图</h3>
+
+        <p>现代团队越来越多用 Mermaid 或 PlantUML 来画架构图——它们用代码描述图，可以版本控制、可以自动生成。</p>
+
+        <pre><code class="mermaid">graph TD
+    A[客户端] --> B[API Gateway]
+    B --> C[用户服务]
+    B --> D[订单服务]
+    D --> E[库存服务]
+    D --> F[支付服务]
+    C --> G[(MySQL)]
+    D --> G
+    E --> H[(Redis)]
+    F --> I[第三方支付 API]
+</code></pre>
+
+        <h2>架构决策记录 (ADR)</h2>
+
+        <p>架构决策记录是一种轻量级的文档化工具，用来记录<strong>为什么选了 A 而不是 B</strong>。这是很多团队忽略但极其重要的实践。</p>
+
+        <pre><code class="text"># ADR-001: 选择 PostgreSQL 而非 MongoDB
+
+## 状态
+已接受
+
+## 上下文
+我们需要一个持久化存储方案。团队对关系型数据库和非关系型数据库都没有深入经验。
+系统需要强一致性的事务支持（订单支付），且有复杂的关联查询需求。
+
+## 决策
+选择 PostgreSQL 作为主数据存储。
+
+## 后果
++ 支持 ACID 事务，满足订单支付场景
++ 团队对 SQL 更熟悉，学习成本低
++ 丰富的 ORM 生态
+- 水平扩展能力不如 NoSQL（但可以通过分库分表解决）
+- Schema 变更需要迁移脚本
+</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>实践建议</strong>：每个重大的架构决策都应该有一个 ADR。不是所有技术选型都需要（比如选 React 还是 Vue 可以由产品负责人决定），但涉及系统整体架构的决策（选什么数据库、什么部署方式、什么通信协议）必须记录。
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>软件设计分为架构设计和详细设计两个层次</li>
+            <li>主流架构风格：分层、微服务、事件驱动各有适用场景</li>
+            <li>SOLID 五原则是面向对象设计的基石</li>
+            <li>组合优于继承，简单优于复杂</li>
+            <li>架构决策需要记录——ADR 是轻量且有效的方式</li>
+            <li>UML/Mermaid 是表达设计的工具，不要为了画图而画图</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.amazon.cn/dp/7115273557" target="_blank">《架构整洁之道》— Robert C. Martin</a></li>
+                <li><a href="https://martinfowler.com/books/arch.html" target="_blank">Martin Fowler: Patterns of Enterprise Application Architecture</a></li>
+                <li><a href="https://www.amazon.cn/dp/7115547381" target="_blank">《领域驱动设计》— Eric Evans</a></li>
+                <li><a href="https://c4model.com/" target="_blank">C4 模型 — 软件架构可视化</a></li>
+                <li><a href="https://adr.github.io/" target="_blank">Architecture Decision Records (ADR)</a></li>
+            </ul>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>下一步</strong>：设计做好了，就该编码了。但编码不是"打开 IDE 就开始敲键盘"——编码实践决定了代码的质量上限。下一章我们学习<strong>编码实践</strong>。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="03-development-process.html">← 上一章：开发过程模型</a>
+            <a href="05-implementation.html">编码实践 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

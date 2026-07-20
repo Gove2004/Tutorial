@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>项目管理与度量 - 软件工程完整教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-ci-cd.html">← 上一章</a>
+        <a href="10-emerging-trends.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>项目管理与度量</h1>
+
+        <p>项目管理不是"画甘特图、开周会"。它是<strong>在约束条件下交付价值</strong>的能力——约束包括时间、预算、人力、技术风险。好的项目管理让团队在有限的资源下做出最大的影响。</p>
+
+        <h2>项目管理的三重约束</h2>
+
+        <div class="arch-diagram">
+         范围 (Scope)
+           ╱  ╲
+          ╱    ╲
+         ╱      ╲
+        ╱  质量   ╲
+       ╱──────────╲
+      ╱            ╲
+     ╱   时间 ─── 成本  ╲
+    ╱                    ╲
+   ─────────────────────────
+        </div>
+
+        <p>三重约束（Iron Triangle）的核心思想：<strong>你不可能同时改变任何一个角而不影响其他两个。</strong></p>
+
+        <ul>
+            <li>想加快进度？→ 要么加人（成本↑），要么砍功能（范围↓）</li>
+            <li>想降低成本？→ 要么延长期限（时间↑），要么减少功能（范围↓）</li>
+            <li>想加功能？→ 要么加时间，要么加钱</li>
+        </ul>
+
+        <h2>估算与排期</h2>
+
+        <p>估算是一切计划的基础。但估算是软件工程中最难的事情之一——因为你既不了解任务的真实复杂度，也不了解团队的实际速度。</p>
+
+        <h3>估算方法</h3>
+
+        <table>
+            <thead>
+                <tr><th>方法</th><th>做法</th><th>精度</th><th>适用场景</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>类比估算</strong></td>
+                    <td>跟类似项目对比</td>
+                    <td>低（±50%）</td>
+                    <td>早期规划、粗略估计</td>
+                </tr>
+                <tr>
+                    <td><strong>三点估算</strong></td>
+                    <td>最乐观 + 最悲观 + 最可能，加权平均</td>
+                    <td>中（±25%）</td>
+                    <td>单个任务的估算</td>
+                </tr>
+                <tr>
+                    <td><strong>敏捷故事点</strong></td>
+                    <td>相对估算（这个任务是那个任务的 2 倍大）</td>
+                    <td>中（±20%）</td>
+                    <td>迭代规划、Backlog 排序</td>
+                </tr>
+                <tr>
+                    <td><strong>Planning Poker</strong></td>
+                    <td>团队一起估算，讨论分歧</td>
+                    <td>中高（±15%）</td>
+                    <td>团队共识、知识共享</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>三点估算公式</h3>
+
+        <pre><code class="text">期望值 E = (乐观 + 4 × 最可能 + 悲观) / 6
+标准差 σ = (悲观 - 乐观) / 6
+
+示例：
+乐观：3 天
+最可能：5 天
+悲观：12 天
+
+E = (3 + 4×5 + 12) / 6 = 5.83 天
+σ = (12 - 3) / 6 = 1.5 天
+
+结论：有 68% 的概率在 4.3 ~ 7.3 天内完成
+</code></pre>
+
+        <h3>敏捷估算：故事点与 Velocity</h3>
+
+        <p>敏捷团队用<strong>故事点 (Story Points)</strong> 估算任务的相对复杂度，而不是绝对时间。然后用 <strong>Velocity（速率）</strong> 衡量每个 Sprint 能完成多少故事点。</p>
+
+        <pre><code class="text">Sprint 1: 完成 21 点
+Sprint 2: 完成 19 点
+Sprint 3: 完成 23 点
+Sprint 4: 完成 20 点
+─────────────────────
+平均 Velocity ≈ 21 点/Sprint
+
+剩余 Backlog: 140 点
+预计 Sprint 数: 140 / 21 ≈ 7 个 Sprint
+如果每个 Sprint 2 周 → 约 14 周
+</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>常见陷阱</strong>：把故事点直接等同于人天。故事点是相对复杂度，不是时间。一个 8 点的任务不一定是 4 点任务的两倍工作量——它可能在复杂度、风险和不确定性上都更高。
+        </div>
+
+        <h2>风险管理</h2>
+
+        <p>风险管理不是"等出了问题再救火"，而是<strong>提前识别可能的风险，评估影响，制定应对策略</strong>。</p>
+
+        <h3>风险矩阵</h3>
+
+        <table>
+            <thead>
+                <tr><th>风险</th><th>可能性</th><th>影响</th><th>等级</th><th>应对策略</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>核心开发人员离职</td>
+                    <td>中</td>
+                    <td>极高</td>
+                    <td style="color:#f44336;font-weight:bold">高</td>
+                    <td>知识共享、文档化、交叉培训</td>
+                </tr>
+                <tr>
+                    <td>第三方 API 变更</td>
+                    <td>中</td>
+                    <td>高</td>
+                    <td style="color:#f44336;font-weight:bold">高</td>
+                    <td>抽象接口层、准备备选方案</td>
+                </tr>
+                <tr>
+                    <td>性能不达标</td>
+                    <td>低</td>
+                    <td>高</td>
+                    <td style="color:#ff9800;font-weight:bold">中</td>
+                    <td>早期性能测试、性能基准</td>
+                </tr>
+                <tr>
+                    <td>UI 设计稿反复修改</td>
+                    <td>高</td>
+                    <td>低</td>
+                    <td style="color:#4caf50;font-weight:bold">低</td>
+                    <td>设计评审确认、冻结期</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>风险的四种应对策略</h3>
+
+        <ul>
+            <li><strong>规避 (Avoid)</strong>：改变计划消除风险。例如：不用新技术，用团队熟悉的方案。</li>
+            <li><strong>转移 (Transfer)</strong>：把风险转给别人。例如：买保险、签 SLA、用云服务代替自建。</li>
+            <li><strong>缓解 (Mitigate)</strong>：降低可能性或影响。例如：多做测试、加监控、写预案。</li>
+            <li><strong>接受 (Accept)</strong>：承认风险存在，准备应急资金/时间。适用于低概率低影响的风险。</li>
+        </ul>
+
+        <h2>敏捷看板 (Kanban Board)</h2>
+
+        <p>看板是可视化管理工作流的工具。它的核心是<strong>限制在制品 (WIP, Work In Progress)</strong>——一次只做少数的几件事。</p>
+
+        <div class="arch-diagram">
+Kanban Board
+
+待办 (Backlog)     进行中 (Doing)        已完成 (Done)
+┌──────────┐     ┌──────────┐         ┌──────────┐
+│ Ticket 1 │     │ Ticket 3 │         │ Ticket 5 │
+│ Ticket 2 │ ──→ │ Ticket 4 │ ──→     │ Ticket 6 │
+│ Ticket 3 │     └──────────┘         └──────────┘
+│ Ticket 4 │     WIP ≤ 2              交付给用户
+│ Ticket 5 │
+└──────────┘
+WIP 限制：每列最多 2 个任务
+        </div>
+
+        <p>限制 WIP 的好处：<strong>减少上下文切换，提高交付速度。</strong>当"进行中"的列满了，团队成员就不能再接新任务，而是要先帮别人完成已有的任务。</p>
+
+        <h2>代码度量 (Code Metrics)</h2>
+
+        <p>度量是"用数据驱动决策"的基础。代码度量帮助我们客观地评估代码质量，而不是凭感觉说"这段代码写得不错"。</p>
+
+        <h3>核心代码度量指标</h3>
+
+        <table>
+            <thead>
+                <tr><th>指标</th><th>定义</th><th>健康范围</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>圈复杂度</strong></td>
+                    <td>线性独立路径的数量</td>
+                    <td>≤ 10（函数）</td>
+                    <td>复杂度越高，越难测试和理解</td>
+                </tr>
+                <tr>
+                    <td><strong>代码行数</strong></td>
+                    <td>文件的物理行数</td>
+                    <td>≤ 300（文件）</td>
+                    <td>文件太长通常意味着职责过多</td>
+                </tr>
+                <tr>
+                    <td><strong>耦合度</strong></td>
+                    <td>与其他模块的依赖数量</td>
+                    <td>越少越好</td>
+                    <td>高耦合意味着改一处动全身</td>
+                </tr>
+                <tr>
+                    <td><strong>圈复杂度</strong></td>
+                    <td>函数/类的圈复杂度之和</td>
+                    <td>类 ≤ 50</td>
+                    <td>类的方法太多也意味着职责过多</td>
+                </tr>
+                <tr>
+                    <td><strong>测试覆盖率</strong></td>
+                    <td>被测试覆盖的代码比例</td>
+                    <td>≥ 80%</td>
+                    <td>但不是越高越好——关注有意义的覆盖</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>圈复杂度详解</h3>
+
+        <p>圈复杂度 (Cyclomatic Complexity) 衡量的是一个函数的"分支数量"。每增加一个 if/for/while/catch，复杂度 +1。</p>
+
+        <pre><code class="language-python"># 圈复杂度 = 1（没有分支）
+def calculate_sum(numbers):
+    total = 0
+    for n in numbers:
+        total += n
+    return total
+
+# 圈复杂度 = 4（3 个分支）
+def classify_score(score):
+    if score >= 90:          # +1
+        return "A"
+    elif score >= 80:        # +1
+        return "B"
+    elif score >= 60:        # +1
+        return "C"
+    return "F"                # 基础 1
+
+# 圈复杂度 = 8（7 个分支）
+def process_order(order):
+    if order.is_valid():     # +1
+        if order.has_stock(): # +1
+            if order.can_pay(): # +1
+                if order.is_vip(): # +1
+                    discount = 0.2
+                else:
+                    discount = 0.1
+                payment = process_payment(order, discount) # +1
+                if payment.success: # +1
+                    ship(order)
+    return None
+    # 圈复杂度 = 8，建议拆分为多个小函数
+</code></pre>
+
+        <h2>团队度量</h2>
+
+        <p>除了代码度量，还有一些团队层面的度量指标可以帮助你了解项目的健康度：</p>
+
+        <table>
+            <thead>
+                <tr><th>指标</th><th>定义</th><th>用途</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>燃尽图 (Burndown Chart)</strong></td>
+                    <td>剩余工作量随时间的变化</td>
+                    <td>跟踪 Sprint 进度</td>
+                </tr>
+                <tr>
+                    <td><strong>累积流图 (CFD)</strong></td>
+                    <td>各状态累积的任务数</td>
+                    <td>发现瓶颈（哪一列堆积了最多任务）</td>
+                </tr>
+                <tr>
+                    <td><strong>Lead Time</strong></td>
+                    <td>从创建到交付的总时间</td>
+                    <td>衡量交付效率</td>
+                </tr>
+                <tr>
+                    <td><strong>Cycle Time</strong></td>
+                    <td>从开始开发到交付的时间</td>
+                    <td>衡量开发效率</td>
+                </tr>
+                <tr>
+                    <td><strong>Bug 逃逸率</strong></td>
+                    <td>生产环境发现的 bug 数 / 总 bug 数</td>
+                    <td>衡量测试质量</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>项目管理是在三重约束（范围、时间、成本）之间做权衡</li>
+            <li>估算用相对方法（故事点）比绝对方法（人天）更准确</li>
+            <li>风险管理要提前识别、评估、制定应对策略</li>
+            <li>看板的核心是限制 WIP，减少上下文切换</li>
+            <li>代码度量（圈复杂度、耦合度、覆盖率）帮助客观评估代码质量</li>
+            <li>团队度量（Lead Time、Cycle Time、Bug 逃逸率）帮助优化流程</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.amazon.cn/dp/7115303116" target="_blank">《敏捷估算与规划》— Mike Cohn</a></li>
+                <li><a href="https://www.pivotaltracker.com/learning/guides/burndown-charts" target="_blank">Pivotal Tracker: Burndown Charts Guide</a></li>
+                <li><a href="https://www.sonarsource.com/products/sonarqube/" target="_blank">SonarQube 代码质量度量平台</a></li>
+                <li><a href="https://www.amazon.cn/dp/7115547381" target="_blank">《精益软件开发》— Suzanne Robertson & Lisa Robertson</a></li>
+            </ul>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>下一步</strong>：我们已经覆盖了软件工程的核心领域。最后一章，我们看看<strong>工程趋势与前沿</strong>——AI 辅助开发、平台工程、SRE、绿色软件。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="08-ci-cd.html">← 上一章：CI/CD 与持续交付</a>
+            <a href="10-emerging-trends.html">工程趋势与前沿 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

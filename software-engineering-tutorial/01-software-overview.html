@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>软件工程概述 - 软件工程完整教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-requirements.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>软件工程概述</h1>
+
+        <p>软件工程是一门"用工程方法做软件"的学科。它不教你怎么写循环、怎么调 API，而是回答一个更根本的问题：<strong>如何让一群人稳定地、可预测地、高质量地做出复杂的软件系统？</strong></p>
+
+        <div class="definition">
+            <h4>什么是软件工程？</h4>
+            <p>IEEE 标准定义：软件工程是<strong>将系统化、规范化、可量化的方法应用于软件开发、运行和维护</strong>的学科。换句话说，软件工程就是"把写软件这件事变成一门工程学科"。</p>
+        </div>
+
+        <h2>为什么"写代码"不等于"做软件"</h2>
+
+        <p>很多人认为"会写代码 = 会做软件"。这就像"会砌砖 = 会盖楼"一样荒谬。区别在于规模与复杂度。</p>
+
+        <table class="comparison">
+            <thead>
+                <tr><th>维度</th><th>写代码（编程）</th><th>做软件（工程）</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>规模</strong></td>
+                    <td>几十行到几千行</td>
+                    <td>百万行到亿行级代码</td>
+                </tr>
+                <tr>
+                    <td><strong>人员</strong></td>
+                    <td>一个人</td>
+                    <td>几十人到几万人</td>
+                </tr>
+                <tr>
+                    <td><strong>时间跨度</strong></td>
+                    <td>几天到几周</td>
+                    <td>几个月到几十年</td>
+                </tr>
+                <tr>
+                    <td><strong>核心挑战</strong></td>
+                    <td>语法、算法、数据结构</td>
+                    <td>需求变更、团队协作、质量保障、运维</td>
+                </tr>
+                <tr>
+                    <td><strong>失败代价</strong></td>
+                    <td>重来一遍</td>
+                    <td>经济损失、安全事故、人命伤亡</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-danger">
+            <strong>历史教训</strong>：1968 年 NATO 会议首次提出"软件工程"一词，原因是当时大量软件项目严重超预算、延期、质量低劣，被称为"<strong>软件危机</strong>"。这不是技术问题，是工程问题。
+        </div>
+
+        <h2>软件危机的典型案例</h2>
+
+        <details>
+            <summary>IBM System/360 操作系统项目（1960s）</summary>
+            <div class="details-content">
+                <p>这个项目最初计划 30 人、1 年完成。实际投入超过 4000 人、耗时 4 年，且初期版本存在大量缺陷。直接后果是 IBM 损失了数十亿美元的市场份额。</p>
+                <p><strong>根本原因</strong>：没有需求管理、没有架构设计、没有测试体系、没有版本控制。完全是"作坊式"开发。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>Healthcare.gov 网站上线事故（2013）</summary>
+            <div class="details-content">
+                <p>美国政府医保网站上线当天就崩溃了。测试覆盖率不足、代码质量差、缺乏集成测试，导致上线首月收到超过 10 万条用户投诉。</p>
+                <p><strong>根本原因</strong>：外包管理失控、需求频繁变更、没有端到端集成测试、上线前没有压力测试。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>Ariane 5 火箭爆炸（1996）</summary>
+            <div class="details-content">
+                <p>一枚价值 10 亿美元的火箭在发射后 37 秒自毁，原因是软件中的一个整数溢出异常未被处理。这段代码在 Ariane 4 中从未触发，因为 Ariane 4 的速度和加速度范围不会导致溢出。</p>
+                <p><strong>根本原因</strong>：复用了未经充分测试的代码、异常处理不完善、系统集成测试不充分。</p>
+            </div>
+        </details>
+
+        <h2>软件工程的生命周期</h2>
+
+        <p>一个完整的软件项目通常经历以下阶段：</p>
+
+        <div class="arch-diagram">
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  需求分析    │ -> │  架构设计    │ -> │  编码实现    │
+└─────────────┘    └─────────────┘    └─────────────┘
+       ^                    |                    |
+       |                    v                    v
+       |             ┌─────────────┐    ┌─────────────┐
+       └─────────────│  测试验证    │ <- │  部署运维    │
+                     └─────────────┘    └─────────────┘
+        </div>
+
+        <p>但这不是单向流水线——每个阶段都可能产生反馈，推动前面的阶段修改。比如测试阶段发现的需求缺陷，会回到需求分析阶段。</p>
+
+        <h2>软件工程的核心原则</h2>
+
+        <div class="checklist">
+            <h4>工程师思维 Checklist</h4>
+            <ul>
+                <li><strong>可预测性</strong>：项目进度、成本、质量都应该可预估</li>
+                <li><strong>可重复性</strong>：同样的流程应该产生同样质量的产物</li>
+                <li><strong>可追溯性</strong>：每一行代码都应该能追溯到某个需求</li>
+                <li><strong>可维护性</strong>：软件不是写完就完了，而是要持续维护数年甚至数十年</li>
+                <li><strong>可扩展性</strong>：架构要能支撑未来的增长</li>
+                <li><strong>可靠性</strong>：软件要在预期场景下稳定工作</li>
+                <li><strong>经济性</strong>：工程质量要和投资回报匹配</li>
+            </ul>
+        </div>
+
+        <h2>软件工程 vs 其他学科</h2>
+
+        <p>软件工程不是计算机科学，也不是项目管理，更不是艺术创作。它有自己独特的关注点：</p>
+
+        <table>
+            <thead>
+                <tr><th>学科</th><th>关注点</th><th>与软件工程的关系</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>计算机科学</strong></td>
+                    <td>理论、算法、计算模型</td>
+                    <td>提供理论基础（算法、复杂度、形式化方法）</td>
+                </tr>
+                <tr>
+                    <td><strong>项目管理</strong></td>
+                    <td>计划、资源、风险、进度</td>
+                    <td>软件工程是项目管理的特殊场景（无形、可变、复杂）</td>
+                </tr>
+                <tr>
+                    <td><strong>人机交互</strong></td>
+                    <td>用户体验、界面设计</td>
+                    <td>软件工程的产品是"给人用的"，UX 是核心需求</td>
+                </tr>
+                <tr>
+                    <td><strong>质量管理</strong></td>
+                    <td>标准、流程、度量</td>
+                    <td>ISO/IEC 25010、CMMI 等质量体系是工程化的重要支撑</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>现实中的软件工程困境</h2>
+
+        <p>教科书和现实的差距，往往比代码和 bug 的差距还大。以下是一些真实场景中的两难问题：</p>
+
+        <div class="callout callout-warning">
+            <strong>经典困境</strong>：
+            <ul>
+                <li><strong>速度 vs 质量</strong>：老板说"下周必须上线"，但你知道代码质量撑不住——怎么办？</li>
+                <li><strong>完美 vs 完成</strong>：架构设计做到什么程度算够了？过度设计是常见问题</li>
+                <li><strong>技术债 vs 新功能</strong>：重构需要时间，但团队只考核新功能交付</li>
+                <li><strong>通用 vs 专用</strong>：做一套通用框架花 3 个月，但每个业务方都说"我们的场景不一样"</li>
+            </ul>
+        </div>
+
+        <p>这些困境没有标准答案。但有了软件工程的方法论，你可以：<strong>做出有依据的决策，而不是凭感觉拍脑袋。</strong></p>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>软件工程 = 用工程方法解决软件的规模、复杂度和协作问题</li>
+            <li>软件危机的本质是"作坊式开发"无法应对"工业化规模"</li>
+            <li>软件生命周期：需求 → 设计 → 实现 → 测试 → 部署 → 维护</li>
+            <li>核心原则：可预测、可重复、可追溯、可维护、可扩展、可靠、经济</li>
+            <li>现实中的工程决策需要在约束条件下做权衡</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://www.amazon.cn/dp/7111139947" target="_blank">《软件工程：实践者的研究方法》第 1 章</a></li>
+                <li><a href="https://www.amazon.cn/dp/7115146447" target="_blank">《代码大全 2》第 1 章：软件工程的宏观视角</a></li>
+                <li><a href="https://en.wikipedia.org/wiki/Software_crisis" target="_blank">Wikipedia: Software crisis</a></li>
+                <li><a href="https://en.wikipedia.org/wiki/Ariane_5" target="_blank">Wikipedia: Ariane 5 Flight 501 failure</a></li>
+            </ul>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>下一步</strong>：下一章我们将进入<strong>需求工程</strong>——这是软件工程的起点。需求搞错了，后面做得再好也是白费。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="02-requirements.html">需求工程 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

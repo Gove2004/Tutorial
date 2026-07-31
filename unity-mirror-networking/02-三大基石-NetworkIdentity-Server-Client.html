@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 2 章：三大基石 - Unity Mirror 教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <nav class="chapter-nav">
+            <a href="index.html">目录</a>
+            <a href="01-导论与架构总览.html">← 第 1 章</a>
+            <a href="03-RPC与SyncVar通信机制.html">第 3 章 →</a>
+        </nav>
+
+        <h1>第 2 章：三大基石 — NetworkIdentity / NetworkServer / NetworkClient</h1>
+
+        <p class="intro">
+            如果说 Mirror 是一座建筑，那么这三者就是它的承重墙。
+            不理解它们的精确含义和行为边界，后续所有代码都会埋下隐患。
+            本章将逐一拆解，并给出真实项目中会遇到的陷阱。
+        </p>
+
+        <h2>2.1 NetworkIdentity：网络对象的身份证</h2>
+
+        <p><code>NetworkIdentity</code> 是附加在 GameObject 上的组件。
+        它的作用只有一个：<strong>告诉 Mirror"这个对象是网络对象"</strong>。</p>
+
+        <p>Mirror 通过它来区分：<br>
+        • 这个对象需要通过网络同步吗？→ 有 NetworkIdentity → 需要<br>
+        • 这个对象只是本地表现吗？→ 没有 NetworkIdentity → 不需要</p>
+
+        <h3>2.1.1 关键属性</h3>
+
+        <pre><code class="language-csharp">// 在 Inspector 中设置，或代码赋值
+identity.isServer = true;   // 仅在服务器端有效
+identity.isClient = true;   // 仅在客户端有效
+identity.netId = 12345;     // 自动分配，唯一标识此网络对象
+
+// 只读属性（运行时由 Mirror 自动管理）
+identity.hasAuthority = false;   // 此客户端是否拥有此对象的所有权
+identity.connectionToServer;     // 连接到服务器的 NetworkConnection
+identity.connectionToClient;     // 服务器的连接引用（服务器端）</code></pre>
+
+        <div class="definition">
+            <h4>NetID（网络 ID）是什么？</h4>
+            <p>每个被 Spawn 到场景中的网络对象都有一个唯一的 <code>netId</code>。
+            它是一个 <code>uint</code> 类型，由服务器分配，全局唯一。
+            你通过 netId 可以引用任何已 Spawn 的对象——无论它在哪个客户端上。</p>
+            <p>NetId 的生命周期：<br>
+            • Spawn 时分配 → • 对象销毁时回收 → • 不会重复使用（在同一局游戏中）</p>
+        </div>
+
+        <h3>2.1.2 Observed Components：谁在驱动同步？</h3>
+
+        <p>NetworkIdentity 有一个 <strong>Observed</strong> 字段，通常会自动填入同一个 GameObject 上的
+        <code>NetworkTransform</code> 或其他同步组件。它的作用是：</p>
+
+        <p><em>"告诉服务器，这个对象的哪些组件需要被监控和同步。"</em></p>
+
+        <p>在大多数情况下，你不需要手动设置它——当你添加 <code>NetworkTransform</code> 时，
+        Mirror 会自动将它加入 Observed 列表。但理解它的存在很重要，因为：</p>
+
+        <ul>
+            <li>Observed 组件的 <code>OnPreSend</code> / <code>OnPostSend</code> 方法控制着同步频率和条件</li>
+            <li>如果 Observed 组件返回 "没有变化"，Mirror 会跳过序列化，节省带宽</li>
+        </ul>
+
+        <h3>2.1.3 Asset ID：Prefab 层面的身份</h3>
+
+        <p>每个 Prefab 在导出为 Asset Bundle 或通过 <code>Resources.Load</code> 加载时，
+        会有一个 <strong>Asset ID</strong>（一个 GUID）。Spawn 时，客户端收到的是 netId + assetId，
+        然后客户端根据 assetId 找到对应的 Prefab 实例化出来。</p>
+
+        <div class="callout callout-warning">
+            <strong>常见错误：</strong>在运行时用 <code>Instantiate(prefab)</code> 创建对象，
+            但没有通过 <code>NetworkServer.Spawn()</code> 注册。结果就是这个对象对所有客户端不可见——
+            因为你创建了 GameObject，但没有告诉 Mirror 它是网络对象。
+        </div>
+
+        <h2>2.2 NetworkBehaviour：所有网络脚本的基类</h2>
+
+        <p>在 Mirror 中，你不能直接把普通的 <code>MonoBehaviour</code> 放在网络对象上。
+        必须继承 <code>NetworkBehaviour</code>：</p>
+
+        <pre><code class="language-csharp">// ❌ 错误：普通 MonoBehaviour 不能放在网络对象上
+public class PlayerController : MonoBehaviour { ... }
+
+// ✅ 正确：继承 NetworkBehaviour
+public class PlayerController : NetworkBehaviour { ... }</code></pre>
+
+        <p><code>NetworkBehaviour</code> 提供了几个关键属性，你在每个网络脚本中都会用到：</p>
+
+        <pre><code class="language-csharp">public class PlayerController : NetworkBehaviour
+{
+    void Update()
+    {
+        // 这些属性决定代码在当前实例上是否应该执行
+        if (isServer)
+        {
+            // 这段代码只在服务器实例上运行
+            ValidatePlayerInput();
+        }
+
+        if (isClient)
+        {
+            // 这段代码只在客户端实例上运行
+            UpdateVisuals();
+        }
+
+        if (isLocalPlayer)
+        {
+            // 这段代码只对"玩家自己的角色"运行
+            HandleLocalInput();
+        }
+
+        // 注意：hasAuthority 表示"我是否拥有这个对象的控制权"
+        // 对于 Player 对象，拥有者通常是绑定它的客户端
+        if (hasAuthority)
+        {
+            // 只有对象的拥有者才能操控它
+            MovePlayer();
+        }
+    }
+}</code></pre>
+
+        <div class="sidebar-note">
+            <strong>关键区别：isLocalPlayer vs hasAuthority</strong><br>
+            • <code>isLocalPlayer</code>：这个对象是"我的玩家角色"。<br>
+            • <code>hasAuthority</code>：我有权控制这个对象。<br><br>
+            对于 Player 对象，两者通常都为 true。但对于非 Player 的网络对象（如队友的角色、共享道具），
+            可能有 authority 但不是 local player，或者反过来（某些特殊场景）。
+        </div>
+
+        <h2>2.3 NetworkServer：服务器端的上帝模式</h2>
+
+        <p><code>NetworkServer</code> 是服务器端的单例管理器。
+        它掌控着服务器上的一切网络状态：</p>
+
+        <pre><code class="language-csharp">// 核心属性
+NetworkServer.connections       // 所有已连接的客户端
+NetworkServer.localConnection   // 本地连接（Host 模式下使用）
+NetworkServer.active            // 服务器是否正在运行
+
+// 核心方法
+NetworkServer.Listen(100);                    // 启动服务器，最大 100 连接
+NetworkServer.Shutdown();                     // 关闭服务器
+NetworkServer.Spawn(playerObject);            // 生成网络对象
+NetworkServer.Destroy(playerObject);          // 从服务器上销毁对象
+NetworkServer.RemoveConnection(client);       // 踢出客户端
+
+// 注册自定义消息处理器
+NetworkServer.RegisterHandler&lt;MyMessage&gt;(OnMyMessage, replace: true);</code></pre>
+
+        <h3>2.3.1 服务器上的对象管理</h3>
+
+        <p>当一个对象通过 <code>NetworkServer.Spawn()</code> 生成后，Mirror 会在服务器内部维护一个字典：
+        <code>netId → NetworkIdentity</code>。这个映射贯穿整个游戏生命周期。</p>
+
+        <pre><code class="language-csharp">// 在服务器端生成一个敌人
+GameObject enemyPrefab = Resources.Load&lt;GameObject&gt;("Enemies/Boss");
+GameObject enemyInstance = Instantiate(enemyPrefab);
+
+// 关键：用 NetworkServer.Spawn 而不是 Instantiate
+NetworkServer.Spawn(enemyInstance);
+
+// 如果需要指定位置
+NetworkServer.SpawnWithPosition(enemyInstance.transform.position, Quaternion.identity);</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>致命错误：</strong>以下代码在服务器上是<strong>无效</strong>的 Spawn：
+            <pre><code class="language-csharp">// ❌ 错误：只用 Instantiate，没调用 NetworkServer.Spawn
+GameObject enemy = Instantiate(enemyPrefab, position, rotation);</code></pre>
+            这个对象存在于服务器的 GameObject 层级中，但 Mirror 不知道它的存在。
+            客户端永远不会收到它的 Spawn 消息，服务器上也无法对它调用 RPC。
+        </div>
+
+        <h2>2.4 NetworkClient：客户端的连接管理器</h2>
+
+        <p><code>NetworkClient</code> 是客户端端的单例管理器：</p>
+
+        <pre><code class="language-csharp">// 核心属性
+NetworkClient.isConnected           // 是否已连接
+NetworkClient.connection            // 主连接对象
+NetworkClient.connections           // 多连接支持（高级用法）
+NetworkClient.active                // 客户端是否活跃
+
+// 核心方法
+NetworkClient.Connect(new ConnectMessage
+{
+    host = "192.168.1.100",
+    port = 7777,
+    isAuthenticated = true,
+    userId = 0
+});
+
+NetworkClient.Disconnect();                      // 断开连接
+NetworkClient.PrepareToSpawnObjects();           // 准备 Spawn（场景切换时用）</code></pre>
+
+        <h3>2.4.1 客户端的对象接收</h3>
+
+        <p>当服务器 Spawn 一个对象时，客户端并不会"手动创建"它。
+        流程是这样的：</p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>服务器发送 Spawn 消息</h4>
+                    <p>服务器向所有客户端广播一条消息，包含：<br>
+                    • assetId（Prefab 标识）<br>
+                    • netId（对象唯一 ID）<br>
+                    • 初始状态数据（序列化后的 SyncVar 值）</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>客户端查找 Prefab</h4>
+                    <p>客户端收到消息后，根据 assetId 在已注册的 Prefab 池中查找对应模板。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>客户端 Instantiate</h4>
+                    <p>用找到的 Prefab 模板实例化对象，设置 netId，初始化 SyncVar 值。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h4>客户端回调</h4>
+                    <p>触发 <code>OnStartServer</code>、<code>OnStartClient</code> 等生命周期方法。</p>
+                </div>
+            </div>
+        </div>
+
+        <p>这意味着：<strong>客户端的 Spawn 对象必须是预制体注册过的</strong>。
+        你不能用 <code>Resources.Load</code> 动态加载一个从未注册过的 Prefab 然后 Spawn——
+        客户端找不到 assetId 对应的模板。</p>
+
+        <h2>2.5 NetworkManager：开箱即用的胶水</h2>
+
+        <p><code>NetworkManager</code> 是 Mirror 提供的最高层抽象。
+        它把连接流程、场景管理、Player Spawn、对象重置等琐碎工作都封装好了。</p>
+
+        <pre><code class="language-csharp">public class MyNetworkManager : NetworkManager
+{
+    [Header("Prefab 注册")]
+    public GameObject playerPrefab;
+
+    [Header("Spawn 点")]
+    public GameObject[] spawnPoints;
+
+    public override void StartServer()
+    {
+        base.StartServer();
+
+        // 注册 Player Prefab
+        // 这告诉 Mirror："当需要生成 Player 对象时，用这个 Prefab"
+        AddPlayerPrefab();
+    }
+
+    public override void OnServerAddPlayer(NetworkConnection conn)
+    {
+        // 当新客户端连接时，生成它的 Player 对象
+        GameObject player = Instantiate(playerPrefab, GetSpawnPosition(), Quaternion.identity);
+
+        // 告诉 Mirror 这个对象属于哪个客户端
+        NetworkServer.AddPlayerForConnection(conn, player);
+    }
+
+    Vector3 GetSpawnPosition()
+    {
+        // 随机选择 Spawn 点
+        if (spawnPoints.Length == 0) return Vector3.zero;
+        Vector3 pos = spawnPoints[Random.Range(0, spawnPoints.Length)].transform.position;
+        return pos;
+    }
+}</code></pre>
+
+        <h3>2.5.1 NetworkManager 的生命周期钩子</h3>
+
+        <table>
+            <thead>
+                <tr><th>钩子方法</th><th>运行环境</th><th>典型用途</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>OnServerStarted()</code></td><td>服务器</td><td>服务器启动后的初始化</td></tr>
+                <tr><td><code>OnServerConnect(NetworkConnection conn)</code></td><td>服务器</td><td>客户端连接时的回调</td></tr>
+                <tr><td><code>OnServerDisconnect(NetworkConnection conn)</code></td><td>服务器</td><td>客户端断开时的清理</td></tr>
+                <tr><td><code>OnServerAddPlayer(NetworkConnection conn)</code></td><td>服务器</td><td>为新客户端生成 Player 对象</td></tr>
+                <tr><td><code>OnClientConnected()</code></td><td>客户端</td><td>连接成功后的初始化</td></tr>
+                <tr><td><code>OnClientDisconnected()</code></td><td>客户端</td><td>断线清理</td></tr>
+                <tr><td><code>OnServerRemovePlayer(NetworkConnection conn)</code></td><td>服务器</td><td>移除玩家的 Player 对象</td></tr>
+            </tbody>
+        </table>
+
+        <h2>2.6 实战：从零搭建最小可运行联网项目</h2>
+
+        <p>让我们把所有概念串起来，搭建一个最简单的可运行项目。</p>
+
+        <h3>步骤 1：创建 Player Prefab</h3>
+
+        <pre><code class="language-csharp">// PlayerController.cs
+using UnityEngine;
+using Mirror;
+
+public class PlayerController : NetworkBehaviour
+{
+    [SerializeField] float moveSpeed = 5f;
+
+    void Update()
+    {
+        // 只有本地玩家才能控制这个角色
+        if (!isLocalPlayer) return;
+
+        float h = Input.GetAxis("Horizontal");
+        float v = Input.GetAxis("Vertical");
+
+        // 移动 — 注意：这是客户端的"表现移动"
+        // 真正的权威位置由服务器决定
+        transform.Translate(h * moveSpeed * Time.deltaTime, 0, v * moveSpeed * Time.deltaTime);
+    }
+
+    // 服务器端调用的移动请求
+    [Command]
+    void CmdRequestMove(Vector3 direction)
+    {
+        // 服务器验证并执行移动
+        if (direction.sqrMagnitude > 1f)
+            direction.Normalize();
+
+        transform.Translate(direction * moveSpeed * Time.deltaTime);
+
+        // 同步新位置给客户端
+        RpcUpdatePosition(transform.position);
+    }
+
+    [TargetRpc]
+    void RpcUpdatePosition(Vector3 position)
+    {
+        transform.position = position;
+    }
+}</code></pre>
+
+        <h3>步骤 2：配置 NetworkManager</h3>
+
+        <p>在场景中创建一个空的 GameObject，添加 <code>NetworkManager</code> 组件，
+        然后在 Inspector 中设置：</p>
+
+        <ol>
+            <li><strong>Player Prefab</strong>：拖入你的 Player Prefab</li>
+            <li><strong>Offline Scene / Online Scene</strong>：设置离线和联机场景</li>
+            <li><strong>Port</strong>：默认 7777</li>
+        </ol>
+
+        <h3>步骤 3：配置 Transport</h3>
+
+        <p>在 NetworkManager 的 Transport 组件中，选择传输协议。
+        对于开发阶段，推荐使用默认的 <code>UnityTransport</code>（基于 UTP）或 <code>KCP with No Delay</code>。</p>
+
+        <pre><code class="language-text">选择建议：
+• TCP（HTTP/TCP） → 可靠、有序，但头块堆积（HOL）问题
+• KCP → 可靠、快速重传，适合竞技游戏
+• UDP（未加密） → 最快，但不保证送达和顺序
+• WebSocket → 用于浏览器端客户端</code></pre>
+
+        <h3>步骤 4：运行测试</h3>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>在 Unity Editor 中点击 "Host"</h4>
+                    <p>当前实例同时作为服务器和客户端启动。你可以看到自己的 Player 对象被生成了。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>再打开一个 Editor 实例，点击 "Client"</h4>
+                    <p>第二个实例连接到第一个实例。现在你有两个 Player 对象了。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>构建服务器</h4>
+                    <pre><code class="language-bash"># 在 CI 或部署时编译专用服务器
+BuildTarget ServerBuild
+./YourGame.exe -batchmode -nographics -dedicated</code></pre>
+                </div>
+            </div>
+        </div>
+
+        <h2>2.7 常见陷阱与调试技巧</h2>
+
+        <h3>陷阱 1：在客户端修改了服务器上的数据</h3>
+
+        <pre><code class="language-csharp">// ❌ 危险：没有环境检查
+public void TakeDamage(float amount)
+{
+    health -= amount;  // 客户端也能调用！
+}
+
+// ✅ 正确：确保只有服务器能修改
+public void TakeDamage(float amount)
+{
+    if (!isServer) return;  // 客户端调用直接返回
+    health -= amount;
+    RpcUpdateHealth(health); // 同步给客户端
+}</code></pre>
+
+        <h3>陷阱 2：Spawn 顺序错误</h3>
+
+        <pre><code class="language-csharp">// ❌ 错误：先添加子组件，后注册 Prefab
+NetworkServer.Spawn(parent);       // 先生成父对象
+// 此时子对象的 NetworkIdentity 还没准备好
+
+// ✅ 正确：先确保所有 NetworkIdentity 都正确配置
+// 然后在 NetworkManager 中注册 PlayerPrefab
+manager.playerPrefab = playerPrefab;
+NetworkServer.Listen(100);
+// 连接后自动 Spawn</code></pre>
+
+        <h3>陷阱 3：IsServer / IsClient 在 Awake 时为 false</h3>
+
+        <pre><code class="language-csharp">void Awake()
+{
+    // ❌ 这些在这里都是 false！
+    Debug.Log(isServer);   // false
+    Debug.Log(isClient);   // false
+
+    // ✅ 正确的初始化时机：
+}
+
+void OnStartServer()
+{
+    // ✅ 服务器端初始化放这里
+    Debug.Log(isServer);   // true
+}
+
+void OnStartClient()
+{
+    // ✅ 客户端端初始化放这里
+    Debug.Log(isClient);   // true
+}</code></pre>
+
+        <div class="callout callout-info">
+            <strong>为什么 Awake 时是 false？</strong>
+            因为 NetworkIdentity 的网络状态是在连接建立后才设置的。
+            Awake 执行时，网络模块可能还没有初始化。
+            Mirror 专门设计了 OnStartServer / OnStartClient 等生命周期钩子，
+            保证在这些方法被调用时，网络状态已经就绪。
+        </div>
+
+        <h3>调试技巧：使用 Mirror 内置日志</h3>
+
+        <p>Mirror 在 Console 中输出详细的网络日志。你可以在代码中控制日志级别：</p>
+
+        <pre><code class="language-csharp">// 开启详细日志
+Logger.LogLevel = LogLevel.Debug;
+
+// 常用级别
+LogLevel.Fatal     // 致命错误
+LogLevel.Error     // 错误
+LogLevel.Warning   // 警告（默认级别）
+LogLevel.Info      // 信息
+LogLevel.Debug     // 调试（大量输出）</code></pre>
+
+        <p>你还可以在 NetworkServer 和 NetworkClient 上注册自定义消息处理器来追踪数据流：</p>
+
+        <pre><code class="language-csharp">// 服务器端：打印所有收到的消息
+NetworkServer.RegisterHandler&lt;RpcMessage&gt;(msg =>
+{
+    Debug.Log($"[Server] 收到 RPC 消息: {msg}");
+}, replace: true);</code></pre>
+
+        <h2>2.8 本章小结</h2>
+
+        <p>本章我们建立了 Mirror 的核心认知模型：</p>
+
+        <ul>
+            <li><strong>NetworkIdentity</strong> 是网络对象的身份证——没有它，Mirror 完全不知道这个对象的存在</li>
+            <li><strong>NetworkServer</strong> 是服务器的上帝——管理所有连接和 Spawn 的对象，一切逻辑的权威</li>
+            <li><strong>NetworkClient</strong> 是客户端的窗口——负责连接、接收消息、表现同步</li>
+            <li><strong>NetworkBehaviour</strong> 是所有网络脚本的基类——提供 isServer / isClient / isLocalPlayer 等环境判断</li>
+            <li><strong>NetworkManager</strong> 是胶水——把连接、Spawn、场景切换串联起来</li>
+        </ul>
+
+        <p>下一章，我们将深入通信机制：RPC 和 SyncVar——这是你和服务器、客户端之间对话的语言。</p>
+
+        <h2>自测题</h2>
+
+        <details>
+            <summary>点击展开自测题</summary>
+            <div class="details-content">
+                <ol>
+                    <li><strong>代码分析：</strong>以下代码有什么问题？如何修复？
+                        <pre><code class="language-csharp">public class HealthSystem : NetworkBehaviour
+{
+    public int health = 100;
+
+    public void Damage(int amount)
+    {
+        health -= amount;
+        if (health <= 0)
+            Die();
+    }
+}</code></pre>
+                    </li>
+                    <li><strong>场景推理：</strong>服务器 Spawn 了一个对象 A，然后销毁了它。
+                    此时客户端收到了 Destroy 消息但延迟了 500ms。在这 500ms 内，
+                    客户端还能对对象 A 调用 RPC 吗？为什么？</li>
+                    <li><strong>设计题：</strong>你需要在一个网络对象上存储一个玩家的名字字符串。
+                    这个名字在对象 Spawn 时由服务器设定，之后所有客户端都需要看到相同的值。
+                    你会用 SyncVar 还是其他方式？为什么？</li>
+                </ol>
+
+                <div class="callout callout-tip">
+                    <strong>参考答案：</strong>
+                    1) Damage 方法没有 isServer 检查，客户端可以直接调用并修改服务器状态。
+                    修复：改为 [Command] 方法，或在方法开头加 if (!isServer) return;
+                    2) 不能。客户端收到 Destroy 消息后，对象已从客户端的 Spawn 列表中移除，
+                    调用 RPC 时会报 "unknown netId" 错误。
+                    3) 用 SyncVar。名字是"状态数据"，不是"动作指令"——它需要在服务器修改后自动同步到所有客户端。
+                </div>
+            </div>
+        </details>
+
+        <footer class="chapter-footer">
+            <nav class="chapter-nav bottom">
+                <a href="01-导论与架构总览.html">← 第 1 章</a>
+                <a href="03-RPC与SyncVar通信机制.html">第 3 章：RPC 与 SyncVar →</a>
+            </nav>
+        </footer>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

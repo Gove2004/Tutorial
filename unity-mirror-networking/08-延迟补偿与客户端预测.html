@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 8 章：延迟补偿与预测 - Unity Mirror 教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="07-权威服务器与客户端权限.html">← 第 7 章</a>
+        <a href="09-部署与运行模式.html">第 9 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 8 章：延迟补偿与客户端预测</h1>
+
+        <p class="intro">
+            这是单机开发者转联机时遇到的最大体验鸿沟。
+            在 50ms 延迟下你可能感觉不到问题，但一旦达到 150ms+（跨区匹配、海外服务器），
+            "射击打不中"、"移动卡顿"、"操作跟手性差"这些问题就会集中爆发。
+            本章从零搭建一套可工作的预测+插值系统。
+        </p>
+
+        <h2>8.1 问题的本质：延迟为什么影响体验？</h2>
+
+        <p>假设你和服务器的 RTT（往返延迟）是 200ms：</p>
+
+        <pre><code class="language-text">t=0ms    客户端: 按下 W 键，发送移动请求
+t=100ms  服务器: 收到移动请求，执行移动，广播新位置
+t=200ms  客户端: 收到新位置更新
+
+问题：从按下 W 到看到角色移动，经过了 200ms！
+玩家感受："操作有延迟"、"角色不听使唤"</code></pre>
+
+        <p>更严重的是<strong>其他玩家的视角</strong>：</p>
+
+        <pre><code class="language-text">玩家 A（本地，RTT=20ms）   玩家 B（远程，RTT=200ms）
+     |                            |
+     |-- 移动请求 -------------->|
+     |<-- 位置更新 --------------|
+     |                            |
+     |<--- 位置更新（经过转发） --->|
+     |                          |
+     感觉流畅                    感觉卡顿 100ms+</code></pre>
+
+        <div class="definition">
+            <h4>关键指标</h4>
+            <p><strong>RTT（Round Trip Time）</strong>：数据包从客户端到服务器再返回的时间。<br>
+            <strong>服务端 Tick Rate</strong>：服务器每秒更新游戏的次数。常见值：20Hz（50ms）、30Hz（33ms）、60Hz（16ms）。<br>
+            <strong>Input Lag</strong>：从玩家按下按键到看到效果的时间。</strong></p>
+        </div>
+
+        <h2>8.2 客户端预测（Client-side Prediction）</h2>
+
+        <p>核心思想：<strong>不等服务器确认，客户端先自己移动</strong>。
+        如果服务器的反馈和客户端的预测不一致，再修正回来。</p>
+
+        <pre><code class="language-csharp">public class ClientPrediction : NetworkBehaviour
+{
+    public float moveSpeed = 5f;
+
+    // 输入缓存：存储尚未被服务器确认的输入
+    List&lt;PlayerInput&gt; pendingInputs = new List&lt;PlayerInput&gt;();
+    int serverConfirmedSeq = 0;
+
+    // 服务器确认的移动速度（可能和客户端略有不同）
+    public float serverMoveSpeed = 5f;
+
+    void Update()
+    {
+        if (!isLocalPlayer || !hasAuthority) return;
+
+        // ===== 第 1 步：收集输入 =====
+        Vector2 input = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
+        if (input.sqrMagnitude > 0.01f)
+        {
+            PlayerInput newInput = new PlayerInput
+            {
+                sequence = ++inputSequence,
+                timestamp = Time.time,
+                direction = input
+            };
+            pendingInputs.Add(newInput);
+
+            // ===== 第 2 步：预测性执行（本地立即应用）====
+            PredictMove(input * moveSpeed * Time.deltaTime);
+        }
+
+        // ===== 第 3 步：发送输入给服务器 =====
+        if (Time.time - lastSendTime > 1f / 30f)  // 30Hz 发送频率
+        {
+            CmdSendInput(newInput);
+            lastSendTime = Time.time;
+        }
+    }
+
+    void PredictMove(Vector3 delta)
+    {
+        transform.position += delta;
+    }
+
+    [Command]
+    void CmdSendInput(PlayerInput input)
+    {
+        // 服务器执行输入并广播
+        ServerProcessInput(input);
+        RpcBroadcastInput(input);
+    }
+
+    [ClientRpc]
+    void RpcBroadcastInput(PlayerInput input)
+    {
+        // 所有客户端收到后更新对应玩家的位置
+        UpdatePlayerPosition(input.sequence, input.estimatedPosition);
+    }
+
+    // 服务器回传确认状态
+    public void ApplyServerCorrection(Vector3 serverPos, int confirmedSeq)
+    {
+        serverConfirmedSeq = confirmedSeq;
+
+        // ===== 第 4 步：校正 —— 这是最关键的一步 =====
+        // 如果服务器位置和预测位置差异太大，需要平滑校正
+        float diff = Vector3.Distance(transform.position, serverPos);
+        if (diff > 5f)
+        {
+            // 差距过大，可能是网络抖动或作弊检测，直接瞬移
+            transform.position = serverPos;
+            pendingInputs.Clear();  // 清空未确认输入
+        }
+        else if (diff > 0.1f)
+        {
+            // 小差距，平滑过渡
+            transform.position = Vector3.Lerp(transform.position, serverPos, 0.3f);
+        }
+        // 差距很小，忽略——避免微小抖动
+    }
+}
+
+[Serializable]
+public struct PlayerInput
+{
+    public int sequence;
+    public float timestamp;
+    public Vector2 direction;
+}</code></pre>
+
+        <h3>8.2.1 预测的核心难点：校正（Reconciliation）</h3>
+
+        <p>最棘手的部分不是"预测移动"，而是"预测错了怎么办"。</p>
+
+        <pre><code class="language-text">时间线：
+
+客户端预测：  A → B → C → D → E（当前位置）
+服务器确认：  A ---------→ C'（只确认到 C'）
+
+问题：D 和 E 是基于错误的 C 预测的，而服务器认为正确的中间点是 C'。
+      C 和 C' 的差异会导致 D 和 E 也不准确。
+
+解决方案 1：暴力回滚
+  删除 C 之后的所有输入，从 C' 重新开始预测。
+  优点：简单正确。缺点：位置跳变，视觉不流畅。
+
+解决方案 2：平滑校正（推荐）
+  不删除pending输入，而是在每一帧将预测位置向服务器位置靠拢。
+  优点：视觉平滑。缺点：需要调参（校正速度不能太快也不能太慢）。</code></pre>
+
+        <pre><code class="language-csharp">// 平滑校正的实现
+public class SmoothCorrection : MonoBehaviour
+{
+    public float correctionSpeed = 5f;
+    Vector3 targetPosition;
+    bool awaitingCorrection = false;
+
+    void Update()
+    {
+        if (awaitingCorrection)
+        {
+            transform.position = Vector3.MoveTowards(
+                transform.position,
+                targetPosition,
+                correctionSpeed * Time.deltaTime
+            );
+
+            if (Vector3.Distance(transform.position, targetPosition) < 0.01f)
+            {
+                awaitingCorrection = false;
+            }
+        }
+    }
+
+    public void RequestCorrection(Vector3 serverPos)
+    {
+        targetPosition = serverPos;
+        awaitingCorrection = true;
+    }
+}</code></pre>
+
+        <h2>8.3 状态插值（State Interpolation）</h2>
+
+        <p>预测解决的是"本地玩家"的体验。插值解决的是"看别人"的体验。</p>
+
+        <pre><code class="language-text">问题：服务器每 33ms（30Hz）发送一次位置更新。
+      如果客户端收到就立即渲染，其他玩家会看到"一帧一帧跳动"的效果。
+
+解决方案：永远渲染"过去"的状态，在两个更新之间做插值。
+
+时间线：
+t=0ms    收到位置 A（t=0时的位置）
+t=33ms   收到位置 B（t=33时的位置）→ 但渲染时用 A 和 B 之间的插值
+t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的插值
+
+关键：引入 bufferTime（缓冲时间），让渲染永远落后服务器一小段时间。
+      这样即使网络抖动导致数据包迟到，也有余量补偿。</code></pre>
+
+        <pre><code class="language-csharp">public class StateInterpolation : NetworkBehaviour
+{
+    // 存储最近的状态历史
+    struct StateRecord
+    {
+        public float serverTime;
+        public Vector3 position;
+        public Quaternion rotation;
+    }
+
+    Queue&lt;StateRecord&gt; stateBuffer = new Queue&lt;StateRecord&gt;();
+
+    public float interpolationFactor = 0.1f;  // 插值系数（越小越平滑，但延迟越大）
+    public float maxBufferSize = 10;           // 最大缓冲状态数
+
+    void OnStartClient()
+    {
+        // 注册位置更新消息处理器
+        NetworkClient.RegisterHandler&lt;PositionUpdateMessage&gt;(OnPositionUpdate, replace: true);
+    }
+
+    void OnPositionUpdate(PositionUpdateMessage msg)
+    {
+        StateRecord record = new StateRecord
+        {
+            serverTime = msg.timestamp,
+            position = msg.position,
+            rotation = msg.rotation
+        };
+
+        stateBuffer.Enqueue(record);
+
+        // 限制缓冲区大小
+        while (stateBuffer.Count > maxBufferSize)
+        {
+            stateBuffer.Dequeue();
+        }
+    }
+
+    void Update()
+    {
+        if (!isLocalPlayer && stateBuffer.Count >= 2)
+        {
+            StateRecord older = stateBuffer.ToArray()[0];
+            StateRecord newer = stateBuffer.ToArray()[1];
+
+            // 计算插值因子
+            float timeSpan = newer.serverTime - older.serverTime;
+            if (timeSpan > 0.001f)
+            {
+                float t = (Time.time - older.serverTime) / timeSpan;
+                t = Mathf.Clamp01(t);
+
+                // 线性插值位置
+                transform.position = Vector3.Lerp(older.position, newer.position, t);
+                transform.rotation = Quaternion.Slerp(older.rotation, newer.rotation, t);
+            }
+        }
+    }
+}</code></pre>
+
+        <h3>8.3.1 插值的延迟权衡</h3>
+
+        <table>
+            <thead>
+                <tr><th>插值延迟</th><th>视觉效果</th><th>适用场景</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>0ms（无插值）</td><td>抖动、跳动</td><td>不适用</td></tr>
+                <tr><td>50ms</td><td>轻微平滑，基本实时</td><td>快节奏竞技游戏</td></tr>
+                <tr><td>100ms</td><td>明显平滑</td><td>大多数多人游戏（推荐）</td></tr>
+                <tr><td>200ms+</td><td>非常平滑但有可见延迟</td><td>回合制、策略游戏</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-tip">
+            <strong>经验法则：</strong>对于大多数动作类游戏，使用 1-2 个服务器的 tick 作为插值延迟。
+            如果服务器是 30Hz（33ms/tick），那么插值延迟约 33-66ms。
+            这个延迟玩家几乎感知不到，但能大幅减少抖动。
+        </div>
+
+        <h2>8.4 延迟补偿（Server-Side Lag Compensation）</h2>
+
+        <p>预测和插值解决的是"视觉流畅度"问题。延迟补偿解决的是"命中判定"问题。</p>
+
+        <p>场景：你用 200ms 延迟射击一个快速移动的敌人。
+        当你看到他在某个位置时，实际上他已经移动了 100ms。
+        如果你朝"看到的位置"射击，大概率打不中——因为那已经是"过去"了。</p>
+
+        <pre><code class="language-csharp">public class LagCompensation : MonoBehaviour
+{
+    // 服务器端：回放敌人的历史位置
+    struct PositionHistory
+    {
+        public float timestamp;
+        public Vector3 position;
+        public Vector3 velocity;
+    }
+
+    Queue&lt;PositionHistory&gt; positionHistory = new Queue&lt;PositionHistory&gt;();
+    const int HistoryLength = 2;  // 保留最近 2 秒的历史
+
+    void RecordPosition()
+    {
+        PositionHistory record = new PositionHistory
+        {
+            timestamp = Time.time,
+            position = transform.position,
+            velocity = rigidbody.velocity
+        };
+
+        positionHistory.Enqueue(record);
+
+        while (positionHistory.Count > HistoryLength * 60)  // 假设 60fps
+        {
+            positionHistory.Dequeue();
+        }
+    }
+
+    // 服务器根据客户端的射击时间，回溯敌人当时的位置
+    Vector3 GetPositionAtTime(float shotTimestamp, float rtt)
+    {
+        float targetTime = shotTimestamp + rtt / 2f;  // 估算敌人在射击时刻的位置
+
+        foreach (var record in positionHistory)
+        {
+            if (Mathf.Abs(record.timestamp - targetTime) < 0.01f)
+            {
+                return record.position;
+            }
+        }
+
+        // 没找到精确匹配，用最近的
+        return positionHistory.Last().position;
+    }
+
+    // 射击时
+    [Command]
+    void CmdShoot(Vector3 shootDirection, float shotTime)
+    {
+        float rtt = connectionToClient.rtt;
+
+        // 获取敌人在射击时刻的位置（而不是现在的位置）
+        Vector3 enemyPosAtShotTime = GetPositionAtTime(shotTime, rtt);
+
+        // 用回溯后的位置做射线检测
+        RaycastHit hit;
+        if (Physics.Raycast(shootOrigin, shootDirection, out hit, weaponRange))
+        {
+            if (hit.collider.gameObject == enemy)
+            {
+                // 命中！
+                enemy.GetComponent&lt;HealthSystem&gt;().TakeDamage(damage);
+            }
+        }
+    }
+}</code></pre>
+
+        <h2>8.5 完整整合：预测 + 插值 + 延迟补偿</h2>
+
+        <p>一个完整的联网运动系统应该同时包含这三个组件：</p>
+
+        <pre><code class="language-csharp">public class CompleteNetworkedMovement : NetworkBehaviour
+{
+    // ===== 客户端预测相关 =====
+    List&lt;MovementCommand&gt; clientCommands = new List&lt;MovementCommand&gt;();
+    int nextCommandSeq = 0;
+    Vector3 predictedPosition;
+
+    // ===== 服务器插值相关 =====
+    Queue&lt;ServerState&gt; serverStateBuffer = new Queue&lt;ServerState&gt;();
+    ServerState prevState;
+    ServerState nextState;
+
+    // ===== 配置 =====
+    public float interpolationDelay = 0.1f;  // 100ms 插值延迟
+    public float correctionSpeed = 5f;
+
+    void Update()
+    {
+        if (isLocalPlayer && hasAuthority)
+        {
+            UpdatePrediction();
+        }
+        else if (!isLocalPlayer)
+        {
+            UpdateInterpolation();
+        }
+    }
+
+    // ---------- 客户端预测部分 ----------
+    void UpdatePrediction()
+    {
+        // 收集输入
+        Vector2 input = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+
+        if (input.sqrMagnitude > 0.1f)
+        {
+            MovementCommand cmd = new MovementCommand
+            {
+                seq = nextCommandSeq++,
+                timestamp = Time.time,
+                input = input
+            };
+            clientCommands.Add(cmd);
+
+            // 预测执行
+            predictedPosition += input * moveSpeed * Time.deltaTime;
+            transform.position = predictedPosition;
+        }
+
+        // 发送输入
+        if (Time.time - lastSendTime > 1f / sendRate)
+        {
+            SendMovementCommand(clientCommands);
+            clientCommands.Clear();
+            lastSendTime = Time.time;
+        }
+    }
+
+    // ---------- 服务器处理部分 ----------
+    [Command]
+    void CmdSendMovementCommand(List&lt;MovementCommand&gt; commands)
+    {
+        foreach (var cmd in commands)
+        {
+            ProcessMovementCommand(cmd);
+        }
+
+        // 广播服务器计算的位置
+        BroadcastServerState();
+    }
+
+    void ProcessMovementCommand(MovementCommand cmd)
+    {
+        Vector3 move = cmd.input * serverMoveSpeed * Time.deltaTime;
+        transform.position += move;
+        RecordServerState();
+    }
+
+    // ---------- 客户端插值部分 ----------
+    void UpdateInterpolation()
+    {
+        // 获取最新的服务器状态
+        if (serverStateBuffer.Count > 0)
+        {
+            ServerState latest = serverStateBuffer.Peek();
+
+            if (nextState == null || latest.timestamp > nextState.timestamp)
+            {
+                prevState = nextState ?? latest;
+                nextState = latest;
+                serverStateBuffer.Dequeue();
+            }
+        }
+
+        if (prevState != null &amp;&amp; nextState != null)
+        {
+            float elapsed = Time.time - prevState.timestamp;
+            float duration = nextState.timestamp - prevState.timestamp;
+            float t = duration > 0 ? elapsed / duration : 0;
+            t = Mathf.Clamp01(t);
+
+            transform.position = Vector3.Lerp(prevState.position, nextState.position, t);
+            transform.rotation = Quaternion.Slerp(prevState.rotation, nextState.rotation, t);
+        }
+    }
+
+    [ClientRpc]
+    void RpcReceiveServerState(ServerState state)
+    {
+        serverStateBuffer.Enqueue(state);
+
+        // 限制缓冲区
+        while (serverStateBuffer.Count > 20)
+            serverStateBuffer.Dequeue();
+    }
+}
+
+[Serializable]
+public struct MovementCommand
+{
+    public int seq;
+    public float timestamp;
+    public Vector2 input;
+}
+
+[Serializable]
+public struct ServerState
+{
+    public float timestamp;
+    public Vector3 position;
+    public Quaternion rotation;
+}</code></pre>
+
+        <h2>8.6 调试与可视化</h2>
+
+        <p>预测和插值的问题往往很难通过日志发现。可视化是关键：</p>
+
+        <pre><code class="language-csharp">public class NetworkDebugVisualizer : MonoBehaviour
+{
+    void OnDrawGizmos()
+    {
+        if (!isClient) return;
+
+        // 绘制预测位置（绿色球）
+        Gizmos.color = Color.green;
+        Gizmos.DrawWireSphere(predictedPosition, 0.3f);
+
+        // 绘制服务器位置（红色球）
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(serverPosition, 0.3f);
+
+        // 绘制当前渲染位置（蓝色球）
+        Gizmos.color = Color.blue;
+        Gizmos.DrawWireSphere(transform.position, 0.3f);
+
+        // 绘制连线
+        Gizmos.DrawLine(predictedPosition, serverPosition);
+
+        // 如果预测和服务器位置差距过大，画一个警告圈
+        float diff = Vector3.Distance(predictedPosition, serverPosition);
+        if (diff > 2f)
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireSphere(transform.position, diff);
+        }
+    }
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>调试技巧：</strong>当预测校正导致位置跳变时，观察绿色球（预测）和红色球（服务器）
+            之间的距离。如果经常超过 1-2 米，说明你的预测模型和服务器模型不一致——
+            最可能的原因是两边的移动速度参数不同，或者服务器做了额外的验证/限制。
+        </div>
+
+        <h2>8.7 性能考量</h2>
+
+        <table>
+            <thead>
+                <tr><th>优化项</th><th>建议</th><th>原因</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>发送频率</td><td>30Hz（每 33ms）</td><td>高于 30Hz 收益递减，低于 20Hz 有明显卡顿</td></tr>
+                <tr><td>插值缓冲</td><td>2-3 个状态</td><td>太少容易断档，太多增加延迟</td></tr>
+                <tr><td>校正阈值</td><td>1-2 米</td><td>超过这个值说明模型不一致，需要调查根因</td></tr>
+                <tr><td>历史长度</td><td>2-3 秒</td><td>覆盖最大可能的 RTT + 抖动</td></tr>
+            </tbody>
+        </table>
+
+        <h2>8.8 本章小结</h2>
+
+        <ul>
+            <li><strong>客户端预测</strong>解决"自己的操作有延迟"的问题——不等服务器确认就执行</li>
+            <li><strong>状态插值</strong>解决"看别人一卡一卡"的问题——在两个状态间平滑过渡</li>
+            <li><strong>延迟补偿</strong>解决"明明瞄准了却打不中"的问题——回溯目标在射击时刻的位置</li>
+            <li>三者结合，才能在 200ms+ 延迟下获得可玩的体验</li>
+        </ul>
+
+        <p>这些技术是所有商业级联网游戏的标配。实现它们不需要高深数学，
+        只需要理解延迟的来源和每一方看到的"时间线"。</p>
+
+        <p>下一章，我们学习如何部署和运行——从本地测试到专用服务器到云端部署。</p>
+
+        <h2>自测题</h2>
+
+        <details>
+            <summary>点击展开自测题</summary>
+            <div class="details-content">
+                <ol>
+                    <li><strong>场景推理：</strong>如果 RTT 是 0ms（局域网），还需要预测和插值吗？为什么？</li>
+                    <li><strong>设计题：</strong>预测校正时，如果客户端和服务器对物理模拟的结果不一致（比如一个撞墙了，另一个穿过去了），应该如何处理？</li>
+                    <li><strong>数值题：</strong>服务器 60Hz，RTT 100ms。插值延迟应该设多少？缓冲队列应该保持多少个状态？</li>
+                </ol>
+
+                <div class="callout callout-tip">
+                    <strong>参考答案：</strong>
+                    1) 理论上 RTT=0 时不需要预测。但实际上"零延迟"几乎不存在（即使是局域网也有 1-5ms）。
+                    而且插值不是为了 RTT，而是为了平滑服务器 tick 之间的抖动。所以插值始终需要。
+                    2) 这是最常见的预测问题根源。解决方案：确保客户端和服务器的物理参数完全一致（重力、摩擦力、碰撞体）。
+                    如果仍然不一致，应该以服务器为准进行强制校正，而不是尝试让两边一致。
+                    3) 插值延迟建议 60-100ms（1-2 个 tick）。缓冲队列保持 3-5 个状态。
+                    60Hz 下 100ms = 6 个 tick，所以缓冲 5-6 个状态足够覆盖大多数抖动。
+                </div>
+            </div>
+        </details>
+
+        <footer class="chapter-footer">
+            <nav class="chapter-nav bottom">
+                <a href="07-权威服务器与客户端权限.html">← 第 7 章</a>
+                <a href="09-部署与运行模式.html">第 9 章：部署 →</a>
+            </nav>
+        </footer>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

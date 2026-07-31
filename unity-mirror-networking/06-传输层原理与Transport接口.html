@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 6 章：传输层原理 - Unity Mirror 教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="05-数据同步-SyncList与自定义消息.html">← 第 5 章</a>
+        <a href="07-权威服务器与客户端权限.html">第 7 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 6 章：传输层原理 — Transport 接口与底层通信</h1>
+
+        <p class="intro">
+            RPC、SyncVar、Spawn——这些高层机制都建立在一个基础之上：<strong>数据如何在两台机器之间传输</strong>。
+            Mirror 通过 Transport 抽象层将这个问题隔离起来。理解 Transport 的原理，
+            你才能在网络状况不佳时做出正确的调优决策。
+        </p>
+
+        <h2>6.1 Transport 抽象层的设计思想</h2>
+
+        <p>Mirror 的架构是分层的：</p>
+
+        <pre><code class="language-text
+┌─────────────────────────────────────┐
+│         应用层（你的游戏逻辑）        │  Cmd / Rpc / SyncVar
+├─────────────────────────────────────┤
+│         消息层（Mirror 内部）        │  MessagePacker / Channel
+├─────────────────────────────────────┤
+│       Transport 抽象层              │  ITransport 接口
+├─────────────────────────────────────┤
+│   TCP   │   UDP   │   KCP  │   WS   │  具体协议实现
+├─────────────────────────────────────┤
+│         操作系统网络栈               │  Socket API
+└─────────────────────────────────────┘</code></pre>
+
+        <p>Transport 层的核心接口很简单：</p>
+
+        <pre><code class="language-csharp">public interface ITransport
+{
+    bool Connected { get; }
+
+    // 发送数据
+    void Send(int channelId, ArraySegment&lt;byte&gt; data);
+
+    // 接收数据（回调）
+    event Action&lt;ArraySegment&lt;byte&gt;, int&gt; onMessage;
+
+    // 连接/断开
+    void Connect(string address);
+    void Disconnect();
+
+    // 获取本地端口
+    int GetPort();
+}</code></pre>
+
+        <div class="callout callout-info">
+            <strong>为什么用 ArraySegment&lt;byte&gt;？</strong><br>
+            避免不必要的内存分配。直接传递字节段的引用，而不是拷贝整个数组。
+            在网络高频收发场景中，这能显著减少 GC 压力。
+        </div>
+
+        <h2>6.2 协议对比：TCP vs UDP vs KCP</h2>
+
+        <p>Mirror 支持多种传输协议，每种都有各自的优劣：</p>
+
+        <h3>6.2.1 TCP（Transmission Control Protocol）</h3>
+
+        <pre><code class="language-text">特点：
+• 可靠：保证送达
+• 有序：保证顺序
+• 面向连接：需要先建立连接
+• 有头部开销：每个包 ~40 字节
+• 头块堆积（HOL）：前一个包丢失会阻塞后续所有包</code></pre>
+
+        <p>适用场景：聊天消息、交易确认、登录验证等低频但必须可靠的数据。</p>
+
+        <pre><code class="language-csharp">// TCP 的优势与劣势示例
+// 假设你同时发送：[位置更新] [开火指令] [位置更新] [位置更新]
+
+// TCP 处理：
+// 如果 [开火指令] 因为网络问题丢失重传
+// → [位置更新 #3] 和 [#4] 必须等待 #2 送达后才能交付给应用层
+// → 这就是 HOL（Head-of-Line blocking）
+
+// 结果：虽然 #3、#4 数据本身没丢，但你感受到了"卡顿"</code></pre>
+
+        <h3>6.2.2 UDP（User Datagram Protocol）</h3>
+
+        <pre><code class="language-text">特点：
+• 不可靠：不保证送达
+• 无序：可能乱序到达
+• 无连接：直接发送
+• 头部开销小：每个包 ~8 字节（UDP）+ 20 字节（IP）= ~28 字节
+• 无 HOL 问题
+• 速度最快</code></pre>
+
+        <p>适用场景：位置同步、输入流等高频、可容忍丢包的数据。</p>
+
+        <pre><code class="language-csharp">// UDP 的行为示例
+// 发送：[1] [2] [3] [4] [5]
+
+// 可能收到：[1] [3] [5]     ← [2] 和 [4] 丢了
+// 也可能收到：[1] [3] [2] [4] [5]  ← 乱序了
+
+// 对于位置同步：
+// 丢掉 [2] 没关系——[3] 包含了更新的位置
+// 收到乱序的 [3] [2]——应该按 sequenceNumber 排序后使用最新的</code></pre>
+
+        <h3>6.2.3 KCP（改善型 UDP）</h3>
+
+        <p>KCP 是一个基于 UDP 的快速可靠传输协议。它在 UDP 的基础上添加了：</p>
+
+        <ul>
+            <li><strong>快速重传</strong>：收到 2 个重复 ACK 就立即重传，不等超时</li>
+            <li><strong>滑动窗口</strong>：支持批量发送和确认</li>
+            <li><strong>可选无重传模式</strong>：对某些数据关闭重传，避免 HOL</li>
+        </ul>
+
+        <pre><code class="language-text">KCP vs TCP vs UDP 对比：
+
+指标          TCP      UDP      KCP
+------------------------------ ----------
+可靠性         ★★★★★   ★★       ★★★★
+速度          ★★★      ★★★★★   ★★★★★
+延迟(低网络)   ★★★      ★★★★★   ★★★★★
+延迟(高延迟)   ★★       ★★★★    ★★★★★
+HOL 问题      ❌ 有     ✅ 无     ⚠️ 可控
+适用场景      聊天/交易  位置同步   竞技游戏</code></pre>
+
+        <div class="definition">
+            <h4>为什么 Mirror 默认推荐 KCP with No Delay？</h4>
+            <p>KCP with No Delay 模式关闭了 KCP 的内部缓冲，让它可以像 UDP 一样即时发送。
+            这消除了 KCP 自身的 HOL 问题，同时保留了快速重传的能力。
+            对于实时竞技游戏（FPS、格斗、MOBA），这是最佳平衡点。</p>
+        </div>
+
+        <h2>6.3 Channel（通道）机制</h2>
+
+        <p>Mirror 允许你在 Transport 之上定义多个通道，每个通道有不同的可靠性保证：</p>
+
+        <pre><code class="language-csharp">// Mirror 内置通道
+ChannelId.Reliable     // 可靠通道：保证送达、保证顺序
+                    // 适用于：RPC、SyncVar、伤害计算
+ChannelId.Unreliable   // 不可靠通道：不保证送达、可能乱序
+                    // 适用于：位置同步、输入流
+
+// 发送时指定通道
+NetworkServer.SendToAll(message, channelId: (int)ChannelId.Reliable);
+NetworkServer.SendToAll(message, channelId: (int)ChannelId.Unreliable);</code></pre>
+
+        <h3>6.3.1 为什么需要多通道？</h3>
+
+        <p>想象一下你在玩 FPS 游戏，同时发生以下事情：</p>
+
+        <ul>
+            <li>每帧发送位置数据（高频，可丢包）</li>
+            <li>每秒发送几次伤害计算（中频，不可丢包）</li>
+            <li>偶尔发送聊天消息（低频，必须送达）</li>
+        </ul>
+
+        <p>如果全部走同一个可靠通道：聊天消息可能因为等待位置数据包而延迟数秒。<br>
+        如果全部走不可靠通道：伤害计算可能丢失，导致"我明明打中了却没伤害"。</p>
+
+        <p>多通道解决了这个矛盾：</p>
+
+        <pre><code class="language-text">通道 0 (Reliable):   [伤害计算] [聊天消息] [RPC调用]
+通道 1 (Unreliable): [位置#1][位置#2][位置#3][位置#4][位置#5]...
+
+即使通道 1 丢了几个包，通道 0 的聊天消息也能及时送达。
+两者互不干扰。</code></pre>
+
+        <h2>6.4 MTU（最大传输单元）与分包</h2>
+
+        <p>每个网络协议都有一个 MTU 限制——单次发送的最大数据包大小：</p>
+
+        <table>
+            <thead>
+                <tr><th>协议</th><th>典型 MTU</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>以太网 (Ethernet)</td><td>1500 字节</td><td>标准局域网</td></tr>
+                <tr><td>IPv4 over PPPoE</td><td>1492 字节</td><td>宽带拨号</td></tr>
+                <tr><td>IPv6</td><td>1280 字节</td><td>最小 MTU</td></tr>
+                <tr><td>WebRTC UDP</td><td>~1200 字节</td><td>留余量给加密头部</td></tr>
+            </tbody>
+        </table>
+
+        <p>如果你发送的消息超过 MTU，Transport 层需要<strong>分包</strong>（Fragmentation）：</p>
+
+        <pre><code class="language-csharp">// Mirror 内置了分包机制
+// 当消息超过 MTU 时自动分包
+// 但频繁分包是性能信号——说明你的消息太大了
+
+// 检查当前 MTU
+Debug.Log($"MTU: {transport.Mtu}");
+
+// 调整 MTU（如果 Transport 支持）
+transport.SetMtu(1400);  // 留一些空间给加密头部</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>分包陷阱：</strong>如果一个大数据包被分成 3 个子包，只要其中 1 个丢失，
+            整个消息都无法重组——3 个子包全部丢弃。所以大数据包的可靠传输成本很高。
+            策略：<strong>把大数据拆成多条小消息发送，比发一条大数据包更高效。</strong>
+        </div>
+
+        <h2>6.5 从 UNet Transport 迁移到 Mirror</h2>
+
+        <p>如果你从 UNet 迁移过来，需要注意 Transport 接口的变化：</p>
+
+        <table>
+            <thead>
+                <tr><th>UNet</th><th>Mirror</th><th>变化说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>NetworkTransport</code></td><td><code>Transport</code> 单例</td><td>Mirror 简化为单例访问</td></tr>
+                <tr><td><code>AddConnection()</code></td><td><code>OnConnected()</code> 回调</td><td>事件驱动而非主动轮询</td></tr>
+                <tr><td><code>Send()</code> 参数复杂</td><td><code>Send(channelId, segment)</code> 简洁</td><td>使用 ArraySegment 减少参数</td></tr>
+                <tr><td>绑定 Unity Relay</td><td>Transport 可插拔</td><td>可以替换为任何后端</td></tr>
+            </tbody>
+        </table>
+
+        <h2>6.6 自定义 Transport</h2>
+
+        <p>Mirror 允许你完全替换 Transport 实现。这对于接入自研服务或第三方服务非常有用：</p>
+
+        <pre><code class="language-csharp">public class CustomTransport : Transport
+{
+    public override bool Available
+    {
+        get
+        {
+            // 检查依赖是否可用
+            return true;
+        }
+    }
+
+    public override string Name
+    {
+        get { return "CustomWebSocket"; }
+    }
+
+    public override bool Connect(string server, int port)
+    {
+        // 连接到服务器
+        websocket = new WebSocket($"wss://{server}:{port}");
+        websocket.OnMessage += (msg) =>
+        {
+            // 收到数据，转发给 Mirror
+            var segment = new ArraySegment&lt;byte&gt;(msg.Data);
+            OnData(connectionId, segment, channelId);
+        };
+        websocket.OnOpen += () =>
+        {
+            OnConnected(connectionId);
+        };
+        websocket.OnClose += (code) =>
+        {
+            OnDisconnected(connectionId);
+        };
+        return true;
+    }
+
+    public override void Send(int channelId, ArraySegment&lt;byte&gt; data)
+    {
+        // 发送数据
+        websocket.Send(new ArraySegment&lt;byte&gt;(data.Array, data.Offset, data.Count));
+    }
+
+    public override void Disconnect(int connectionId)
+    {
+        websocket.Close();
+    }
+
+    public override void Shutdown()
+    {
+        websocket?.Close();
+        websocket = null;
+    }
+
+    // 还需要实现其他必要方法...
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>自定义 Transport 的典型场景：</strong><br>
+            • 接入 WebSocket 服务（用于浏览器端客户端）<br>
+            • 接入自研网关/代理服务器<br>
+            • 使用 QUIC 协议替代 TCP/UDP<br>
+            • 在模拟器环境中注入模拟延迟和丢包
+        </div>
+
+        <h2>6.7 网络调优参数</h2>
+
+        <p>Mirror 的 Transport 层暴露了一些可调参数：</p>
+
+        <pre><code class="language-csharp">// KCP 参数调优（如果使用 KCP Transport）
+var kcp = GetComponent&lt;KcpTransport&gt;();
+
+kcp.BlockSize = 1500;      // MTU
+kcp.ArchiveSize = 128;     // 滑动窗口大小
+kcp.UpdateTimeout = 0.01f; // 更新间隔（10ms）
+kcp.NoDelayParams = new NoDelayParams(1, 10, 2, 1);
+// NoDelay(nopDelay, interval, fastResend, limit)
+// nopDelay=1: 关闭内部延迟累积
+// interval=10: 内部更新间隔 10ms
+// fastResend=2: 2 个重复 ACK 触发快速重传
+// limit=1: 快速重传阈值</code></pre>
+
+        <h3>6.7.1 延迟与带宽的权衡</h3>
+
+        <pre><code class="language-csharp">// 不同游戏类型的推荐配置
+
+// FPS 游戏（追求最低延迟）
+KCP with No Delay:
+  noDelay = 1    // 关闭延迟累积
+  interval = 5   // 5ms 更新间隔
+  fastResend = 2 // 激进重传
+  limit = 2      // 降低快速重传阈值
+
+// 回合制游戏（可靠性优先）
+TCP 或 KCP 默认:
+  noDelay = 0    // 允许延迟累积以合并小包
+  interval = 40  // 40ms 更新间隔足够了
+  fastResend = 0 // 不需要快速重传
+
+// 策略游戏（状态同步为主）
+TCP Reliable:
+  所有数据走可靠通道
+  不需要 unreliable 通道</code></pre>
+
+        <h2>6.8 网络诊断工具</h2>
+
+        <h3>6.8.1 延迟与丢包模拟</h3>
+
+        <pre><code class="language-csharp">// 开发阶段模拟不同网络环境
+public class NetworkSimulator : MonoBehaviour
+{
+    [Header("模拟设置")]
+    public float latencyMs = 0f;       // 模拟延迟（毫秒）
+    public float packetLoss = 0f;      // 模拟丢包率（0-1）
+    public bool enabledSimulation = false;
+
+    void Start()
+    {
+        if (enabledSimulation)
+        {
+            // 在 Transport 层注入延迟和丢包
+            var transport = Transport.active;
+            // 自定义 Transport 包装器...
+        }
+    }
+
+    bool ShouldDropPacket()
+    {
+        return Random.value &lt; packetLoss;
+    }
+}</code></pre>
+
+        <h3>6.8.2 带宽监控</h3>
+
+        <pre><code class="language-csharp">public class BandwidthMonitor : MonoBehaviour
+{
+    long bytesIn = 0, bytesOut = 0;
+    long lastBytesIn = 0, lastBytesOut = 0;
+
+    void Update()
+    {
+        // Mirror 不直接暴露流量统计，需要自己追踪
+        // 通过拦截消息来计算
+
+        float bpsIn = (bytesIn - lastBytesIn) * 8 / Time.deltaTime;
+        float bpsOut = (bytesOut - lastBytesOut) * 8 / Time.deltaTime;
+
+        if (bpsIn + bpsOut > 100_000) // 100 Kbps 警告
+        {
+            Debug.LogWarning($"带宽过高: 入 {bpsIn / 1024:F1} KB/s 出 {bpsOut / 1024:F1} KB/s");
+        }
+
+        lastBytesIn = bytesIn;
+        lastBytesOut = bytesOut;
+    }
+}</code></pre>
+
+        <h2>6.9 本章小结</h2>
+
+        <ul>
+            <li><strong>Transport 层</strong>是 Mirror 的网络基础设施，抽象了 TCP/UDP/KCP 的细节</li>
+            <li><strong>多通道机制</strong>让你可以在可靠和不可靠传输之间做选择</li>
+            <li><strong>KCP with No Delay</strong>是竞技游戏的最佳默认选择</li>
+            <li><strong>MTU 和分包</strong>影响传输效率——小消息优于大数据包</li>
+            <li><strong>自定义 Transport</strong>让你可以接入任何底层协议</li>
+        </ul>
+
+        <p>下一章，我们将讨论权威服务器模型——这是网络游戏中最重要的安全概念。</p>
+
+        <h2>自测题</h2>
+
+        <details>
+            <summary>点击展开自测题</summary>
+            <div class="details-content">
+                <ol>
+                    <li><strong>场景分析：</strong>一个 FPS 游戏中，位置同步和伤害计算的传输方案应该如何设计？为什么？</li>
+                    <li><strong>推理题：</strong>如果 MTU 是 1400 字节，你发送了一条 3000 字节的消息，会发生什么？Mirror 如何处理？</li>
+                    <li><strong>设计题：</strong>你需要为一个网页端的 Unity WebGL 客户端设计联网方案。Transport 层应该选什么？为什么？</li>
+                </ol>
+
+                <div class="callout callout-tip">
+                    <strong>参考答案：</strong>
+                    1) 位置同步走 unreliable 通道（高频、可丢包），伤害计算走 reliable 通道（中频、不可丢包）。
+                    这样位置丢包不影响伤害确认，伤害也不会被位置数据包阻塞。
+                    2) Mirror 会自动分包。但分包增加了复杂度和失败概率——任何一个子包丢失都需要重传全部。
+                    3) WebGL 只支持 WebSocket。所以需要自定义 WebSocket Transport。
+                    WebSocket 本质上是基于 TCP 的，所以继承了 TCP 的 HOL 问题。
+                    可以通过在应用层实现多通道（消息类型区分优先级）来缓解。
+                </div>
+            </div>
+        </details>
+
+        <footer class="chapter-footer">
+            <nav class="chapter-nav bottom">
+                <a href="05-数据同步-SyncList与自定义消息.html">← 第 5 章</a>
+                <a href="07-权威服务器与客户端权限.html">第 7 章：权威服务器 →</a>
+            </nav>
+        </footer>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

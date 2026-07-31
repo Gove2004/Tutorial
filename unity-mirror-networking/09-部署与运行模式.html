@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 9 章：部署与运行模式 - Unity Mirror 教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-延迟补偿与客户端预测.html">← 第 8 章</a>
+        <a href="10-生态对比与未来展望.html">第 10 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 9 章：部署与运行模式</h1>
+
+        <p class="intro">
+            代码写完了，功能跑通了——但现在你面对一个全新的问题：<strong>怎么让别人连进来玩？</strong>
+            从 Editor 里的 Host 模式到生产环境中的专用服务器，部署涉及到编译、配置、网络、运维多个层面。
+            本章覆盖从本地测试到云端部署的完整链路。
+        </p>
+
+        <h2>9.1 三种运行模式</h2>
+
+        <p>Mirror 支持三种运行模式，每种适用于不同场景：</p>
+
+        <table>
+            <thead>
+                <tr><th>模式</th><th>角色</th><th>适用场景</th><th>部署复杂度</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>Client Only</strong></td><td>仅客户端</td><td>玩家正常进入游戏</td><td>低</td></tr>
+                <tr><td><strong>Host</strong></td><td>客户端 + 服务器</td><td>开发测试、P2P 主机游戏</td><td>中</td></tr>
+                <tr><td><strong>Dedicated Server</strong></td><td>仅服务器</td><td>生产环境、正式服</td><td>高</td></tr>
+            </tbody>
+        </table>
+
+        <h2>9.2 编译专用服务器</h2>
+
+        <p>专用服务器（Dedicated Server）是无头进程——没有图形渲染，只有服务器逻辑。</p>
+
+        <h3>9.2.1 Unity 构建设置</h3>
+
+        <pre><code class="language-text">Build Settings 配置：
+• Build Target: Standalone Server (Windows/Linux/macOS)
+• Architecture: x86_64
+• Development Build: 关闭（发布时）/ 开启（调试时）
+• Compression Method: LZ4（减小体积）</code></pre>
+
+        <h3>9.2.2 命令行启动参数</h3>
+
+        <pre><code class="language-bash"># Windows
+YourGame.exe -batchmode -nographics -dedicated -port 7777
+
+# Linux
+./YourGame.x86_64 -batchmode -nographics -dedicated -port 7777
+
+# macOS
+./YourGame.app/Contents/MacOS/YourGame -batchmode -nographics -dedicated -port 7777</code></pre>
+
+        <p>参数说明：</p>
+
+        <table>
+            <thead>
+                <tr><th>参数</th><th>作用</th><th>必需？</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>-batchmode</code></td><td>无 UI 模式，不等待用户输入</td><td>✅ 必须</td></tr>
+                <tr><td><code>-nographics</code></td><td>不初始化 Graphics 模块，节省内存和 CPU</td><td>✅ 必须</td></tr>
+                <tr><td><code>-dedicated</code></td><td>自定义参数，在你的代码中判断是否专用服务器模式</td><td>推荐</td></tr>
+                <tr><td><code>-port 7777</code></td><td>自定义端口</td><td>可选</td></tr>
+                <tr><td><code>-logFile /tmp/game.log</code></td><td>指定日志文件路径</td><td>可选</td></tr>
+            </tbody>
+        </table>
+
+        <h3>9.2.3 在代码中处理专用服务器模式</h3>
+
+        <pre><code class="language-csharp">public class GameBootstrapper : MonoBehaviour
+{
+    void Start()
+    {
+        // 检测是否以专用服务器模式启动
+        bool isDedicated = System.ArgumentList.Contains("-dedicated");
+
+        if (isDedicated)
+        {
+            StartDedicatedServer();
+        }
+        else
+        {
+            StartClientOrHost();
+        }
+    }
+
+    void StartDedicatedServer()
+    {
+        // 获取端口
+        int port = 7777;
+        var portArg = System.ArgumentList.Get("-port");
+        if (int.TryParse(portArg, out int parsed))
+            port = parsed;
+
+        // 启动服务器
+        NetworkServer.Listen(port);
+
+        Debug.Log($"[Server] 专用服务器已启动，端口 {port}");
+
+        // 加载游戏场景
+        SceneManager.LoadScene("GameScene");
+    }
+
+    void StartClientOrHost()
+    {
+        // 客户端/Host 模式的启动逻辑
+        NetworkClient.Connect("localhost");
+    }
+}</code></pre>
+
+        <div class="callout callout-info">
+            <strong>内存优化：</strong>使用 <code>-nographics</code> 后，Unity 不会初始化 GPU 驱动，
+            服务器进程的内存占用可以从 ~500MB 降到 ~100MB。这对云服务器成本影响很大——
+            一台 2GB 内存的机器可以跑 20 个服务器实例，而不是 4 个。
+        </div>
+
+        <h2>9.3 本地测试流程</h2>
+
+        <h3>9.3.1 Editor 内测试</h3>
+
+        <pre><code class="language-text">步骤 1: 打开 Unity Editor → 点击 "Host"（服务器 + 本地客户端）
+步骤 2: 再打开一个 Editor → 点击 "Client Only"（连接到 Host）
+步骤 3: 验证 Player 对象生成、移动同步、RPC 调用</code></pre>
+
+        <h3>9.3.2 独立客户端测试</h3>
+
+        <pre><code class="language-text">步骤 1: 构建服务器 → YourGame.exe -dedicated -port 7777
+步骤 2: 打开另一个 Unity Editor → Client Only → 连接 localhost:7777
+步骤 3: 或者构建独立客户端 → YourGameClient.exe → 连接 localhost:7777</code></pre>
+
+        <h3>9.3.3 多客户端测试</h3>
+
+        <pre><code class="language-text">步骤 1: 启动专用服务器
+步骤 2: 同时打开 4 个 Editor/客户端实例
+步骤 3: 依次连接，验证多人同步</code></pre>
+
+        <div class="sidebar-note">
+            <strong>为什么不在 Editor 的 Host 模式下测试多客户端？</strong><br>
+            Host 模式只包含一个服务器实例和一个客户端实例。
+            要测试"多个玩家"，至少需要两个客户端连接同一个服务器。
+            最方便的方式是：一个构建的服务器 + 多个 Editor 客户端。
+        </div>
+
+        <h2>9.4 使用 Unity Relay 进行 NAT 穿透</h2>
+
+        <p>当服务器和客户端不在同一局域网时，NAT（网络地址转换）会阻止直连。
+        Relay 服务作为中间代理转发数据。</p>
+
+        <pre><code class="language-csharp">// Unity Relay (之前叫 Netcode Relay)
+// 通过 Unity Gaming Services (UGS) 提供
+
+using Unity.Netcode.Relay;
+
+// 服务器端：创建 Relay 房间
+var relay = new Relay();
+var joinCode = await relay.CreateRoom(maxClients: 10);
+// joinCode 是一个字符串，类似 "ABC12345"
+
+// 客户端：用 JoinCode 加入
+await relay.JoinRoom(joinCode);
+
+// 获取 Relay 信息并配置 Transport
+var serverConnectionData = relay.GetServerConnectionData();
+var clientConnectionData = relay.GetClientConnectionData();</code></pre>
+
+        <h3>9.4.1 Relay vs 直连的权衡</h3>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>直连（专用服务器）</th><th>Relay</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>延迟</td><td>低（直连）</td><td>较高（多一跳转发）</td></tr>
+                <tr><td>带宽成本</td><td>服务器承担</td><td>Relay 服务商承担</td></tr>
+                <tr><td>NAT 穿透</td><td>需要端口转发或公网 IP</td><td>自动处理</td></tr>
+                <tr><td>部署复杂度</td><td>需要 VPS / 云服务器</td><td>零服务器管理</td></tr>
+                <tr><td>适用规模</td><td>任意规模</td><td>中小规模（&lt;500 并发）</td></tr>
+                <tr><td>成本模型</td><td>固定（服务器费用）</td><td>按流量付费</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-tip">
+            <strong>推荐方案：</strong>开发阶段用直连（本地服务器），发布初期用 Relay（快速上线），
+            用户量增长后用专用服务器 + CDN 加速。三者可以共存——你的游戏应该支持多种连接方式。
+        </div>
+
+        <h2>9.5 CI/CD 中的自动化服务器测试</h2>
+
+        <p>在持续集成管道中运行服务器测试，确保每次提交都不会破坏联网功能：</p>
+
+        <pre><code class="language-bash"># Jenkins / GitLab CI 脚本示例
+#!/bin/bash
+
+# 1. 构建服务器
+unity -batchmode -quit -executeMethod BuildServer.Build \
+    -projectPath ./MyGame \
+    -buildTarget StandaloneLinux64
+
+# 2. 启动服务器
+./Builds/linux-server/MyGameServer -batchmode -nographics -dedicated -port 7777 &
+SERVER_PID=$!
+
+# 3. 等待服务器就绪
+sleep 5
+
+# 4. 运行自动化测试（Headless 客户端）
+./Builds/linux-client/MyGameClient \
+    -batchmode -nographics \
+    -testServer localhost:7777
+
+# 5. 清理
+kill $SERVER_PID</code></pre>
+
+        <pre><code class="language-csharp">// 自动化测试脚本
+public class ServerTests : MonoBehaviour
+{
+    IEnumerator TestPlayerSpawn()
+    {
+        NetworkClient.Connect("localhost", 7777);
+        yield return new WaitUntil(() => NetworkClient.isConnected);
+
+        // 等待 Player 对象生成
+        yield return new WaitUntil(() => ClientScene.localPlayers.Count > 0);
+
+        Assert.IsTrue(ClientScene.localPlayers.Count > 0, "Player should be spawned");
+    }
+
+    IEnumerator TestMovementSync()
+    {
+        // 发送移动命令
+        GetComponent&lt;PlayerController&gt;().Move(Vector3.forward);
+
+        // 等待服务器广播
+        yield return new WaitForSeconds(0.5f);
+
+        // 验证其他客户端收到了位置更新
+        // ...
+    }
+}</code></pre>
+
+        <h2>9.6 云服务器部署</h2>
+
+        <h3>9.6.1 推荐的云服务商</h3>
+
+        <table>
+            <thead>
+                <tr><th>平台</th><th>特点</th><th>适合场景</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>AWS EC2</td><td>功能最全，生态完善</td><td>大规模生产</td></tr>
+                <tr><td>GCP Compute Engine</td><td>全球网络好，价格透明</td><td>国际服</td></tr>
+                <tr><td>阿里云 ECS</td><td>国内延迟低，合规方便</td><td>中国大陆</td></tr>
+                <tr><td>DigitalOcean</td><td>简单易用，按小时计费</td><td>中小项目</td></tr>
+                <tr><td>Google Cloud Run</td><td>容器化部署，自动扩缩</td><td>弹性需求</td></tr>
+            </tbody>
+        </table>
+
+        <h3>9.6.2 Docker 容器化部署</h3>
+
+        <pre><code class="language-dockerfile"># Dockerfile for Unity Mirror Server
+FROM ubuntu:22.04
+
+# 安装 Unity 运行时依赖
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libssl1.1 \
+    libstdc++6 \
+    zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制服务器二进制
+COPY MyGameServer /game/
+COPY GameData /game/Data/
+
+WORKDIR /game
+
+# 启动命令
+ENTRYPOINT ["./MyGameServer", "-batchmode", "-nographics", "-dedicated"]
+CMD ["--port", "7777"]</code></pre>
+
+        <pre><code class="language-bash"># 构建和运行
+docker build -t mygame-server .
+docker run -d -p 7777:7777 --name mygame-1 mygame-server
+
+# 多实例部署
+docker run -d -p 7778:7777 mygame-server
+docker run -d -p 7779:7777 mygame-server</code></pre>
+
+        <h3>9.6.3 服务器扩缩策略</h3>
+
+        <pre><code class="language-text">静态部署（简单但浪费）：
+  始终运行 N 个服务器实例
+  适合：日活稳定、峰值可预估
+
+动态扩缩（推荐）：
+  监控在线人数 → 低于阈值时缩减 → 高于阈值时扩展
+  适合：日活波动大、成本控制严格
+
+混合模式（最佳）：
+  基础 N 个实例常驻 + 高峰期自动扩展 M 个实例
+  适合：大多数商业游戏</code></pre>
+
+        <h2>9.7 监控与运维</h2>
+
+        <h3>9.7.1 服务器健康检查</h3>
+
+        <pre><code class="language-csharp">public class ServerMonitor : MonoBehaviour
+{
+    void Update()
+    {
+        // 监控关键指标
+        int connectedClients = NetworkServer.connections.Count;
+        float cpuUsage = GetCPUUsage();
+        float memoryUsage = GetMemoryUsage();
+        long bytesReceived = GetBytesReceived();
+        long bytesSent = GetBytesSent();
+
+        // 异常检测
+        if (connectedClients == 0 && Time.time > 300)
+        {
+            Debug.LogWarning("服务器运行 5 分钟但无客户端连接");
+        }
+
+        if (memoryUsage > 200 * 1024 * 1024)  // 200MB
+        {
+            Debug.LogError("内存占用过高！可能存在内存泄漏");
+        }
+
+        // 定期输出性能报告
+        if (Time.frameCount % 300 == 0)  // 每 5 秒
+        {
+            Debug.Log($"[Perf] 客户端:{connectedClients} CPU:{cpuUsage:F1}% Mem:{memoryUsage / 1024 / 1024:F0}MB");
+        }
+    }
+}</code></pre>
+
+        <h3>9.7.2 日志管理</h3>
+
+        <pre><code class="language-csharp">// 结构化日志输出（方便 ELK/Grafana 等工具采集）
+public class StructuredLogger
+{
+    public static void LogEvent(string eventType, Dictionary&lt;string, string&gt; data)
+    {
+        // JSON 格式输出，便于解析
+        string json = JsonConvert.SerializeObject(new
+        {
+            timestamp = DateTime.UtcNow.ToString("O"),
+            type = eventType,
+            data = data
+        });
+
+        Debug.Log(json);
+    }
+}
+
+// 使用
+StructuredLogger.LogEvent("player_connected", new Dictionary&lt;string, string&gt;
+{
+    { "userId", userId },
+    { "ip", ip },
+    { "rtt", rtt.ToString() }
+});</code></pre>
+
+        <h2>9.8 安全与防护</h2>
+
+        <h3>9.8.1 连接认证</h3>
+
+        <pre><code class="language-csharp">public class AuthManager : MonoBehaviour
+{
+    [ServerCallback]
+    public void OnServerAuthenticate(ServerAuthMessage msg)
+    {
+        // 验证用户令牌
+        bool isValid = ValidateToken(msg.token);
+
+        if (isValid)
+        {
+            // 认证成功
+            NetworkServer.SetAuthenticated(msg.connection);
+        }
+        else
+        {
+            // 认证失败，断开连接
+            NetworkServer.RemoveConnection(msg.connection);
+        }
+    }
+
+    bool ValidateToken(string token)
+    {
+        // 验证 JWT / Session Token / 自定义加密签名
+        // 这里应该调用你的后端 API
+        return true;
+    }
+}</code></pre>
+
+        <h3>9.8.2 防 DDoS 基础措施</h3>
+
+        <ul>
+            <li><strong>速率限制</strong>：每个连接每秒最多 N 条消息</li>
+            <li><strong>连接限制</strong>：单个 IP 最多 M 个并发连接</li>
+            <li><strong>消息大小限制</strong>：拒绝超过 MTU × 2 的消息</li>
+            <li><strong>Cloudflare / AWS Shield</strong>：在服务器前加 CDN 做 L3/L4 防护</li>
+        </ul>
+
+        <h2>9.9 本章小结</h2>
+
+        <ul>
+            <li><strong>专用服务器</strong>是生产环境的标配——无头进程、命令行参数、Docker 容器化</li>
+            <li><strong>Unity Relay</strong>可以快速上线，但适合中小规模</li>
+            <li><strong>CI/CD 自动化测试</strong>确保每次代码变更都不会破坏联网功能</li>
+            <li><strong>监控和日志</strong>是运维的基础——不知道服务器出了什么问题，就无法修复</li>
+        </ul>
+
+        <p>最后一章，我们将对比 Mirror 与其他 Unity 网络方案，帮助你做出正确的技术选型。</p>
+
+        <h2>自测题</h2>
+
+        <details>
+            <summary>点击展开自测题</summary>
+            <div class="details-content">
+                <ol>
+                    <li><strong>实操题：</strong>如何在 Ubuntu Server 上部署一个 Mirror 专用服务器？列出具体步骤。</li>
+                    <li><strong>设计题：</strong>你的游戏日活 100-500 人，峰值 1000 人。你会选择什么部署方案？为什么？</li>
+                    <li><strong>安全题：</strong>如果服务器日志中出现大量 "Unknown connection from IP X.X.X.X"，可能是什么攻击？如何应对？</li>
+                </ol>
+
+                <div class="callout callout-tip">
+                    <strong>参考答案：</strong>
+                    1) ① 在 Unity 中构建 Standalone Linux 服务器 ② 上传到服务器 ③ 安装依赖 (libgl1-mesa-glx 等) ④
+                    运行 ./Game -batchmode -nographics -dedicated -port 7777 ⑤ 用 systemctl 创建服务实现开机自启
+                    2) 动态扩缩方案：2 个基础实例常驻 + 自动扩展。
+                    日常 2 个实例足够（每个 50-100 并发），峰值时自动扩展到 5-10 个。
+                    成本低且能应对波动。
+                    3) 可能是 DDoS 或暴力连接攻击。
+                    应对：IP 速率限制、连接数上限、防火墙规则、Cloudflare 防护。
+                </div>
+            </div>
+        </details>
+
+        <footer class="chapter-footer">
+            <nav class="chapter-nav bottom">
+                <a href="08-延迟补偿与客户端预测.html">← 第 8 章</a>
+                <a href="10-生态对比与未来展望.html">第 10 章：生态对比 →</a>
+            </nav>
+        </footer>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

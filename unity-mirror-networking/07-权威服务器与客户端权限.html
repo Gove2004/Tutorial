@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 7 章：权威服务器 - Unity Mirror 教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-传输层原理与Transport接口.html">← 第 6 章</a>
+        <a href="08-延迟补偿与客户端预测.html">第 8 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 7 章：权威服务器与客户端权限</h1>
+
+        <p class="intro">
+            这是单机开发者转联机时最难跨越的思维障碍。
+            在单机游戏中，你的代码说"玩家移动到那里"，玩家就到了那里。
+            在网络游戏中，你的代码说"玩家想移动到那里"——但最终决定权在服务器手里，
+            服务器可能说"不行，你不可能这么快"。理解并实践"服务器权威"模型，是联网开发的分水岭。
+        </p>
+
+        <h2>7.1 为什么需要权威服务器？</h2>
+
+        <p>先想一个场景：你在开发一个平台跳跃游戏。玩家在单机模式下按空格跳跃，角色腾空而起。</p>
+
+        <pre><code class="language-csharp">// 单机版：简单直接
+void Update()
+{
+    if (Input.GetKeyDown(KeyCode.Space))
+    {
+        rigidbody.velocity = Vector3.up * jumpForce;
+    }
+}</code></pre>
+
+        <p>现在联网了。如果同样的代码跑在客户端上：</p>
+
+        <ul>
+            <li>玩家可以修改内存，把 <code>jumpForce</code> 从 10 改成 1000</li>
+            <li>玩家可以拦截网络包，把自己的位置从 <code>(5, 0, 0)</code> 改成 <code>(5, 50, 0)</code>（飞天）</li>
+            <li>玩家可以重放"跳跃"消息 100 次/秒，实现悬浮</li>
+        </ul>
+
+        <div class="callout callout-danger">
+            <strong>核心原则：永远不要信任客户端。</strong><br>
+            这不是"防备某个特定玩家"，而是"防备所有玩家"。
+            任何运行客户端代码的人都有能力修改、拦截、重放你的数据。
+            这是客观事实，不是道德判断。
+        </div>
+
+        <h2>7.2 服务器权威模型的三种级别</h2>
+
+        <h3>7.2.1 完全权威（Fully Authoritative）— 推荐</h3>
+
+        <p>服务器拥有全部真相。客户端只做两件事：<strong>收集输入</strong>和<strong>播放表现</strong>。</p>
+
+        <pre><code class="language-csharp">public class PlayerController : NetworkBehaviour
+{
+    void Update()
+    {
+        // ❌ 绝对不要在客户端直接修改状态
+        // transform.position += direction;  // 危险！
+
+        // ✅ 正确：只收集输入，发送给服务器
+        if (isLocalPlayer && hasAuthority)
+        {
+            Vector2 input = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
+            CmdSendInput(input, Time.time);
+        }
+    }
+
+    [Command]
+    void CmdSendInput(Vector2 input, float timestamp)
+    {
+        // 服务器收到输入后验证并执行
+        ProcessInput(input, timestamp);
+    }
+
+    void ProcessInput(Vector2 input, float timestamp)
+    {
+        // 验证 1：输入范围是否合法
+        if (input.magnitude > 1.01f) return;
+
+        // 验证 2：时间戳是否合理（不能是未来时间）
+        if (timestamp > Time.time) return;
+
+        // 验证 3：速度是否超过最大移动速度
+        Vector3 move = new Vector3(input.x, input.y, 0) * maxSpeed * Time.deltaTime;
+        if (move.sqrMagnitude > (maxSpeed * Time.deltaTime) * (maxSpeed * Time.deltaTime))
+            move.Normalize() * maxSpeed * Time.deltaTime;
+
+        transform.position += move;
+    }
+
+    // 服务器广播新位置
+    [ClientRpc]
+    void RpcSyncPosition(Vector3 pos)
+    {
+        if (!isLocalPlayer)  // 本地玩家自己已经知道位置，不需要同步
+            transform.position = pos;
+    }
+}</code></pre>
+
+        <h3>7.2.2 部分权威（Partial Authority / Client Authority）</h3>
+
+        <p>某些对象的所有权可以交给客户端。但"所有权"不等于"不受验证"：</p>
+
+        <pre><code class="language-csharp">// 场景：NPC 跟随玩家
+// NPC 的位置更新由绑定它的客户端负责（减少 RPC 开销）
+// 但服务器仍然验证 NPC 的速度是否合理
+
+public class NPCTracker : NetworkBehaviour
+{
+    public Transform target;
+    public float speed = 3f;
+
+    void Start()
+    {
+        // 将 NPC 的 Authority 授予绑定它的客户端
+        if (isServer)
+        {
+            GetComponent&lt;NetworkIdentity&gt;().AssignAuthority(connectionToClient);
+        }
+    }
+
+    // 拥有 Authority 的客户端可以驱动这个 NPC
+    void Update()
+    {
+        if (hasAuthority && target != null)
+        {
+            transform.position = Vector3.MoveTowards(
+                transform.position, target.position, speed * Time.deltaTime
+            );
+
+            // 即使有 Authority，也应该定期向服务器报告位置
+            if (Time.time - lastReportTime > 0.1f)
+            {
+                CmdReportPosition(transform.position);
+                lastReportTime = Time.time;
+            }
+        }
+    }
+
+    [Command]
+    void CmdReportPosition(Vector3 pos)
+    {
+        // 服务器验证：这个移动速度是否合理？
+        float distance = Vector3.Distance(serverPosition, pos);
+        float maxAllowed = speed * 0.1f + 0.5f;  // 允许一些误差
+
+        if (distance &gt; maxAllowed)
+        {
+            Debug.LogWarning($"[反作弊] NPC 速度异常: {distance / 0.1f:F1} m/s");
+            transform.position = serverPosition;  // 回滚
+            return;
+        }
+
+        serverPosition = pos;
+        RpcSyncPosition(pos);
+    }
+}</code></pre>
+
+        <h3>7.2.3 无权威（No Authority）— 纯观察对象</h3>
+
+        <p>有些网络对象只用于视觉表现，不需要任何人控制：</p>
+
+        <pre><code class="language-csharp">// 场景：地图上的装饰物、特效粒子、静态陷阱
+// 这些对象 Spawn 后由服务器完全管理，客户端只负责渲染
+
+public class Trap : NetworkBehaviour
+{
+    public int damage = 20;
+
+    void OnTriggerEnter(Collider other)
+    {
+        // ⚠️ 注意：触发器逻辑必须在服务器端执行！
+        // 客户端的 OnTriggerEnter 不应该影响游戏结果
+
+        if (isServer)
+        {
+            NetworkIdentity target = other.GetComponent&lt;NetworkIdentity&gt;();
+            if (target && target.TryGetComponent(out HealthSystem hs))
+            {
+                hs.TakeDamage(damage);
+                RpcTriggerEffect(transform.position);
+            }
+        }
+    }
+
+    [ClientRpc]
+    void RpcTriggerEffect(Vector3 pos)
+    {
+        // 客户端只播放特效
+        Instantiate(trapEffect, pos, Quaternion.identity);
+    }
+}</code></pre>
+
+        <h2>7.3 Client Authority 详解</h2>
+
+        <p><code>Client Authority</code> 不是"让客户端为所欲为"，而是"让最合适的机器做决策"。</p>
+
+        <h3>7.3.1 什么时候给客户端 Authority？</h3>
+
+        <table>
+            <thead>
+                <tr><th>场景</th><th>建议</th><th>原因</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Player 角色</td><td>✅ 给客户端</td><td>客户端最需要即时反馈</td></tr>
+                <tr><td>NPC 跟随 Player</td><td>✅ 给客户端</td><td>减少 RPC 频率</td></tr>
+                <tr><td>可拾取物品</td><td>❌ 不给</td><td>物品不应该被"控制"</td></tr>
+                <tr><td>载具/载具上的乘客</td><td>⚠️ 视情况</td><td>载具本身服务器权威，乘客同步位置</td></tr>
+                <tr><td>投射物（子弹）</td><td>⚠️ 视情况</td><td>高精度游戏服务器权威，低精度可客户端预测</td></tr>
+            </tbody>
+        </table>
+
+        <h3>7.3.2 获取和释放 Authority</h3>
+
+        <pre><code class="language-csharp">// 服务器转移 Authority
+public class AuthorityManager : NetworkBehaviour
+{
+    [Command]
+    public void CmdRequestAuthority()
+    {
+        // 检查请求者是否有资格获得 Authority
+        if (GetComponent&lt;NetworkIdentity&gt;().connectionToClient == connectionToClient)
+        {
+            // 合法请求，授予 Authority
+            GetComponent&lt;NetworkIdentity&gt;().GrantAuthority(connectionToClient);
+        }
+        else
+        {
+            // 非法请求——有人试图夺取不属于他的对象控制权
+            Debug.LogWarning("非法 Authority 请求");
+        }
+    }
+
+    // 释放 Authority
+    public void ReleaseAuthority()
+    {
+        if (isServer)
+        {
+            GetComponent&lt;NetworkIdentity&gt;().RevokeAuthority(connectionToClient);
+        }
+    }
+}</code></pre>
+
+        <div class="sidebar-note">
+            <strong>Mirror 中的 Authority API 说明：</strong><br>
+            不同版本的 Mirror 对 Authority 的管理方式有所不同。
+            较新版本中，<code>NetworkIdentity.AssignAuthority()</code> 用于在 Spawn 前分配，
+            <code>NetworkServer.Spawn()</code> 时自动处理 Player 对象的 Authority。
+            具体 API 请以你使用的 Mirror 版本文档为准。
+        </div>
+
+        <h2>7.4 常见作弊手段与防御策略</h2>
+
+        <h3>7.4.1 速度作弊</h3>
+
+        <pre><code class="language-csharp">// 作弊方式：客户端发送超快的移动速度
+// 防御：服务器验证移动速度
+
+public class MovementValidator : NetworkBehaviour
+{
+    public float maxSpeed = 10f;
+    public float maxAcceleration = 20f;
+    Vector3 lastPosition;
+    float lastUpdateTime;
+
+    [Command]
+    void CmdUpdatePosition(Vector3 newPos, float timestamp)
+    {
+        float dt = timestamp - lastUpdateTime;
+        if (dt &lt;= 0) { Debug.LogWarning("时间戳异常"); return; }
+
+        float distance = Vector3.Distance(transform.position, newPos);
+        float actualSpeed = distance / dt;
+
+        if (actualSpeed &gt; maxSpeed * 1.5f)  // 允许 50% 的余量
+        {
+            Debug.LogWarning($"[速度作弊检测] 玩家速度: {actualSpeed:F1} m/s (上限: {maxSpeed})");
+            // 选项 1: 踢出游戏
+            // NetworkServer.RemoveConnection(connectionToClient);
+            // 选项 2: 回滚位置
+            transform.position = lastPosition;
+            return;
+        }
+
+        lastPosition = transform.position;
+        lastUpdateTime = timestamp;
+        transform.position = newPos;
+    }
+}</code></pre>
+
+        <h3>7.4.2 传送作弊</h3>
+
+        <pre><code class="language-csharp">// 作弊方式：客户端直接设置位置到远处
+// 防御：验证位移距离
+
+[Command]
+void CmdTeleport(Vector3 targetPos)
+{
+    float distance = Vector3.Distance(transform.position, targetPos);
+    float maxTeleportDistance = 5f;  // 允许的最大传送距离
+
+    if (distance &gt; maxTeleportDistance)
+    {
+        Debug.LogWarning($"[传送作弊检测] 距离: {distance:F1}m");
+        return;
+    }
+
+    transform.position = targetPos;
+}</code></pre>
+
+        <h3>7.4.3 伤害注入</h3>
+
+        <pre><code class="language-csharp">// 作弊方式：客户端发送虚假的"我打中了你"消息
+// 防御：服务器自己计算命中判定
+
+[Command]
+void CmdReportHit(Vector3 targetPos, uint targetNetId)
+{
+    // ❌ 错误做法：相信客户端说的"我打中了 netId=X 的对象"
+    // HealthSystem target = FindObjectById(targetNetId).GetComponent&lt;HealthSystem&gt;();
+    // target.TakeDamage(damage);
+
+    // ✅ 正确做法：服务器自己做射线检测
+    RaycastHit hit;
+    if (Physics.Raycast(shootOrigin, shootDirection, out hit, weaponRange))
+    {
+        if (hit.collider.gameObject.scene.name == currentSceneName)  // 确保在同一场景
+        {
+            NetworkIdentity targetIdentity = hit.collider.GetComponent&lt;NetworkIdentity&gt;();
+            if (targetIdentity &amp;&amp; targetIdentity.TryGetComponent(out HealthSystem hs))
+            {
+                hs.TakeDamage(calculateDamage(hit));
+            }
+        }
+    }
+}</code></pre>
+
+        <h3>7.4.4 重复消息攻击（Replay Attack）</h3>
+
+        <pre><code class="language-csharp">// 作弊方式：客户端反复发送相同的"使用药水"消息
+// 防御：序列号 + 去重
+
+public class AntiReplay : NetworkBehaviour
+{
+    Dictionary&lt;int, float&gt; processedCommands = new Dictionary&lt;int, float&gt;();
+    const int MaxHistory = 100;
+    int nextSeq = 1;
+
+    [Command]
+    void CmdCommand(int seq, CommandData data)
+    {
+        // 检查序列号
+        if (seq &lt;= nextSeq - MaxHistory)
+        {
+            Debug.LogWarning("过时命令，忽略");
+            return;
+        }
+
+        if (processedCommands.ContainsKey(seq))
+        {
+            Debug.LogWarning("重复命令，忽略");
+            return;
+        }
+
+        processedCommands[seq] = Time.time;
+        nextSeq = seq + 1;
+
+        // 清理历史
+        if (processedCommands.Count &gt; MaxHistory * 2)
+        {
+            var oldest = processedCommands.OrderBy(x => x.Value).First();
+            processedCommands.Remove(oldest.Key);
+        }
+
+        ExecuteCommand(data);
+    }
+}</code></pre>
+
+        <h3>7.4.5 输入频率作弊</h3>
+
+        <pre><code class="language-csharp">// 作弊方式：客户端以 1000 次/秒的频率发送"攻击"命令
+// 防御：服务端限速
+
+public class RateLimiter : NetworkBehaviour
+{
+    public int maxCommandsPerSecond = 30;
+    Queue&lt;float&gt; commandTimes = new Queue&lt;float&gt;();
+
+    [Command]
+    void CmdAttack()
+    {
+        float now = Time.time;
+
+        // 清理超过 1 秒的记录
+        while (commandTimes.Count &gt; 0 &amp;&amp; commandTimes.Peek() &lt; now - 1f)
+        {
+            commandTimes.Dequeue();
+        }
+
+        // 检查频率
+        if (commandTimes.Count &gt;= maxCommandsPerSecond)
+        {
+            Debug.LogWarning("输入频率过高");
+            return;
+        }
+
+        commandTimes.Enqueue(now);
+        PerformAttack();
+    }
+}</code></pre>
+
+        <h2>7.6 服务器验证的粒度</h2>
+
+        <p>验证太松 → 容易被作弊。验证太紧 → 正常玩家也可能被误判。<br>
+        找到平衡点需要理解网络的本质：<strong>延迟是不可避免的</strong>。</p>
+
+        <pre><code class="language-csharp">public class ValidationTuner : MonoBehaviour
+{
+    // 验证阈值应该考虑当前网络状况
+    // 不要使用固定值
+
+    float GetRTT()
+    {
+        // Mirror 提供平均 RTT
+        return NetworkClient.connection?.rtt ?? 0f;
+    }
+
+    float CalculateAcceptableMoveDistance(float maxSpeed)
+    {
+        float rtt = GetRTT();
+        // 允许的位移 = 最大速度 × (更新时间 + 半个往返延迟)
+        // 给网络延迟留余量
+        return maxSpeed * (0.1f + rtt / 2f);
+    }
+}</code></pre>
+
+        <h2>7.7 本章小结</h2>
+
+        <ul>
+            <li><strong>服务器权威</strong>不是可选项，而是网络游戏的必需品</li>
+            <li><strong>Client Authority</strong>不是"放弃控制"，而是" delegation with verification"——委派但验证</li>
+            <li>每种作弊手段都有对应的防御策略，核心思路是<strong>服务器独立验证</strong></li>
+            <li>验证要有合理的容差——考虑网络延迟和抖动</li>
+        </ul>
+
+        <p>下一章，我们将进入高级主题：延迟补偿与客户端预测——这些技术让你即使在 200ms 延迟下也能获得流畅的体验。</p>
+
+        <h2>自测题</h2>
+
+        <details>
+            <summary>点击展开自测题</summary>
+            <div class="details-content">
+                <ol>
+                    <li><strong>设计题：</strong>在一个合作 RPG 中，队友死亡时需要复活。设计一个防作弊的复活系统。</li>
+                    <li><strong>场景分析：</strong>以下代码有什么安全问题？如何修复？
+                        <pre><code class="language-csharp">[Command]
+void CmdPickupItem(uint itemNetId)
+{
+    GameObject item = FindObjectById(itemNetId);
+    inventory.Add(item);
+    NetworkServer.Destroy(item);
+}</code></pre>
+                    </li>
+                    <li><strong>思考题：</strong>"完全信任服务器"是否意味着客户端可以完全不验证任何东西？
+                    客户端是否应该做任何验证？为什么？</li>
+                </ol>
+
+                <div class="callout callout-tip">
+                    <strong>参考答案：</strong>
+                    1) 复活请求应该由队友发起（CmdRequestResurrect(targetId)），
+                    服务器验证：① 请求者是否在复活范围内 ② 目标是否真的死亡 ③ 复活技能是否在冷却中
+                    ④ 目标是否在同一场景。全部通过才执行复活。
+                    2) 缺少距离验证——任何人都可以拾取远处的物品。
+                    应添加：if (Vector3.Distance(transform.position, item.transform.position) &gt; pickupRange) return;
+                    还缺少权限验证——应该检查调用者是否有资格拾取此物品。
+                    3) 客户端仍然需要做验证：输入范围校验（防止发送非法输入）、
+                    UI 状态管理（不显示不可用的按钮）、本地表现同步。
+                    客户端验证不是为了安全，而是为了体验和性能。
+                </div>
+            </div>
+        </details>
+
+        <footer class="chapter-footer">
+            <nav class="chapter-nav bottom">
+                <a href="06-传输层原理与Transport接口.html">← 第 6 章</a>
+                <a href="08-延迟补偿与客户端预测.html">第 8 章：延迟补偿 →</a>
+            </nav>
+        </footer>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

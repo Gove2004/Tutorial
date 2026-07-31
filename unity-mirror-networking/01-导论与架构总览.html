@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 1 章：导论与架构总览 - Unity Mirror 教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <nav class="chapter-nav">
+            <a href="index.html">目录</a>
+            <span>← 第一章</span>
+            <a href="02-三大基石-NetworkIdentity-Server-Client.html">第 2 章 →</a>
+        </nav>
+
+        <h1>第 1 章：导论 — Unity 网络编程与 Mirror</h1>
+
+        <p class="intro">
+            你做过很多单机项目，知道如何在 <code>Update</code> 里移动角色、如何在场景里放置敌人、
+            如何用 <code>DontDestroyOnLoad</code> 管理全局状态。但现在你的策划说："这个玩法应该支持两个人一起玩。"
+            你突然意识到——你完全不知道从哪里开始。本章将解释<strong>为什么</strong>这么难，以及 Mirror 试图解决什么。
+        </p>
+
+        <h2>1.1 单机变联机：到底多了哪些复杂度？</h2>
+
+        <p>单机开发中，有一台机器拥有<strong>全部真相</strong>（single source of truth）。
+        玩家按下 W 键，你就把角色往前移；敌人 AI 在服务器帧里计算走位，结果直接渲染出来。
+        一切简单直观。</p>
+
+        <p>一旦要联网，以下问题同时出现：</p>
+
+        <ul>
+            <li><strong>谁说了算？</strong>玩家觉得自己往前走了，但服务器认为他还在原地——该听谁的？</li>
+            <li><strong>消息什么时候到？</strong>你发送了一个"开火"指令，但 200ms 后服务器才收到。这期间其他玩家看到了什么？</li>
+            <li><strong>消息会丢吗？</strong>TCP 保证送达但可能乱序，UDP 快但不保证送达——选哪个？</li>
+            <li><strong>有人作弊怎么办？</strong>如果客户端控制角色移动，玩家修改一下内存就能飞天遁地。</li>
+            <li><strong>多人同时在线怎么扩？</strong>10 人和 1000 人的网络架构完全不同。</li>
+        </ul>
+
+        <div class="definition">
+            <h4>核心概念：网络游戏的本质矛盾</h4>
+            <p>单机游戏的问题是<strong>计算问题</strong>（如何让 AI 更聪明、物理更稳定）。
+            网络游戏的问题本质上是<strong>信息分发问题</strong>（如何让多台机器对同一状态达成一致）。
+            这个转变是理解所有网络框架的起点。</p>
+        </div>
+
+        <h2>1.2 Mirror 的定位</h2>
+
+        <p>Mirror 是一个<strong>基于权威服务器模型</strong>的 Unity 网络框架。它的核心职责是：</p>
+
+        <ol>
+            <li>在服务器和客户端之间<strong>可靠或不可靠地传输数据</strong>（RPC 调用、状态同步、自定义消息）</li>
+            <li>管理<strong>网络对象的生命周期</strong>（Spawn / 销毁 / 所有权）</li>
+            <li>提供一套<strong>声明式 API</strong>，让你用特性标注（[Command]、[ClientRpc]）而不是手写序列化代码</li>
+        </ol>
+
+        <p>Mirror 不是万能的。它不提供：</p>
+
+        <ul>
+            <li> matchmaking / 房间系统（你需要自己实现或用第三方服务）</li>
+            <li>NAT 穿透 / Relay 服务（但可以通过自定义 Transport 接入）</li>
+            <li>反作弊引擎（但提供了 Client Authority 等机制让你防范作弊）</li>
+            <li>客户端预测 / 延迟补偿（这些需要你自己基于 Mirror 的基础设施实现）</li>
+        </ul>
+
+        <div class="callout callout-warning">
+            <strong>重要认知：</strong>Mirror 提供的是<strong>基础设施</strong>，不是<strong>完整解决方案</strong>。
+            它让你能发数据、同步状态、管理对象——但"如何设计一个好玩且可靠的联网玩法"仍然需要你思考。
+            把它理解为"联网版的 MonoBehaviour"，而不是"一键联机插件"。
+        </div>
+
+        <h2>1.3 历史背景：从 UNet 到 Mirror</h2>
+
+        <p>理解 Mirror 的来龙去脉，有助于理解它的设计取舍。</p>
+
+        <p>Unity 曾经官方提供过一个网络框架叫 <strong>UNet</strong>（Unity Networking）。
+        它在 2016 年前后广泛使用，但存在诸多问题：</p>
+
+        <table>
+            <thead>
+                <tr><th>问题领域</th><th>UNet 的缺陷</th><th>Mirror 的改进</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>维护状态</td><td>Unity 官方停止维护，文档链接大量失效</td><td>社区活跃维护，GitHub 持续更新</td></tr>
+                <tr><td>架构复杂度</td><td>内部实现臃肿，大量抽象层，难以理解和二次开发</td><td>代码量约 UNet 的 1/3，结构扁平清晰</td></tr>
+                <tr><td>Transport 层</td><td>绑定 Unity 的 Relay 服务，无法灵活替换</td><td>Transport 接口抽象，可插拔</td></tr>
+                <tr><td>文档与社区</td><td>官方文档消失，社区分散</td><td>中文/英文文档齐全，Discord 活跃</td></tr>
+                <tr><td>包管理</td><td>只能通过 Package Manager 安装，版本锁定</td><td>可直接导入 Unity Package 或 via UPM</td></tr>
+            </tbody>
+        </table>
+
+        <p>2018 年，UNet 宣布停更后，原 Unity 网络团队成员 <strong>Johan Andersson (Revenant)</strong>
+        基于 UNet 源码 fork 出了 Mirror，目标是做一个<strong>更简单、更透明、更好改</strong>的网络框架。</p>
+
+        <div class="sidebar-note">
+            <strong>为什么"好改"很重要？</strong>
+            在网络编程中，你几乎必然遇到框架默认行为不符合需求的情况。
+            如果框架像黑盒一样复杂难改，你就被限制了。Mirror 的代码量控制在合理范围内，
+            阅读源码就能理解每个数据包的生成和处理过程——这在学习阶段尤其珍贵。
+        </div>
+
+        <h2>1.4 架构总览：客户端-服务器模型</h2>
+
+        <p>Mirror 采用严格的<strong>客户端-服务器（Client-Server）</strong>架构。
+        这是业界标准做法，也是所有联网游戏的基石。</p>
+
+        <pre><code class="language-text">┌─────────────────────────────────────────────────────┐
+│                    网络（互联网 / LAN）               │
+└─────────────────────────────────────────────────────┘
+         ▲                         ▲
+         │ TCP/UDP/KCP            │ TCP/UDP/KCP
+         │                         │
+   ┌─────┴──────┐          ┌──────┴──────┐
+   │  Client    │          │   Server    │
+   │  客户端    │          │   服务器端   │
+   │            │          │             │
+   │ Player A   │          │  Authority  │
+   │ Player B   │          │  全部真相    │
+   └────────────┘          └─────────────┘
+</code></pre>
+
+        <p>在这个模型中：</p>
+
+        <ul>
+            <li><strong>服务器是权威的</strong>——所有游戏状态的最终决定权在服务器。客户端只是"显示器 + 输入收集器"。</li>
+            <li><strong>客户端不信任</strong>——客户端发送的任何请求（"我按了射击键"、"我移动到了这里"），服务器都要验证后再决定是否接受。</li>
+            <li><strong>数据双向流动</strong>——客户端发送输入（通常很小、很频繁），服务器广播状态更新（通常较大、有频率限制）。</li>
+        </ul>
+
+        <h3>1.4.1 Host 模式：当客户端同时也是服务器</h3>
+
+        <p>在开发和小规模联机的场景中，经常遇到一种特殊情况：<strong>主机（Host）</strong>——
+        一台机器既运行服务器逻辑，又运行客户端渲染。</p>
+
+        <pre><code class="language-text">┌─────────────────────────┐
+│       Host 机器          │
+│  ┌───────────────────┐  │
+│  │    Server 部分     │  │  ← 拥有全部游戏状态
+│  │    Client 部分     │  │  ← 负责渲染和本地输入
+│  └───────────────────┘  │
+│         ▲               │
+│         │ 本地调用      │  ← 不需要走网络！
+└─────────┼───────────────┘
+          │
+     ┌────┴────┐
+     │ Client  │
+     │ 玩家 B  │
+     └─────────┘
+</code></pre>
+
+        <div class="callout callout-info">
+            <strong>开发时的便利：</strong>在 Unity Editor 中点击 "Host" 按钮，当前实例就同时变成了服务器和客户端。
+            这让你在不调用外部服务器的情况下测试多人场景。但要注意：Host 模式下的本地调用不走网络序列化，
+            而远程客户端走网络——这种差异是常见 bug 来源。
+        </div>
+
+        <h3>1.4.2 为什么不用 P2P（对等网络）？</h3>
+
+        <p>你可能听说过 P2P 联网方式——每台机器既是客户端又是服务器，彼此直连。
+        早期一些游戏（如 CS 1.6 的 dedicated server 可选、一些怀旧游戏的 IPX 模式）用过这种方式。</p>
+
+        <p>Mirror 不支持 P2P，原因很实际：</p>
+
+        <table>
+            <thead>
+                <tr><th>问题</th><th>P2P</th><th>客户端-服务器</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>作弊</td><td>极难防范，每台机器都可控</td><td>服务器权威，客户端无法篡改状态</td></tr>
+                <tr><td>NAT 穿透</td><td>需要复杂的 STUN/TURN 方案</td><td>服务器有公网 IP，客户端只需连接</td></tr>
+                <tr><td>掉线处理</td><td>主机掉线 = 所有人掉线</td><td>服务器独立运行，客户端重连即可</td></tr>
+                <tr><td>部署</td><td>需要每台机器都运行游戏</td><td>服务器可以是无头进程（Headless）</td></tr>
+            </tbody>
+        </table>
+
+        <p>现代网络游戏几乎全部采用客户端-服务器架构。P2P 仅在一些特殊场景（如 VoIP、文件共享）中使用。</p>
+
+        <h2>1.5 数据流全景：一次"射击"在网络上经历了什么</h2>
+
+        <p>让我们用一个具体例子，追踪一次射击操作在 Mirror 中的完整旅程。</p>
+
+        <p>场景：玩家 A 看到敌人站在前方 10 米，按下鼠标左键射击。</p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>客户端输入采集</h4>
+                    <p>本地客户端检测到鼠标左键按下。此时客户端<strong>不直接修改任何游戏状态</strong>（比如不给敌人扣血）。
+                    它只是记录了这个输入事件。</p>
+                    <pre><code class="language-csharp">// 错误示范：客户端直接扣血
+enemy.Health -= damage;  // ❌ 服务器不认可！
+
+// 正确做法：发送请求给服务器
+Shoot();  // [Command] 方法</code></pre>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>Command RPC 序列化与发送</h4>
+                    <p><code>[Command]</code> 标记的方法被 Mirror 拦截，序列化为网络消息，
+                    通过 Transport 层发送到服务器。消息内容通常包含：目标位置、武器类型、时间戳等。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>服务器接收与验证</h4>
+                    <p>服务器收到消息后，执行验证：<br>
+                    • 玩家 A 真的在射程内吗？<br>
+                    • 武器还在冷却中吗？<br>
+                    • 敌人在视野范围内吗？<br>
+                    验证通过后才执行逻辑。</p>
+                    <pre><code class="language-csharp">public override void CmdShoot(Vector3 origin, Vector3 direction)
+{
+    // 验证 1：冷却时间
+    if (Time.time < lastShootTime + fireRate) return;
+
+    // 验证 2：射程
+    float distance = Vector3.Distance(transform.position, origin);
+    if (distance > weaponRange) { Debug.LogWarning("射程溢出"); return; }
+
+    // 验证 3：射线检测（敌人是否真的在准星方向）
+    RaycastHit hit;
+    if (Physics.Raycast(origin, direction, out hit, weaponRange))
+    {
+        if (hit.collider.TryGetComponent(out NetworkIdentity target))
+        {
+            // 验证通过，造成伤害
+            TargetTakeDamage(target, damage, hit.point);
+        }
+    }
+
+    lastShootTime = Time.time;
+}</code></pre>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h4>服务器广播结果</h4>
+                    <p>服务器通过 <code>[TargetRpc]</code> 或 <code>[ClientRpc]</code> 通知所有相关客户端：
+                    "玩家 A 射击了，命中了敌人 B，造成了 X 点伤害"。每个客户端播放枪口火焰特效、
+                    血条动画、音效——但这些只是<strong>表现层</strong>，真正的伤害计算在服务器已经完成了。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">5</div>
+                <div class="step-content">
+                    <h4>客户端同步表现</h4>
+                    <p>所有客户端收到 RPC 后，更新画面。玩家 A 看到自己的枪响了，
+                    玩家 B 看到自己的角色掉了血——大家看到的是一致的。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="callout callout-danger">
+            <strong>新手最常见的错误：</strong>在客户端直接修改游戏状态（加血、扣血、改变分数）。
+            记住一条铁律：<strong>任何影响游戏结果的操作，必须在服务器上执行。</strong>
+            客户端只能做"表现同步"（播放动画、特效、音效），不能做"逻辑决策"。
+        </div>
+
+        <h2>1.6 Mirror 的核心组件一览</h2>
+
+        <p>在进入细节之前，先认识 Mirror 的主要模块。你不需要现在就理解每个组件——
+        本章的目标是建立一张"地图"，后续章节会逐一深入。</p>
+
+        <table>
+            <thead>
+                <tr><th>组件</th><th>职责</th><th>对应章节</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>NetworkIdentity</code></td><td>标识一个 GameObject 是网络对象。每个网络对象必须有且仅有一个。</td><td>第 2 章</td></tr>
+                <tr><td><code>NetworkServer</code></td><td>服务器端单例。管理所有连接、Spawn 的对象、游戏逻辑。</td><td>第 2 章</td></tr>
+                <tr><td><code>NetworkClient</code></td><td>客户端端单例。管理连接状态、向服务器发送消息。</td><td>第 2 章</td></tr>
+                <tr><td><code>Transport</code></td><td>传输层抽象。封装 TCP/UDP/KCP/WebSocket 的细节，向上提供统一的发送/接收接口。</td><td>第 6 章</td></tr>
+                <tr><td><code>[Command]</code></td><td>客户端→服务器的 RPC。标记后可以从客户端调用，服务器自动接收。</td><td>第 3 章</td></tr>
+                <tr><td><code>[ClientRpc]</code></td><td>服务器→所有客户端的广播。</td><td>第 3 章</td></tr>
+                <tr><td><code>[TargetRpc]</code></td><td>服务器→指定客户端的单播。</td><td>第 3 章</td></tr>
+                <tr><td><code>[SyncVar]</code></td><td>标记字段后，服务器修改时自动同步到所有客户端。</td><td>第 3 章</td></tr>
+                <tr><td><code>NetworkManager</code></td><td>开箱即用的管理器。处理连接流程、场景切换、Player Spawn 点选择。可继承扩展。</td><td>贯穿全教程</td></tr>
+                <tr><td><code>NetworkBehaviour</code></td><td>所有附加在网络对象上的脚本的基类。提供 <code>isServer</code>、<code>isClient</code> 等属性。</td><td>第 2 章</td></tr>
+            </tbody>
+        </table>
+
+        <h2>1.7 本章小结</h2>
+
+        <p>本章我们建立了三个关键认知：</p>
+
+        <ol>
+            <li><strong>网络编程的本质是信息分发问题</strong>——不是计算问题。理解这一点，就能理解为什么几乎所有网络框架都采用"服务器权威"模型。</li>
+            <li><strong>Mirror 是基础设施，不是魔法</strong>——它帮你处理数据传输和对象管理，但游戏逻辑的设计和验证仍然需要你自己写。</li>
+            <li><strong>客户端不信任原则</strong>——所有来自客户端的请求都要在服务器端验证，这是反作弊的第一道防线。</li>
+        </ol>
+
+        <p>下一章，我们将深入 Mirror 的三大基石组件，开始真正动手写代码。</p>
+
+        <h2>自测题</h2>
+
+        <details>
+            <summary>点击展开自测题</summary>
+            <div class="details-content">
+                <ol>
+                    <li><strong>概念题：</strong>为什么网络游戏普遍采用客户端-服务器架构而不是 P2P 架构？列出至少 3 个原因。</li>
+                    <li><strong>场景分析：</strong>在一个回合制卡牌游戏中，玩家 A 打出了一张牌。客户端检测到点击事件后，
+                    应该直接在本地创建这张牌的动画，还是发送给服务器？为什么？</li>
+                    <li><strong>陷阱识别：</strong>以下代码有什么问题？
+                        <pre><code class="language-csharp">void Update() {
+    if (Input.GetKey(KeyCode.W)) {
+        transform.Translate(0, 0, speed * Time.deltaTime);
+    }
+}</code></pre>
+                    </li>
+                    <li><strong>思考题：</strong>如果你正在开发一个本地多人同屏游戏（4 个人同一台电脑），
+                    还需要 NetworkServer / NetworkClient 吗？Mirror 适合这种场景吗？</li>
+                </ol>
+
+                <div class="callout callout-tip">
+                    <strong>参考答案：</strong>
+                    1) 作弊防范、NAT 穿透简单、掉线不影响其他人、服务器可无头部署。
+                    2) 应该发给服务器——客户端直接放动画会导致服务器不认可、其他玩家看到不一致。
+                    3) 这是单机代码，在网络游戏中客户端直接移动角色意味着服务器不认可你的位置，
+                    服务器下一帧的状态更新会把你的位置"拉回去"（interpolation 除外）。
+                    4) 本地同屏不需要网络框架。但如果要"局域网联机"，就需要。Mirror 主要针对远程联网场景。
+                </div>
+            </div>
+        </details>
+
+        <footer class="chapter-footer">
+            <nav class="chapter-nav bottom">
+                <span>← 第一章</span>
+                <a href="02-三大基石-NetworkIdentity-Server-Client.html">第 2 章：三大基石 →</a>
+            </nav>
+        </footer>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

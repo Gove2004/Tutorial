@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 5 章：SyncList 与自定义消息 - Unity Mirror 教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-对象生成与Spawn管理.html">← 第 4 章</a>
+        <a href="06-传输层原理与Transport接口.html">第 6 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 5 章：数据同步 — SyncList 与自定义消息</h1>
+
+        <p class="intro">
+            SyncVar 能同步单个值，但真实项目中你需要同步列表、字典、复杂数据结构。
+            Mirror 提供了 SyncList 来处理集合类型，也提供了自定义 NetworkMessage 来支持灵活的消息设计。
+            本章将深入这两个主题。
+        </p>
+
+        <h2>5.1 SyncList：同步集合数据</h2>
+
+        <p><code>SyncList</code> 是 Mirror 提供的同步集合类型。
+        它继承自 <code>NetworkBehaviour</code>，因此只能在网络脚本中使用。</p>
+
+        <div class="definition">
+            <h4>SyncList 的核心特性</h4>
+            <p>• 服务器修改后自动同步到所有客户端<br>
+            • 支持 hook 回调（元素变化时触发）<br>
+            • 多种类型变体：SyncListInt、SyncListString、SyncListFloat 等<br>
+            • 不支持泛型——每种类型都有独立的实现</p>
+        </div>
+
+        <h3>5.1.1 基本用法</h3>
+
+        <pre><code class="language-csharp">public class InventorySystem : NetworkBehaviour
+{
+    // 同步物品列表
+    public SyncListString itemNames = new SyncListString();
+
+    // 同步生命值列表（用于队伍系统）
+    public SyncListInt teamHealths = new SyncListInt();
+
+    void OnStartServer()
+    {
+        // 服务器端初始化
+        itemNames.Add("铁剑");
+        itemNames.Add("护甲");
+        itemNames.Add("药水");
+    }
+
+    // hook 方法：当列表变化时调用
+    protected override void OnSyncListChanged(IEnumerable&lt;SyncListString.Operation&gt; operations)
+    {
+        foreach (var op in operations)
+        {
+            switch (op.operation)
+            {
+                case SyncListString.Operation.itemAdded:
+                    Debug.Log($"新增物品: {op.item} 在索引 {op.index}");
+                    break;
+                case SyncListString.Operation.itemRemoved:
+                    Debug.Log($"移除物品: {op.item} 在索引 {op.index}");
+                    break;
+                case SyncListString.Operation.itemChanged:
+                    Debug.Log($"物品变更: {op.item} 在索引 {op.index}");
+                    break;
+            }
+        }
+    }
+}</code></pre>
+
+        <h3>5.1.2 SyncList 支持的类型</h3>
+
+        <table>
+            <thead>
+                <tr><th>类型</th><th>说明</th><th>典型用途</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>SyncListInt</code></td><td>整数列表</td><td>血量、分数、ID</td></tr>
+                <tr><td><code>SyncListString</code></td><td>字符串列表</td><td>物品名、玩家名、聊天消息</td></tr>
+                <tr><td><code>SyncListFloat</code></td><td>浮点列表</td><td>位置插值、伤害值</td></tr>
+                <tr><td><code>SyncListBool</code></td><td>布尔列表</td><td>开关状态、标志位</td></tr>
+                <tr><td><code>SyncListByte</code></td><td>字节列表</td><td>紧凑数据编码</td></tr>
+                <tr><td><code>SyncListUInt16</code></td><td>无符号短整型</td><td>节省带宽的 ID</td></tr>
+                <tr><td><code>SyncListHandle</code></td><td>句柄（内部使用）</td><td>不推荐直接使用</td></tr>
+            </tbody>
+        </table>
+
+        <h3>5.1.3 SyncList 的操作与开销</h3>
+
+        <p>SyncList 支持以下操作：</p>
+
+        <pre><code class="language-csharp">list.Add(value);          // 末尾添加
+list.Insert(index, value); // 指定位置插入
+list.Remove(value);        // 移除第一个匹配项
+list.RemoveAt(index);      // 移除指定位置
+list.Clear();              // 清空
+list[index];               // 索引访问（get/set）
+list.Count;                // 当前数量</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>性能警告：</strong>每次 <code>Add</code> / <code>Remove</code> / <code>Insert</code>
+            都会触发同步。如果你在循环中逐个添加 100 个物品，会触发 100 次同步。
+            应该先修改本地列表，最后一次性同步：
+        </div>
+
+        <pre><code class="language-csharp">// ❌ 低效：100 次同步
+for (int i = 0; i &lt; 100; i++)
+{
+    itemNames.Add($"物品{i}");
+}
+
+// ✅ 高效：先在本地构建，然后一次性赋值
+// SyncList 没有批量 Add，所以需要用 RPC 或自定义消息
+CmdBulkAddItems(new[] { "物品1", "物品2", ... });
+
+// 更好的方案：用自定义消息批量发送</code></pre>
+
+        <h2>5.2 自定义 NetworkMessage</h2>
+
+        <p>当 SyncVar / SyncList 不够用时，你可以定义完全自定义的消息结构。</p>
+
+        <h3>5.2.1 消息的定义</h3>
+
+        <pre><code class="language-csharp">using Mirror;
+using UnityEngine;
+
+// 定义消息结构
+[Serializable]
+public class PlayerMoveMessage : MessageBase
+{
+    public Vector3 position;
+    public Vector3 rotation;
+    public float timestamp;       // 用于预测/插值
+    public int sequenceNumber;    // 用于排序和去重
+}
+
+[Serializable]
+public class CombatReportMessage : MessageBase
+{
+    public uint attackerNetId;
+    public uint targetNetId;
+    public int damage;
+    public Vector3 hitPosition;
+    public DamageType damageType;  // 自定义 enum
+}
+
+public enum DamageType
+{
+    Physical,
+    Magic,
+    True,
+    Burst
+}</code></pre>
+
+        <h3>5.2.2 注册与发送消息</h3>
+
+        <pre><code class="language-csharp">// 服务器端：注册消息处理器
+void OnServerStarted()
+{
+    NetworkServer.RegisterHandler&lt;PlayerMoveMessage&gt;(OnPlayerMove, replace: true);
+    NetworkServer.RegisterHandler&lt;CombatReportMessage&gt;(OnCombatReport, replace: true);
+}
+
+// 处理收到的消息
+void OnPlayerMove(NetworkConnection conn, PlayerMoveMessage msg)
+{
+    // 验证消息来源
+    if (conn == null) return;
+
+    // 找到对应的 Player 对象
+    NetworkIdentity player = conn.player?.identity;
+    if (player == null) return;
+
+    // 验证合理性（防作弊）
+    Vector3 expectedPos = player.transform.position;
+    float maxSpeed = player.GetComponent&lt;PlayerController&gt;().moveSpeed;
+    float maxDist = maxSpeed * 0.5f;  // 允许 0.5 秒的偏差
+
+    if ((msg.position - expectedPos).sqrMagnitude > maxDist * maxDist)
+    {
+        Debug.LogWarning($"[反作弊] 玩家 {conn.userId} 位置异常");
+        return;  // 忽略异常消息
+    }
+
+    // 应用移动
+    player.transform.position = msg.position;
+
+    // 广播给其他客户端
+    NetworkServer.SendToAll(new PlayerMoveMessage
+    {
+        position = msg.position,
+        rotation = msg.rotation,
+        timestamp = msg.timestamp,
+        sequenceNumber = msg.sequenceNumber
+    }, conn);  // 不包括发送者（他已经有最新数据了）
+}
+
+// 服务器向特定客户端发送消息
+void SendCombatReportToClient(NetworkConnection client, CombatReport report)
+{
+    client.Send(new CombatReportMessage
+    {
+        attackerNetId = report.attacker.netId,
+        targetNetId = report.target.netId,
+        damage = report.damage,
+        hitPosition = report.hitPosition,
+        damageType = report.type
+    });
+}</code></pre>
+
+        <h3>5.2.3 客户端注册与发送</h3>
+
+        <pre><code class="language-csharp">void Start()
+{
+    // 客户端注册消息处理器
+    NetworkClient.RegisterHandler&lt;CombatReportMessage&gt;(OnCombatReport, replace: true);
+    NetworkClient.RegisterHandler&lt;PlayerMoveMessage&gt;(OnOtherPlayerMove, replace: true);
+}
+
+void OnCombatReport(CombatReportMessage msg)
+{
+    // 显示伤害数字、播放命中特效
+    ShowDamageNumber(msg.targetNetId, msg.damage, msg.hitPosition);
+}
+
+void OnOtherPlayerMove(PlayerMoveMessage msg)
+{
+    // 更新其他玩家的位置（用于插值）
+    UpdateRemotePlayerPosition(msg);
+}
+
+// 客户端发送自定义消息给服务器
+void SendMoveCommand(Vector3 pos, Vector3 rot)
+{
+    NetworkClient.connection.Send(new PlayerMoveMessage
+    {
+        position = pos,
+        rotation = rot,
+        timestamp = Time.time,
+        sequenceNumber = ++moveSequence
+    });
+}</code></pre>
+
+        <h2>5.3 消息 ID 与注册</h2>
+
+        <p>Mirror 为每种消息类型分配一个唯一的 <strong>message ID</strong>。
+        在发送和接收之前，消息必须被注册：</p>
+
+        <pre><code class="language-csharp">// 方式 1：RegisterHandler 自动注册
+NetworkServer.RegisterHandler&lt;MyMessage&gt;(Handler, replace: true);
+
+// 方式 2：手动指定 message ID
+const int MyCustomMsgId = (int)MsgType.Highest + 1;
+NetworkServer.RegisterHandler(MyCustomMsgId, Handler, authenticator);
+
+// 方式 3：在 MessagePacker 中预注册（适合大量消息）
+// Mirror 会自动为泛型 RegisterHandler&lt;T&gt; 分配 ID</code></pre>
+
+        <div class="sidebar-note">
+            <strong>为什么需要注册？</strong><br>
+            消息注册做了两件事：<br>
+            1. 建立 messageTypeId → handler 的映射表<br>
+            2. 注册序列化器（Serializer）和反序列化器（Deserializer）<br><br>
+            如果忘记注册就发送消息，Mirror 会在打包时报错："Unknown message type"。
+        </div>
+
+        <h2>5.4 消息设计最佳实践</h2>
+
+        <h3>5.4.1 小消息优先</h3>
+
+        <p>每条网络消息都有头部开销（约 6-10 字节）。消息越小、越精简，带宽利用率越高：</p>
+
+        <pre><code class="language-csharp">// ❌ 浪费：发送了整个 Transform 数据
+public class BadMoveMessage : MessageBase
+{
+    public float x, y, z;
+    public float rx, ry, rz, rw;
+    public float scaleX, scaleY, scaleZ;
+    public int animationState;
+    public float sprintMultiplier;
+    // 总共 ~50 字节
+}
+
+// ✅ 精简：只发送必要的差分数据
+public class EfficientMoveMessage : MessageBase
+{
+    public int sequenceNumber;     // 4 bytes
+    public short posX, posZ;       // 4 bytes (缩放 100 倍)
+    public short rotY;             // 2 bytes
+    public byte animState;         // 1 byte
+    // 总共 ~11 bytes
+}</code></pre>
+
+        <h3>5.4.2 使用固定精度而非浮点数</h3>
+
+        <pre><code class="language-csharp">// ❌ float 占用 4 字节，且网络中精度可能丢失
+public float positionX;
+
+// ✅ 用 short 存储缩放后的坐标（精度 0.01 米）
+public short positionX_Scaled;
+
+// 转换函数
+public static short ToNetworkFloat(float value) => (short)(value * 100f);
+public static float FromNetworkShort(short value) => value / 100f;</code></pre>
+
+        <h3>5.4.3 消息分组与优先级</h3>
+
+        <pre><code class="language-csharp">// 高频消息（位置同步，每帧）→ 低优先级，unreliable
+// 中频消息（技能释放，每秒几次）→ 中优先级，reliable
+// 低频消息（聊天、系统通知）→ 高优先级，reliable
+
+// Mirror 通过 channelId 区分
+// Channel 0: Reliable Sequenced Channel（默认，保证送达和顺序）
+// Channel 1: Unreliable Channel（不保证送达）
+
+// 发送 unreliable 消息
+NetworkServer.SendToAll(message, channelId: 1);
+
+// 接收 unreliable 消息时，丢弃重复/过期序列号
+void OnUnreliableMove(PlayerMoveMessage msg)
+{
+    if (msg.sequenceNumber <= lastProcessedSequence)
+        return;  // 丢弃过期消息
+    lastProcessedSequence = msg.sequenceNumber;
+}</code></pre>
+
+        <h2>5.5 序列化与反序列化深度理解</h2>
+
+        <p>Mirror 的消息传递依赖于序列化。理解这个过程有助于避免奇怪的 bug。</p>
+
+        <h3>5.5.1 Mirror 的序列化管道</h3>
+
+        <pre><code class="language-text">C# 对象
+   │
+   ▼
+MessagePacker.Pack()        ← 将 C# 对象序列化为 byte[]
+   │
+   ▼
+Transport.Send(byte[])      ← 通过 TCP/UDP/KCP 发送
+   │
+   ▼
+Transport.OnData(byte[])    ← 接收字节数据
+   │
+   ▼
+MessagePacker.Unpack&lt;T>()   ← 将 byte[] 反序列化为 C# 对象
+   │
+   ▼
+Handler(T message)          ← 业务逻辑处理</code></pre>
+
+        <h3>5.5.2 常见序列化问题</h3>
+
+        <table>
+            <thead>
+                <tr><th>问题</th><th>症状</th><th>解决方案</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>消息大小超过 MTU</td><td>UDP 分包失败，TCP 头块堆积</td><td>拆分消息或使用 reliable channel</td></tr>
+                <tr><td>字段类型不匹配</td><td>反序列化后数据错乱</td><td>确保收发双方使用相同的消息结构</td></tr>
+                <tr><td>引用类型序列化</td><td>NetworkIdentity 被序列化为 netId 而非对象引用</td><td>手动在 handler 中通过 netId 查找对象</td></tr>
+                <tr><td>枚举值变更破坏兼容</td><td>旧客户端收到新消息后枚举解析错误</td><td>枚举不要删除中间值，只追加</td></tr>
+            </tbody>
+        </table>
+
+        <h2>5.6 实战：设计一个消息系统</h2>
+
+        <p>让我们为一个多人竞技游戏设计完整的消息系统：</p>
+
+        <pre><code class="language-csharp">// ==================== 消息定义 ====================
+
+public enum MessageType
+{
+    Move = 1,
+    Attack,
+    Skill,
+    Chat,
+    ScoreUpdate,
+    GameState
+}
+
+[Message(MessageType.Move)]
+public class MoveMessage : MessageBase
+{
+    public int sequence;
+    public short inputX, inputY;  // 输入方向，缩放 1000 倍
+    public float timestamp;
+}
+
+[Message(MessageType.Attack)]
+public class AttackMessage : MessageBase
+{
+    public int weaponId;
+    public short aimX, aimY, aimZ;  // 瞄准方向，量化
+    public float timestamp;
+}
+
+[Message(MessageType.Chat)]
+public class ChatMessage : MessageBase
+{
+    public string senderName;
+    public string content;
+    public ChatType type;  // All / Team / Whisper
+}
+
+public enum ChatType { All = 0, Team = 1, Whisper = 2 }
+public enum WhisperTarget { None = 0, Player1 = 1, Player2 = 2 }
+
+// ==================== 消息路由 ====================
+
+public class MessageRouter : NetworkBehaviour
+{
+    void OnStartServer()
+    {
+        // 注册所有消息处理器
+        NetworkServer.RegisterHandler&lt;MoveMessage&gt;(OnMove, replace: true);
+        NetworkServer.RegisterHandler&lt;AttackMessage&gt;(OnAttack, replace: true);
+        NetworkServer.RegisterHandler&lt;ChatMessage&gt;(OnChat, replace: true);
+    }
+
+    void OnMove(NetworkConnection conn, MoveMessage msg)
+    {
+        // 频率限制：每秒最多 30 条移动消息
+        if (Time.time - conn.lastMoveTime &lt; 1f / 30f) return;
+        conn.lastMoveTime = Time.time;
+
+        // 处理移动输入
+        Vector2 input = new Vector2(msg.inputX / 1000f, msg.inputY / 1000f);
+        ProcessPlayerInput(conn.player, input, msg.sequence);
+    }
+
+    void OnAttack(NetworkConnection conn, AttackMessage msg)
+    {
+        // 冷却限制
+        if (Time.time - conn.lastAttackTime &lt; 0.2f) return;
+        conn.lastAttackTime = Time.time;
+
+        // 执行攻击
+        ExecuteAttack(conn.player, msg);
+    }
+}</code></pre>
+
+        <h2>5.7 消息调试工具</h2>
+
+        <pre><code class="language-csharp">// 拦截并打印所有消息流量
+public class MessageDebugger : MonoBehaviour
+{
+    void Start()
+    {
+        // 服务器端：拦截所有入站消息
+        NetworkServer.RegisterHandler&lt;MessageBase&gt;(OnDebugMessage, replace: true);
+    }
+
+    void OnDebugMessage(NetworkConnection conn, MessageBase msg)
+    {
+        Debug.Log($"[MSG] 来自 {conn.userId}: {msg.GetType().Name} @ {Time.time}");
+
+        // 可选：转发到原始处理器
+        // 但这需要维护一个 handler 链
+    }
+}
+
+// 统计消息频率
+public class BandwidthMonitor : MonoBehaviour
+{
+    long bytesReceived = 0;
+    long bytesSent = 0;
+    float lastCheckTime = 0;
+
+    void Update()
+    {
+        float elapsed = Time.time - lastCheckTime;
+        if (elapsed &gt; 1f)
+        {
+            float recvBps = (bytesReceived * 8) / elapsed;
+            float sentBps = (bytesSent * 8) / elapsed;
+            Debug.Log($"带宽: 收 {recvBps / 1024:F1} KB/s 发 {sentBps / 1024:F1} KB/s");
+
+            bytesReceived = 0;
+            bytesSent = 0;
+            lastCheckTime = Time.time;
+        }
+    }
+}</code></pre>
+
+        <h2>5.8 本章小结</h2>
+
+        <ul>
+            <li><strong>SyncList</strong> 是 Mirror 提供的同步集合类型，适用于简单的列表数据同步</li>
+            <li><strong>自定义 NetworkMessage</strong> 让你可以定义任意结构的数据传输，适合复杂场景</li>
+            <li>消息设计要遵循<strong>小消息优先、固定精度、频率控制</strong>原则</li>
+            <li>理解序列化管道有助于排查数据错乱、消息丢失等问题</li>
+        </ul>
+
+        <p>下一章，我们将深入传输层——理解 Mirror 如何在 TCP/UDP/KCP 之间选择，以及如何自定义 Transport。</p>
+
+        <h2>自测题</h2>
+
+        <details>
+            <summary>点击展开自测题</summary>
+            <div class="details-content">
+                <ol>
+                    <li><strong>设计题：</strong>你需要同步一个玩家的装备栏，包含 20 个格子，每个格子有物品 ID 和数量。
+                    你会用 SyncList 还是自定义消息？如何设计？</li>
+                    <li><strong>代码找错：</strong>以下代码有什么问题？
+                        <pre><code class="language-csharp">[Command]
+public void CmdSendChat(string message)
+{
+    RpcChatMessage(message);  // 从 Command 内部调用 Rpc
+}</code></pre>
+                    </li>
+                    <li><strong>推理题：</strong>如果服务器和客户端对同一个 enum 的定义不一致（服务器新增了值），
+                    会发生什么？如何避免？</li>
+                </ol>
+
+                <div class="callout callout-tip">
+                    <strong>参考答案：</strong>
+                    1) 两者皆可。SyncList 简单但不够灵活（无法存储复合对象）。
+                    推荐用自定义消息：EquippedItemsMessage { List&lt;ItemSlot&gt; slots }，
+                    其中 ItemSlot { int itemId, int count }。
+                    2) 这在技术上是可行的（Command 内部可以调 Rpc），但要注意：
+                    Command 在服务端执行，Rpc 从服务端发出，这是正确的流向。
+                    但如果 Cmd 方法中有 return 或 early exit，Rpc 可能不会执行——
+                    应该改为在服务端直接调用 Rpc 方法，而不是通过 [Command] 包装。
+                    3) 客户端可能将未知枚举值解析为默认值（0），导致行为异常。
+                    避免方法：enum 只追加不修改；或在消息中加入版本号字段。
+                </div>
+            </div>
+        </details>
+
+        <footer class="chapter-footer">
+            <nav class="chapter-nav bottom">
+                <a href="04-对象生成与Spawn管理.html">← 第 4 章</a>
+                <a href="06-传输层原理与Transport接口.html">第 6 章：传输层 →</a>
+            </nav>
+        </footer>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unity Mirror 从入门到底层 - 教程目录</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <h1>Unity Mirror 网络编程：从入门到精通再到底层</h1>
+
+        <p class="intro">
+            这是一套面向<strong>有单机 Unity 开发经验、但从未接触过联机开发</strong>的工程师的系统性教程。
+            从最基础的网络概念讲起，逐步深入到 RPC 机制、Spawn 系统、传输层原理、延迟补偿与预测、
+            再到生产环境部署和生态选型。每章都包含真实代码示例、常见陷阱和最佳实践。
+        </p>
+
+        <div class="version-info">
+            <p><strong>版本：</strong>v1.0 | <strong>更新日期：</strong>2026-07-25</p>
+            <p><strong>适用版本：</strong>Mirror 2022.1.1+ / Unity 2021.3 LTS+</p>
+            <p><strong>主题风格：</strong>theme-tech（技术类教程，深色代码块 + 蓝色系）</p>
+        </div>
+
+        <div class="callout callout-info">
+            <strong>前置知识假设：</strong>你熟悉 C#、理解 Unity 组件系统（MonoBehaviour、GameObject、Prefab）、
+            做过至少一个完整的单机项目。不需要任何网络编程经验——我们从零开始。
+        </div>
+
+        <h2>课程结构</h2>
+        <p>本课程分为三个阶段，循序渐进：</p>
+
+        <h3>第一阶段：核心概念（第 1-4 章）</h3>
+        <p>理解 Mirror 的架构设计，掌握 NetworkIdentity、RPC、SyncVar、Spawn 等核心机制。</p>
+
+        <h3>第二阶段：深入理解（第 5-8 章）</h3>
+        <p>探索数据传输原理、权威服务器模型、延迟补偿与预测——这些是区分"能跑"和"好用"的关键。</p>
+
+        <h3>第三阶段：生产与生态（第 9-10 章）</h3>
+        <p>学习如何部署专用服务器、接入 Relay 服务，以及在 Mirror / NGO / Fish-Net 之间做出正确选型。</p>
+
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-导论与架构总览.html">第 1 章：导论：Unity 网络编程与 Mirror</a></h3>
+                <p>为什么单机变联机这么难？Mirror 在 Unity 生态中的定位。客户端-服务器架构详解，
+                主机模式与专用服务器模式的区别，Mirror 的整体架构图解。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-三大基石-NetworkIdentity-Server-Client.html">第 2 章：三大基石：NetworkIdentity / NetworkServer / NetworkClient</a></h3>
+                <p>Mirror 的三驾马车。NetworkIdentity 为什么每个网络对象都必须有？
+                NetworkServer 和 NetworkClient 的职责边界在哪里？IsServer / IsClient / IsLocalPlayer 的含义与陷阱。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-RPC与SyncVar通信机制.html">第 3 章：RPC 与 SyncVar：服务器-客户端通信</a></h3>
+                <p>[Command]、[ClientRpc]、[TargetRpc]、[ServerCallback] 的使用场景与区别。
+                SyncVar 的钩子机制、延迟同步、带宽优化。什么时候用 RPC、什么时候用 SyncVar？</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="04-对象生成与Spawn管理.html">第 4 章：对象生成与 Spawn：网络实体管理</a></h3>
+                <p>Spawn 的生命周期：注册、生成、销毁、重置。SpawnReader 与自定义 Spawn 逻辑。
+                Player 对象的特殊处理、Client Authority 与 Spawn 的关系。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-数据同步-SyncList与自定义消息.html">第 5 章：数据同步：SyncList 与自定义消息</a></h3>
+                <p>SyncList 的类型与操作、自定义 NetworkMessage 的序列化与反序列化。
+                高效的消息设计原则、消息路由与处理管道。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-传输层原理与Transport接口.html">第 6 章：传输层原理与 Transport 接口</a></h3>
+                <p>Mirror 的 Transport 抽象层。KCP vs TCP vs WebSocket 的权衡。
+                从 UNet 迁移到 Mirror 时 Transport 的变化。自定义 Transport 的实现方法。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="07-权威服务器与客户端权限.html">第 7 章：权威服务器与客户端权限</a></h3>
+                <p>为什么需要权威服务器？Client Authority 的精确控制。
+                常见作弊手段与防御策略：速度作弊、传送作弊、伤害注入。
+                服务端验证的最佳实践。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="08-延迟补偿与客户端预测.html">第 8 章：延迟补偿与客户端预测</a></h3>
+                <p>延迟补偿（Server Reconciliation）、客户端预测（Client-side Prediction）、
+                状态插值（State Interpolation）的原理与实现。
+                从零搭建一套可工作的预测+插值系统。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="09-部署与运行模式.html">第 9 章：部署与运行模式</a></h3>
+                <p>Build Server 编译专用服务器。Host 模式与 Client 模式的差异。
+                使用 Unity Relay 进行 NAT 穿透。CI/CD 中的自动化服务器测试。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="10-生态对比与未来展望.html">第 10 章：生态对比与未来展望</a></h3>
+                <p>Mirror vs Netcode for GameObjects (NGO) vs Fish-Net vs FishNet。
+                各自的架构差异、性能特点、维护状态。如何选择？何时迁移？</p>
+            </div>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>学习建议：</strong>建议按顺序阅读，每章读完后可尝试配套的概念自测题。
+            实际项目中不必一次性掌握全部内容——先完成第 1-4 章即可搭建一个可用的联网原型。
+        </div>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 4 章：Spawn 管理 - Unity Mirror 教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-RPC与SyncVar通信机制.html">← 第 3 章</a>
+        <a href="05-数据同步-SyncList与自定义消息.html">第 5 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 4 章：对象生成与 Spawn — 网络实体管理</h1>
+
+        <p class="intro">
+            Spawn（生成）是网络游戏中最核心的操作之一。
+            一个对象什么时候被创建、在哪台机器上创建、用什么模板创建、初始状态是什么——
+            每一个环节都可能出错。本章将深入理解 Mirror 的 Spawn 系统，从 Prefab 注册到对象生命周期管理。
+        </p>
+
+        <h2>4.1 Spawn 的基本流程</h2>
+
+        <p>Mirror 的 Spawn 不是简单的 <code>Instantiate</code>。它涉及服务器和客户端之间的协调：</p>
+
+        <pre><code class="language-text">服务器                              客户端 A         客户端 B
+  |                                    |                |
+  | Instantiate(prefab)               |                |
+  | NetworkServer.Spawn(obj)           |                |
+  |                                    |                |
+  |--- SpawnMessage(prefabId, netId) -->|                |
+  |--- SpawnMessage(prefabId, netId) ------------------>|
+  |                                    |                |
+  |                                    |Instantiate()   |Instantiate()
+  |                                    |set netId       |set netId
+  |                                    |sync vars       |sync vars
+  |                                    |OnStartClient   |OnStartClient</code></pre>
+
+        <p>关键点：<strong>服务器负责"决定谁存在"，客户端负责"根据指令实例化"</strong>。
+        客户端从不自己决定要 Spawn 什么对象——一切由服务器发起。</p>
+
+        <h2>4.2 Prefab 注册：Spawn 的前提条件</h2>
+
+        <p>在 Spawn 一个对象之前，客户端必须知道这个对象的 Prefab 模板长什么样。
+        这就是<strong>Prefab 注册</strong>的作用。</p>
+
+        <h3>4.2.1 通过 NetworkManager 注册</h3>
+
+        <pre><code class="language-csharp">// 最简单的方式：在 NetworkManager 中设置
+public class MyNetworkManager : NetworkManager
+{
+    public GameObject playerPrefab;      // Inspector 拖入
+    public GameObject enemyPrefab;       // Inspector 拖入
+    public GameObject bulletPrefab;      // Inspector 拖入
+
+    public override void StartServer()
+    {
+        base.StartServer();
+
+        // playerPrefab 会自动注册
+        // 其他 prefab 需要手动注册
+        NetworkManager.Singleton.AddPlayerPrefab(playerPrefab);
+    }
+}</code></pre>
+
+        <div class="callout callout-info">
+            <strong>注意 API 差异：</strong>不同 Mirror 版本的注册 API 可能不同。
+            较新版本使用 <code>NetworkManager.playerPrefab</code> 自动注册 Player Prefab。
+            非 Player 的 Prefab 可以通过 <code>NetworkIdentity.Atlas</code> 或
+            <code>ClientScene.RegisterPrefab()</code> 手动注册。
+        </div>
+
+        <h3>4.2.2 手动注册 Prefab</h3>
+
+        <pre><code class="language-csharp">// 服务器端注册所有可 Spawn 的 Prefab
+void ServerInitializePrefabs()
+{
+    // 方式 1：通过 NetId 注册
+    ClientScene.RegisterPrefab(enemyPrefab);
+
+    // 方式 2：注册带自定义 Spawn 函数的 Prefab
+    ClientScene.RegisterPrefab(
+        enemyPrefab,
+        OnSpawnEnemy,       // 自定义生成逻辑
+        OnUnspawnEnemy      // 自定义销毁逻辑
+    );
+
+    // 方式 3：注册带 AltId（备用 ID）的 Prefab
+    // 适用于从 Resources / AssetBundle 加载的场景
+    ClientScene.RegisterPrefab(enemyPrefab, altId: new NetworkHash128("enemy.v2"));
+}</code></pre>
+
+        <h3>4.2.3 为什么要自定义 Spawn/Unspawn 函数？</h3>
+
+        <p>默认情况下，Mirror Spawn 一个对象时只是简单 <code>Instantiate(prefab)</code>。
+        但你的 Prefab 可能有初始化需求：</p>
+
+        <pre><code class="language-csharp">void OnSpawnEnemy(Vector3 position, Quaternion rotation, NetworkIdentity identity)
+{
+    GameObject obj = Instantiate(enemyPrefab, position, rotation);
+
+    // 自定义初始化
+    EnemyAI ai = obj.GetComponent&lt;EnemyAI&gt;();
+    ai.Initialize(enemyData[identity.netId]);  // 从服务器数据加载敌人配置
+
+    return obj;
+}
+
+void OnUnspawnEnemy(NetworkIdentity identity)
+{
+    // 清理资源
+    GameObject obj = FindObjectByIdentity(identity);
+    if (obj)
+    {
+        // 不要直接用 Destroy——可能需要播放死亡动画
+        DeathAnimation.PlayAndDestroy(obj, 1.5f);
+    }
+}</code></pre>
+
+        <h2>4.3 NetworkServer.Spawn 详解</h2>
+
+        <p>这是服务器端最核心的 Spawn 方法。它的完整签名和行为如下：</p>
+
+        <pre><code class="language-csharp">// 基本用法
+GameObject enemy = Instantiate(enemyPrefab, spawnPoint, Quaternion.identity);
+NetworkServer.Spawn(enemy);
+
+// Spawn 后设置初始 SyncVar 值
+enemy.GetComponent&lt;HealthSystem&gt;().health = 200;
+// 注意：此时 SyncVar 变更会触发同步——确保是在 Spawn 之后
+
+// 给 Spawn 的对象附加额外数据
+enemy.GetComponent&lt;NetworkIdentity&gt;().customData = enemyData;
+NetworkServer.Spawn(enemy);</code></pre>
+
+        <h3>4.3.1 Spawn 的内部流程</h3>
+
+        <p>当调用 <code>NetworkServer.Spawn(obj)</code> 时，Mirror 执行以下操作：</p>
+
+        <ol>
+            <li>检查对象是否已有 <code>netId</code>。如果有，说明已经 Spawn 过，跳过。</li>
+            <li>分配一个新的 <code>netId</code>（全局唯一）。</li>
+            <li>将 <code>netId → NetworkIdentity</code> 映射加入服务器的 <code>spawned</code> 字典。</li>
+            <li>序列化对象的初始状态（所有 SyncVar 的当前值）。</li>
+            <li>向所有已连接的客户端发送 <code>SpawnMessage</code>。</li>
+            <li>触发 <code>OnStartServer</code> 回调。</li>
+        </ol>
+
+        <pre><code class="language-csharp">// Mirror 内部简化版逻辑（伪代码）
+public static void Spawn(GameObject obj)
+{
+    NetworkIdentity identity = obj.GetComponent&lt;NetworkIdentity&gt;();
+
+    // 分配 netId
+    identity.netId = AllocateNewNetId();
+
+    // 注册到 spawned 字典
+    spawned[identity.netId] = identity;
+
+    // 发送 Spawn 消息给所有客户端
+    foreach (var conn in connections)
+    {
+        SendToClient(conn, new SpawnMessage
+        {
+            netId = identity.netId,
+            assetId = identity.assetId,
+            payload = SerializeSyncVars(identity),  // 序列化初始状态
+            owner = identity.hasAuthority ? identity.connectionToClient : null
+        });
+    }
+
+    // 触发回调
+    identity.OnStartServer();
+}</code></pre>
+
+        <h2>4.4 对象的销毁</h2>
+
+        <p>销毁网络对象比单机简单——只需要调用 <code>NetworkServer.Destroy()</code>：</p>
+
+        <pre><code class="language-csharp">// 服务器销毁对象（所有客户端同步销毁）
+NetworkServer.Destroy(deadEnemy);
+
+// 销毁特定客户端上的对象（不影響其他客户端）
+NetworkServer.Destroy(deadEnemy, connectionToClient);
+
+// 注意：不需要手动调用 Destroy()
+// NetworkServer.Destroy 内部会在发送消息后调用 GameObject.Destroy</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>错误做法：</strong>在服务器上直接用 <code>Destroy(gameObject)</code> 而不是
+            <code>NetworkServer.Destroy()</code>。前者只销毁了 GameObject，但没有通知客户端——
+            客户端上这个对象仍然"活着"，成为幽灵对象。
+        </div>
+
+        <h2>4.5 Player 对象的特殊处理</h2>
+
+        <p>Player 对象在网络游戏中有特殊的地位。它们不仅是"普通的网络对象"，
+        还承载着"玩家身份"和"控制权限"。</p>
+
+        <h3>4.5.1 Player vs 普通网络对象</h3>
+
+        <table>
+            <thead>
+                <tr><th>特性</th><th>Player 对象</th><th>普通网络对象</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>数量限制</td><td>每客户端通常 1 个</td><td>无限制</td></tr>
+                <tr><td>自动生成</td><td>通过 AddPlayer 流程</td><td>手动 Spawn</td></tr>
+                <tr><td>Authority</td><td>自动绑定到客户端</td><td>需要显式设置</td></tr>
+                <tr><td>场景切换</td><td>可能被保留或重建</td><td>通常随场景销毁</td></tr>
+                <tr><td>Destroy 时机</td><td>断线时自动销毁</td><td>手动或逻辑驱动</td></tr>
+            </tbody>
+        </table>
+
+        <h3>4.5.2 完整的 Player 生成流程</h3>
+
+        <pre><code class="language-csharp">public class MyNetworkManager : NetworkManager
+{
+    public GameObject playerPrefab;
+
+    public override void StartServer()
+    {
+        base.StartServer();
+        // 注册 Player Prefab
+        playerPrefab = Resources.Load&lt;GameObject&gt;("Player");
+    }
+
+    public override void OnServerAddPlayer(NetworkConnection addConn)
+    {
+        // 1. 创建 Player 对象
+        GameObject player = Instantiate(
+            playerPrefab,
+            GetSpawnPosition(),
+            Quaternion.identity
+        );
+
+        // 2. Spawn 到网络
+        NetworkServer.AddPlayerForConnection(addConn, player);
+
+        // 此时：
+        // • player 的 hasAuthority = true（对连接此 player 的客户端）
+        // • player 的 isLocalPlayer = true（在拥有它的客户端上）
+    }
+
+    public override void OnServerRemovePlayer(NetworkConnection connection)
+    {
+        // 移除 Player 对象时可选：是否自动销毁？
+        GameObject player = connection.player.gameObject;
+        if (player != null)
+        {
+            NetworkServer.Destroy(player);
+        }
+    }
+}</code></pre>
+
+        <h3>4.5.3 Client Authority 与 Player</h3>
+
+        <p>Player 对象默认将 Authority 授予绑定它的客户端。这意味着：</p>
+
+        <ul>
+            <li>该客户端可以操控这个 Player 对象（移动、动画等）</li>
+            <li>该客户端可以在这个对象上调用 [Command]</li>
+            <li>其他客户端对此对象只有"观察权"</li>
+        </ul>
+
+        <pre><code class="language-csharp">// 显式设置 Authority
+public class ObjectOwner : NetworkBehaviour
+{
+    public void GiveAuthorityTo(NetworkConnection newOwner)
+    {
+        if (!isServer) return;
+
+        GetComponent&lt;NetworkIdentity&gt;().AssignAuthority(newOwner);
+        // 新拥有者现在可以在这个对象上调用 Command
+        // 旧的拥有者失去权限
+    }
+}</code></pre>
+
+        <h2>4.6 Spawn 场景中的已有对象</h2>
+
+        <p>有些网络对象一开始就在场景中（不是运行时 Spawn 的）。比如地图上的炮塔、宝箱等。</p>
+
+        <h3>4.6.1 场景预置对象的处理</h3>
+
+        <pre><code class="language-csharp">// 方案 1：在场景编辑器中放置 NetworkIdentity
+// 这些对象在场景加载时自动存在于服务器和客户端
+// 不需要手动 Spawn——Mirror 会处理
+
+// 方案 2：通过 NetworkScene 处理
+// 当服务器和客户端加载相同场景时，
+// 场景中已有的 NetworkIdentity 会自动同步</code></pre>
+
+        <div class="sidebar-note">
+            <strong>关键约束：</strong>服务器和客户端必须加载<strong>完全相同的场景</strong>。
+            如果服务器加载了 Scene_A，而客户端加载了 Scene_B，那么 Scene_A 中的预置对象
+            在客户端上不存在——会导致严重的状态不一致。
+        </div>
+
+        <h3>4.6.2 场景切换的正确方式</h3>
+
+        <pre><code class="language-csharp">// ❌ 错误：直接切换场景
+SceneManager.LoadScene("Arena");
+
+// ✅ 正确：通过 NetworkManager 切换
+NetworkManager.Singleton.ServerChangeScene("Arena");
+
+// 这确保了：
+// 1. 旧场景中的非持久对象被清理
+// 2. 新场景被正确加载到所有客户端
+// 3. Spawn 列表被重置
+// 4. Player 对象在新场景中重新生成</code></pre>
+
+        <h2>4.7 对象池与 Spawn 性能优化</h2>
+
+        <p>频繁地 Instantiate / Destroy 网络对象会产生 GC 压力。使用对象池可以显著改善这个问题：</p>
+
+        <pre><code class="language-csharp">public class BulletPool : NetworkBehaviour
+{
+    private Queue&lt;GameObject&gt; pool = new Queue&lt;GameObject&gt;();
+
+    [SerializeField] GameObject bulletPrefab;
+    [SerializeField] int poolSize = 50;
+
+    void Awake()
+    {
+        // 预创建对象池
+        for (int i = 0; i &lt; poolSize; i++)
+        {
+            GameObject bullet = Instantiate(bulletPrefab);
+            bullet.SetActive(false);
+            pool.Enqueue(bullet);
+        }
+    }
+
+    // 从池中获取子弹并 Spawn
+    public GameObject GetBullet(Vector3 position, Vector3 direction)
+    {
+        if (pool.Count == 0)
+        {
+            // 池空了，动态扩展
+            GameObject bullet = Instantiate(bulletPrefab, position, Quaternion.identity);
+            NetworkServer.Spawn(bullet);
+            return bullet;
+        }
+
+        GameObject bullet = pool.Dequeue();
+        bullet.transform.position = position;
+        bullet.SetActive(true);
+
+        // 关键：先 Destroy（从网络中移除），然后放回池中
+        // 而不是真正销毁 GameObject
+        NetworkServer.Spawn(bullet);
+        return bullet;
+    }
+
+    public void ReturnBullet(GameObject bullet)
+    {
+        NetworkServer.Destroy(bullet);  // 从网络中移除
+        bullet.SetActive(false);
+        pool.Enqueue(bullet);
+    }
+}</code></pre>
+
+        <h2>4.8 网络对象的 Reset 机制</h2>
+
+        <p>当一个对象被销毁后，它的 netId 被回收。但如果你想重用同一个对象（而非创建新实例），
+        Mirror 提供了 Reset 机制：</p>
+
+        <pre><code class="language-csharp">public class RecycleableObject : NetworkBehaviour
+{
+    // 当对象从网络中移除时调用
+    public override void OnStopServer()
+    {
+        // 清理状态，准备重用
+        GetComponent&lt;Renderer&gt;.enabled = true;
+        GetComponent&lt;Collider&gt;.enabled = true;
+        health = maxHealth;
+    }
+
+    // 客户端对应
+    public override void OnStopClient()
+    {
+        // 清理客户端表现
+        GetComponent&lt;Animator&gt;.SetTrigger("Disabled");
+    }
+}</code></pre>
+
+        <h2>4.9 常见 Spawn 陷阱</h2>
+
+        <h3>陷阱 1：Spawn 顺序导致的状态丢失</h3>
+
+        <pre><code class="language-csharp">// ❌ 问题：先修改 SyncVar，后 Spawn
+player.health = 100;                  // 此时 Spawn 还没发生
+NetworkServer.Spawn(player.gameObject);
+// 客户端收到的初始 health 可能是默认值 0，而不是 100
+
+// ✅ 正确：先 Spawn，后修改
+NetworkServer.Spawn(player.gameObject);
+player.health = 100;
+// 此时变更会通过 UpdateVars 同步到客户端</code></pre>
+
+        <h3>陷阱 2：在客户端 Spawn 了服务器不认可的对象</h3>
+
+        <pre><code class="language-csharp">// ❌ 客户端自己 Spawn 的对象，服务器不知道
+void SpawnEnemyLocally()
+{
+    Instantiate(enemyPrefab, position, rotation);
+    // 服务器没有收到任何 Spawn 请求——这个对象只对本地可见
+}
+
+// ✅ 通过 Command 请求服务器 Spawn
+[Command]
+void CmdSpawnEnemy(Vector3 position)
+{
+    GameObject enemy = Instantiate(enemyPrefab, position, rotation);
+    NetworkServer.Spawn(enemy);
+}</code></pre>
+
+        <h3>陷阱 3：重复 Spawn 同一个对象</h3>
+
+        <pre><code class="language-csharp">// ❌ 没有检查是否已 Spawn
+NetworkServer.Spawn(obj);
+NetworkServer.Spawn(obj);
+// 第二次调用会静默失败（因为 netId 已分配），但逻辑上可能掩盖 bug
+
+// ✅ 检查后再 Spawn
+if (!obj.GetComponent&lt;NetworkIdentity&gt;().isSpawned)
+{
+    NetworkServer.Spawn(obj);
+}</code></pre>
+
+        <h2>4.10 调试 Spawn 问题</h2>
+
+        <pre><code class="language-csharp">// 列出服务器上所有 Spawn 的对象
+void DebugPrintSpawnedObjects()
+{
+    foreach (var kvp in NetworkServer.spawned)
+    {
+        Debug.Log($"[Spawned] netId={kvp.Value.netId} name={kvp.Value.name}");
+    }
+}
+
+// 检查某个 netId 是否存在
+bool IsSpawned(uint netId)
+{
+    return NetworkServer.spawned.TryGetValue(netId, out _);
+}
+
+// 客户端调试
+void DebugClientSpawned()
+{
+    foreach (var identity in ClientScene.spawned.Values)
+    {
+        Debug.Log($"[Client Spawned] netId={identity.netId} hasAuthority={identity.hasAuthority}");
+    }
+}</code></pre>
+
+        <h2>4.11 本章小结</h2>
+
+        <p>本章我们深入理解了 Mirror 的 Spawn 系统：</p>
+
+        <ul>
+            <li><strong>Prefab 注册</strong>是 Spawn 的前提——客户端需要知道用什么模板实例化</li>
+            <li><strong>服务器发起 Spawn</strong>，客户端响应实例化——这是权威模型的核心体现</li>
+            <li><strong>Player 对象</strong>有特殊的生成流程和 Authority 绑定</li>
+            <li><strong>场景中的预置对象</strong>不需要手动 Spawn，但要求服务器和客户端加载相同场景</li>
+            <li><strong>对象池</strong>可以显著减少 Spawn/Destroy 的性能开销</li>
+        </ul>
+
+        <p>下一章，我们将学习更高级的数据同步机制：SyncList 和自定义消息。</p>
+
+        <h2>自测题</h2>
+
+        <details>
+            <summary>点击展开自测题</summary>
+            <div class="details-content">
+                <ol>
+                    <li><strong>场景推理：</strong>服务器 Spawn 了一个对象 A，然后客户端 C1 断线重连。
+                    重连后 C1 能看到对象 A 吗？如果不能，需要什么机制？</li>
+                    <li><strong>代码分析：</strong>以下 Spawn 流程有什么问题？
+                        <pre><code class="language-csharp">void SpawnEnemy()
+{
+    GameObject e = Instantiate(enemyPrefab);
+    e.GetComponent&lt;HealthSystem&gt;().health = 500;
+    // 忘记调用 NetworkServer.Spawn(e)!
+}</code></pre>
+                    </li>
+                    <li><strong>设计题：</strong>你需要支持"动态加载新类型敌人"的功能（类似插件系统）。
+                    如何在 Prefab 注册阶段支持这种动态性？</li>
+                </ol>
+
+                <div class="callout callout-tip">
+                    <strong>参考答案：</strong>
+                    1) 默认情况下不能。需要实现"重连支持"：服务器在客户端重连时，
+                    重新发送所有已 Spawn 对象的 SpawnMessage。Mirror 的 ClientScene.ReconnectForNewPlayer()
+                    部分支持这个功能，但复杂场景需要自定义实现。
+                    2) 对象只在服务器内存中存在，不会同步给任何客户端。
+                    而且 HealthSystem 的 health SyncVar 变更也不会被同步。
+                    必须调用 NetworkServer.Spawn(e)。
+                    3) 使用 RegisterPrefab + altId 机制，或在服务器启动时扫描特定目录动态加载 Prefab 并注册。
+                    也可以设计一个 "PrefabRegistry" 单例，从配置文件/ScriptableObject 读取需要注册的 Prefab 列表。
+                </div>
+            </div>
+        </details>
+
+        <footer class="chapter-footer">
+            <nav class="chapter-nav bottom">
+                <a href="03-RPC与SyncVar通信机制.html">← 第 3 章</a>
+                <a href="05-数据同步-SyncList与自定义消息.html">第 5 章：SyncList 与自定义消息 →</a>
+            </nav>
+        </footer>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

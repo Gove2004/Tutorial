@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>策略梯度与 REINFORCE - PyTorch 强化学习教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-Q-Learning与DQN.html">← 上一章</a>
+        <a href="06-Actor-Critic与A2C.html">第 6 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 5 章：策略梯度与 REINFORCE</h1>
+
+        <h2>5.1 为什么需要策略梯度</h2>
+
+        <p>DQN 虽然强大，但有三个根本性限制：</p>
+        <ol>
+            <li><strong>只适用于离散动作空间</strong>：输出层需要与动作数一一对应，连续动作空间无法直接使用</li>
+            <li><strong>多模态策略问题</strong>：当最优策略在某个状态下有多个同样好的动作时，单峰分布的 Q 值网络难以表示</li>
+            <li><strong>部分可观测性</strong>：在 POMDP 中，Agent 只能看到部分状态，Q 值网络难以处理</li>
+        </ol>
+
+        <div class="callout callout-info">
+            <strong>策略梯度的核心思想</strong>：不通过 Q 值间接学习策略，而是<strong>直接参数化策略</strong> π(a|s; θ)，然后梯度上升最大化期望回报。这是一种更直接、更通用的方法。
+        </div>
+
+        <h2>5.2 策略梯度定理</h2>
+
+        <p>策略梯度定理（Policy Gradient Theorem）是整类算法的数学基础。推导的核心是 Jenson 不等式和对数梯度技巧：</p>
+
+        <div class="definition">
+            <h4>策略梯度定理</h4>
+            <p>期望回报对策略参数的梯度：</p>
+            <p><code>∇θ J(θ) = E_π [ ∇θ log π(a|s; θ) · Q^π(s,a) ]</code></p>
+            <p>直觉：梯度方向 = 在状态 s 下，为那些能获得高 Q 值的动作增加概率，为低 Q 值动作减少概率。</p>
+        </div>
+
+        <p>关键技巧：<code>∇θ log π(a|s; θ) = ∇θ π(a|s; θ) / π(a|s; θ)</code>。这使得我们可以通过采样来无偏估计梯度，而不需要知道策略的完整分布。</p>
+
+        <h2>5.3 REINFORCE 算法</h2>
+
+        <p>REINFORCE 是最简单的策略梯度算法（Williams, 1992），它使用完整的 episode 回报来估计 Q 值：</p>
+
+        <pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+
+class PolicyNetwork(nn.Module):
+    """策略网络：输出每个动作的概率"""
+    def __init__(self, state_dim, action_dim, hidden_dim=64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim)
+            # 不使用 Softmax，在 loss 中用 CrossEntropy（内部含 Softmax）
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+    def get_action_prob(self, state):
+        """获取动作概率分布"""
+        logits = self(state)
+        probs = F.softmax(logits, dim=-1)
+        return probs
+
+class REINFORCEAgent:
+    def __init__(self, state_dim, action_dim, lr=0.01, gamma=0.99):
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.gamma = gamma
+        self.policy = PolicyNetwork(state_dim, action_dim)
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr)
+
+    def select_action(self, state):
+        state_t = torch.FloatTensor(state).unsqueeze(0)
+        probs = self.policy.get_action_prob(state_t)
+        # 从多项式分布采样
+        action = torch.multinomial(probs, 1).item()
+        return action, probs[0, action].item()
+
+    def learn(self, states, actions, rewards):
+        """
+        REINFORCE 更新
+        states: [s_0, s_1, ..., s_T]
+        actions: [a_0, a_1, ..., a_T]
+        rewards: [r_0, r_1, ..., r_T]
+        """
+        # 计算每个时刻的回报
+        returns = []
+        G = 0
+        for r in reversed(rewards):
+            G = r + self.gamma * G
+            returns.insert(0, G)
+
+        # 标准化回报（降低方差）
+        returns = torch.FloatTensor(returns)
+        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+
+        # 计算策略梯度损失
+        log_probs = []
+        for state, action, return_t in zip(states, actions, returns):
+            state_t = torch.FloatTensor(state).unsqueeze(0)
+            probs = self.policy.get_action_prob(state_t)
+            log_prob = torch.log(probs[0, action] + 1e-10)
+            log_probs.append(log_prob * return_t)
+
+        loss = -torch.stack(log_probs).sum()
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return loss.item()
+</code></pre>
+
+        <h2>5.4 完整训练：CartPole</h2>
+
+        <pre><code class="language-python">import gymnasium as gym
+import matplotlib.pyplot as plt
+
+env = gym.make("CartPole-v1")
+agent = REINFORCEAgent(
+    state_dim=env.observation_space.shape[0],
+    action_dim=env.action_space.n,
+    lr=0.01,
+    gamma=0.99
+)
+
+num_episodes = 500
+reward_history = []
+avg_rewards = []
+
+for episode in range(num_episodes):
+    state, info = env.reset()
+    states, actions, rewards = [], [], []
+    total_reward = 0
+    done = False
+    truncated = False
+
+    while not done and not truncated:
+        action, log_prob = agent.select_action(state)
+        next_state, reward, done, truncated, info = env.step(action)
+        states.append(state)
+        actions.append(action)
+        rewards.append(reward)
+        state = next_state
+        total_reward += reward
+
+    agent.learn(states, actions, rewards)
+    reward_history.append(total_reward)
+
+    if episode % 50 == 0:
+        avg = np.mean(reward_history[-50:])
+        avg_rewards.append(avg)
+        print(f"Episode {episode}: 奖励 = {total_reward}, 近50平均 = {avg:.1f}")
+
+env.close()
+
+# 可视化
+plt.figure(figsize=(12, 4))
+plt.subplot(1, 2, 1)
+plt.plot(reward_history, alpha=0.3)
+plt.plot(np.convolve(reward_history, np.ones(50)/50, mode='valid'), 'r-', lw=2)
+plt.axhline(y=500, color='g', linestyle='--', label='满分')
+plt.xlabel('Episode')
+plt.ylabel('Total Reward')
+plt.title('REINFORCE 训练曲线')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(avg_rewards)
+plt.xlabel('Episode (每50步)')
+plt.ylabel('Average Reward')
+plt.title('REINFORCE 平均奖励趋势')
+plt.tight_layout()
+plt.savefig('reinforce-training.png', dpi=150)
+plt.show()
+</code></pre>
+
+        <h2>5.5 方差问题与改进</h2>
+
+        <p>REINFORCE 的最大问题是<strong>梯度估计的方差很大</strong>，因为回报受整个 episode 的随机性影响。以下是三种常用的方差降低技术：</p>
+
+        <h3>5.5.1 基线（Baseline）</h3>
+        <p>最基础的改进：从回报中减去一个基线（通常是状态价值 V(s) 的估计）。由于 <code>E[∇log π · c] = 0</code>（对常数 c），减去基线不引入偏差但显著降低方差。</p>
+
+        <pre><code class="language-python"># 基础 REINFORCE：直接用 return
+advantage = returns
+
+# 带基线的 REINFORCE：用 V(s) 作为基线
+advantage = returns - values  # values 是价值网络的预测
+</code></pre>
+
+        <h3>5.5.2 价值网络（Actor-Critic 的前身）</h3>
+        <p>引入一个独立的价值网络 V(s) 来估计基线。这样每个时刻的 advantage 是：<code>A(s_t, a_t) = R_t + γR_{t+1} + ... + γ^{T-t}R_T - V(s_t)</code></p>
+
+        <h3>5.5.3 优势估计与 GAE</h3>
+        <p>广义优势估计（Generalized Advantage Estimation, GAE）是连接蒙特卡罗和时序差分的桥梁：</p>
+
+        <pre><code class="language-python">def compute_gae(rewards, values, gamma=0.99, lambda_=0.95):
+    """
+    计算 GAE 优势估计
+    lambda_: 0 = 纯 TD(0)，1 = 纯蒙特卡罗
+    """
+    advantages = []
+    gae = 0
+    for t in reversed(range(len(rewards))):
+        if t == len(rewards) - 1:
+            next_value = 0
+        else:
+            next_value = values[t + 1]
+
+        delta = rewards[t] + gamma * next_value - values[t]
+        gae = delta + gamma * lambda_ * gae
+        advantages.insert(0, gae)
+
+    return advantages
+</code></pre>
+
+        <h2>5.6 REINFORCE vs DQN 对比</h2>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>REINFORCE</th><th>DQN</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>动作空间</td><td>离散 + 连续</td><td>仅离散</td></tr>
+                <tr><td>学习类型</td><td>on-policy</td><td>off-policy</td></tr>
+                <tr><td>样本效率</td><td>低（需要完整 episode）</td><td>高（可复用单步经验）</td></tr>
+                <tr><td>收敛稳定性</td><td>较差（高方差）</td><td>较好</td></tr>
+                <tr><td>多模态策略</td><td>可以（输出概率分布）</td><td>困难（单值 Q）</td></tr>
+                <tr><td>实现难度</td><td>简单</td><td>中等（需要经验回放、目标网络）</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-tip">
+            <strong>什么时候用 REINFORCE？</strong> 适合小型离散动作空间、episode 较短、不需要极高样本效率的场景。当需要处理连续动作或更复杂的策略时，应转向 Actor-Critic 方法。
+        </div>
+
+        <h2>5.7 本章小结</h2>
+        <ul>
+            <li>策略梯度定理：<code>∇θ J(θ) = E[∇θ log π(a|s) · Q(s,a)]</code></li>
+            <li>REINFORCE 使用完整 episode 回报作为 Q 值的估计</li>
+            <li>基线（Baseline）是降低方差最基础也最有效的手段</li>
+            <li>GAE 在偏差和方差之间提供了灵活的平衡</li>
+            <li>REINFORCE 是 on-policy，数据不能重复利用</li>
+        </ul>
+
+        <h2>练习</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>运行 REINFORCE 代码，尝试不同的学习率（0.001、0.01、0.1）和 γ（0.9、0.99），观察训练曲线的差异。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶挑战</h4>
+                    <p>为 REINFORCE 添加价值网络基线（即实现最基础的 Actor-Critic），比较两者在 CartPole 上的收敛速度和稳定性。</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-Q-Learning与DQN.html">← 上一章：DQN</a>
+            <a href="06-Actor-Critic与A2C.html">第 6 章：Actor-Critic →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+        function showTab(btn) {
+            const tabs = btn.closest('.tabs');
+            tabs.querySelectorAll('.tab-buttons button').forEach(b => b.classList.remove('active'));
+            tabs.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            tabs.querySelectorAll('.tab-content').forEach(c => {
+                if (c.previousElementSibling === btn) c.classList.add('active');
+            });
+        }
+    </script>
+</body>
+</html>

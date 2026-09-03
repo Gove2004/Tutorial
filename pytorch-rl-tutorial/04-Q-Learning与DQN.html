@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Q-Learning 与 DQN - PyTorch 强化学习教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-价值函数与贝尔曼方程.html">← 上一章</a>
+        <a href="05-策略梯度与REINFORCE.html">第 5 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 4 章：Q-Learning 与 DQN</h1>
+
+        <h2>4.1 Q-Learning：表格版的最优 Q 函数</h2>
+
+        <p>Q-Learning 是最经典、最直观的强化学习算法之一。它的核心思想是：<strong>用一张表格存储每个状态-动作对的 Q 值，通过贝尔曼方程迭代更新</strong>。</p>
+
+        <div class="definition">
+            <h4>Q-Learning 更新规则</h4>
+            <p><code>Q(s,a) ← Q(s,a) + α [R + γ · max_{a'} Q(s',a') - Q(s,a)]</code></p>
+            <p>其中 α 是学习率。注意：这是一个 <strong>off-policy</strong> 算法——更新用的 target 来自最优策略（max），而实际采集数据时可以用任意探索策略（如 ε-greedy）。</p>
+        </div>
+
+        <pre><code class="language-python">import numpy as np
+import gymnasium as gym
+
+class QLearningAgent:
+    """表格型 Q-Learning Agent"""
+    def __init__(self, state_dim, action_dim, lr=0.1, gamma=0.99, epsilon=1.0):
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.lr = lr
+        self.gamma = gamma
+        self.epsilon = epsilon
+        # Q 表：状态维度 × 动作维度，初始化为 0
+        self.q_table = np.zeros((state_dim, action_dim))
+
+    def select_action(self, state):
+        """ε-greedy 策略"""
+        if np.random.random() < self.epsilon:
+            return np.random.randint(self.action_dim)  # 探索
+        else:
+            return np.argmax(self.q_table[state])      # 利用
+
+    def update(self, state, action, reward, next_state, done):
+        """Q-Learning 更新"""
+        current_q = self.q_table[state, action]
+        if done:
+            target = reward  # 终止状态无未来价值
+        else:
+            target = reward + self.gamma * np.max(self.q_table[next_state])
+
+        # TD 更新
+        self.q_table[state, action] += self.lr * (target - current_q)
+
+# 训练
+env = gym.make("FrozenLake-v1")
+agent = QLearningAgent(
+    state_dim=env.observation_space.n,
+    action_dim=env.action_space.n,
+    lr=0.1,
+    gamma=0.99,
+    epsilon=1.0
+)
+
+rewards_history = []
+for episode in range(1000):
+    state, info = env.reset()
+    total_reward = 0
+    done = False
+    truncated = False
+
+    while not done and not truncated:
+        action = agent.select_action(state)
+        next_state, reward, done, truncated, info = env.step(action)
+        agent.update(state, action, reward, next_state, done)
+        state = next_state
+        total_reward += reward
+
+    rewards_history.append(total_reward)
+    # 逐步降低 epsilon
+    agent.epsilon = max(0.01, 1.0 - episode / 500)
+
+    if episode % 100 == 0:
+        avg = np.mean(rewards_history[-100:])
+        print(f"Episode {episode}: 平均奖励 = {avg:.3f}, ε = {agent.epsilon:.3f}")
+
+env.close()
+</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>Q-Learning 的致命限制</strong>：当状态空间很大时（如 CartPole 的 4 维连续状态），表格无法存储所有状态。这就是为什么需要 DQN——用神经网络来近似 Q 函数。
+        </div>
+
+        <h2>4.2 DQN：用神经网络拟合 Q 函数</h2>
+
+        <p>DeepMind 在 2013 年发表的 DQN 论文是强化学习里程碑。核心思路：<strong>用深度神经网络替代 Q 表，用经验回放和目标网络解决训练不稳定的问题</strong>。</p>
+
+        <div class="definition">
+            <h4>DQN 网络结构</h4>
+            <p>输入：状态向量（如 CartPole 的 4 维观测）<br>
+            输出：每个动作的 Q 值（如 2 个输出对应左右两个动作）<br>
+            损失函数：MSE(Q_predict, Q_target)，其中 <code>Q_target = R + γ·max Q'(s',a')</code></p>
+        </div>
+
+        <h2>4.3 DQN 的关键创新</h2>
+
+        <h3>4.3.1 经验回放（Experience Replay）</h3>
+        <p>标准神经网络训练假设数据是独立同分布（i.i.d.）的，但 RL 的轨迹数据是时间相关的。经验回放通过存储和随机采样来解决这个问题：</p>
+
+        <pre><code class="language-python">from collections import deque
+import random
+
+class ReplayBuffer:
+    """经验回放缓冲区"""
+    def __init__(self, capacity=10000):
+        self.buffer = deque(maxlen=capacity)
+
+    def push(self, state, action, reward, next_state, done):
+        """存储一条经验 (s, a, r, s', done)"""
+        self.buffer.append((state, action, reward, next_state, done))
+
+    def sample(self, batch_size):
+        """随机采样一批经验"""
+        batch = random.sample(self.buffer, batch_size)
+        states, actions, rewards, next_states, dones = zip(*batch)
+        return (
+            np.array(states, dtype=np.float32),
+            np.array(actions, dtype=np.int64),
+            np.array(rewards, dtype=np.float32),
+            np.array(next_states, dtype=np.float32),
+            np.array(dones, dtype=np.float32)
+        )
+
+    def __len__(self):
+        return len(self.buffer)
+</code></pre>
+
+        <h3>4.3.2 目标网络（Target Network）</h3>
+        <p>DQN 的 Q_target 依赖当前网络的参数，而网络参数又由 Q_target 更新——这导致了"移动靶"问题，训练极易发散。解决方案是维护一个独立的<strong>目标网络</strong>，参数每隔 N 步从主网络拷贝：</p>
+
+        <pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class DQN(nn.Module):
+    """DQN 神经网络"""
+    def __init__(self, state_dim, action_dim, hidden_dim=128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+class DQNAgent:
+    def __init__(self, state_dim, action_dim, lr=0.001, gamma=0.99,
+                 epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995,
+                 buffer_size=10000, batch_size=64, target_update_freq=100):
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.gamma = gamma
+        self.batch_size = batch_size
+        self.target_update_freq = target_update_freq
+
+        # 主网络
+        self.policy_net = DQN(state_dim, action_dim)
+        # 目标网络（参数固定一段时间后才更新）
+        self.target_net = DQN(state_dim, action_dim)
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+
+        self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=lr)
+        self.memory = ReplayBuffer(buffer_size)
+        self.epsilon = epsilon_start
+        self.epsilon_end = epsilon_end
+        self.epsilon_decay = epsilon_decay
+        self.steps = 0
+
+    def select_action(self, state):
+        state_t = torch.FloatTensor(state).unsqueeze(0)
+        if random.random() < self.epsilon:
+            return random.randint(0, self.action_dim - 1)
+        with torch.no_grad():
+            q_values = self.policy_net(state_t)
+        return q_values.argmax(dim=1).item()
+
+    def update(self):
+        """执行一次 DQN 更新"""
+        if len(self.memory) < self.batch_size:
+            return
+
+        states, actions, rewards, next_states, dones = self.memory.sample(self.batch_size)
+
+        # 转换为 tensor
+        states_t = torch.FloatTensor(states)
+        actions_t = torch.LongTensor(actions)
+        rewards_t = torch.FloatTensor(rewards)
+        next_states_t = torch.FloatTensor(next_states)
+        dones_t = torch.FloatTensor(dones)
+
+        # 当前 Q 值
+        current_q = self.policy_net(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
+
+        # 目标 Q 值（使用目标网络）
+        with torch.no_grad():
+            next_q = self.target_net(next_states_t).max(dim=1)[0]
+            target_q = rewards_t + self.gamma * next_q * (1 - dones_t)
+
+        # 计算损失并更新
+        loss = F.mse_loss(current_q, target_q)
+        self.optimizer.zero_grad()
+        loss.backward()
+        # 梯度裁剪防止爆炸
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 10.0)
+        self.optimizer.step()
+
+        # 定期更新目标网络
+        self.steps += 1
+        if self.steps % self.target_update_freq == 0:
+            self.target_net.load_state_dict(self.policy_net.state_dict())
+
+        # 衰减 epsilon
+        self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
+        return loss.item()
+</code></pre>
+
+        <h3>4.3.3 完整训练循环</h3>
+
+        <pre><code class="language-python">import gymnasium as gym
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 创建环境和 Agent
+env = gym.make("CartPole-v1")
+agent = DQNAgent(
+    state_dim=env.observation_space.shape[0],
+    action_dim=env.action_space.n,
+    lr=0.001,
+    gamma=0.99,
+    epsilon_start=1.0,
+    epsilon_end=0.01,
+    epsilon_decay=0.995,
+    target_update_freq=100
+)
+
+# 训练
+num_episodes = 500
+reward_history = []
+loss_history = []
+
+for episode in range(num_episodes):
+    state, info = env.reset()
+    total_reward = 0
+    episode_loss = 0
+    done = False
+    truncated = False
+
+    while not done and not truncated:
+        action = agent.select_action(state)
+        next_state, reward, done, truncated, info = env.step(action)
+        agent.memory.push(state, action, reward, next_state, done)
+        loss = agent.update()
+        state = next_state
+        total_reward += reward
+        episode_loss += loss if loss else 0
+
+    reward_history.append(total_reward)
+    loss_history.append(episode_loss / max(1, total_reward))
+
+    if episode % 50 == 0:
+        avg = np.mean(reward_history[-50:])
+        print(f"Episode {episode}: 平均奖励 = {avg:.1f}, ε = {agent.epsilon:.3f}")
+
+env.close()
+
+# 可视化训练曲线
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+axes[0].plot(reward_history, alpha=0.5)
+axes[0].plot(np.convolve(reward_history, np.ones(50)/50, mode='valid'), 'r-', lw=2)
+axes[0].set_xlabel('Episode')
+axes[0].set_ylabel('Total Reward')
+axes[0].set_title('DQN 训练奖励曲线 (CartPole)')
+axes[0].axhline(y=500, color='g', linestyle='--', label='满分')
+axes[0].legend()
+
+axes[1].plot(loss_history)
+axes[1].set_xlabel('Episode')
+axes[1].set_ylabel('Loss')
+axes[1].set_title('DQN 训练损失曲线')
+plt.tight_layout()
+plt.savefig('dqn-training.png', dpi=150)
+plt.show()
+</code></pre>
+
+        <h2>4.4 DQN 变体与改进</h2>
+
+        <p>原始 DQN 有几个已知的局限性，后续研究提出了多种改进：</p>
+
+        <table>
+            <thead>
+                <tr><th>改进</th><th>解决的问题</th><th>核心思想</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Dueling DQN</strong></td>
+                    <td>Q 值中 V 和 A 的耦合问题</td>
+                    <td>将网络拆分为价值流和优势流：Q(s,a) = V(s) + (A(s,a) - mean(A(s,.)))</td>
+                </tr>
+                <tr>
+                    <td><strong>Double DQN</strong></td>
+                    <td>Q 值过高估计</td>
+                    <td>用主网络选动作，用目标网络评估：Q_target = R + γ·Q'(s', argmax Q(s',a'))</td>
+                </tr>
+                <tr>
+                    <td><strong>Noisy Net</strong></td>
+                    <td>ε-greedy 探索不够智能</td>
+                    <td>在网络权重上添加参数化噪声，让探索更有结构</td>
+                </tr>
+                <tr>
+                    <td><strong>Dueling DQN + Double</strong></td>
+                    <td>综合优化</td>
+                    <td>同时应用两种改进，实际效果显著提升</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>4.5 调试经验与常见问题</h2>
+
+        <div class="callout callout-danger">
+            <strong>调试清单：</strong>
+            <ul>
+                <li><strong>奖励不增长</strong>：检查学习率是否过大（导致震荡）或过小（导致学习缓慢）；确认 reward 信号是否正常</li>
+                <li><strong>训练发散</strong>：目标网络更新太频繁；尝试增大 <code>target_update_freq</code>；添加梯度裁剪</li>
+                <li><strong>过估计</strong>：Q 值持续增长超过实际可达的上限；切换到 Double DQN</li>
+                <li><strong>探索不足</strong>：ε 衰减太快；降低 epsilon_decay 或提高 epsilon_end</li>
+                <li><strong>缓冲区太小</strong>：经验太少导致训练不稳定；增大 buffer_size 到 10000+</li>
+            </ul>
+        </div>
+
+        <h2>4.6 本章小结</h2>
+        <ul>
+            <li>Q-Learning 用表格维护 Q 值，适合离散小状态空间</li>
+            <li>DQN 用神经网络替代 Q 表，通过经验回放和目标网络解决稳定性问题</li>
+            <li>经验回放打破数据相关性，目标网络解决"移动靶"问题</li>
+            <li>Double DQN 和 Dueling DQN 是重要的改进方向</li>
+            <li>调试 DQN 时需要关注学习率、ε 衰减、梯度裁剪等超参数</li>
+        </ul>
+
+        <h2>练习</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>修改上面的 DQN 代码，在 LunarLander-v2 环境上训练。对比不同 γ（0.9 / 0.99 / 0.999）对训练效果的影响。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶练习</h4>
+                    <p>实现 Dueling DQN：将网络拆分为 Value Stream 和 Advantage Stream，然后合并为 Q 值。观察在 CartPole 上相比基础 DQN 的收敛速度差异。</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="03-价值函数与贝尔曼方程.html">← 上一章：价值函数</a>
+            <a href="05-策略梯度与REINFORCE.html">第 5 章：策略梯度 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+        function showTab(btn) {
+            const tabs = btn.closest('.tabs');
+            tabs.querySelectorAll('.tab-buttons button').forEach(b => b.classList.remove('active'));
+            tabs.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            tabs.querySelectorAll('.tab-content').forEach(c => {
+                if (c.previousElementSibling === btn) c.classList.add('active');
+            });
+        }
+    </script>
+</body>
+</html>

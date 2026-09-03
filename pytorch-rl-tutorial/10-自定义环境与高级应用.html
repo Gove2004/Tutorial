@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实战：自定义环境与高级应用 - PyTorch 强化学习教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-实战Gym环境训练.html">← 上一章</a>
+        <a href="11-分布式训练与生产实践.html">第 11 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 10 章：实战：自定义环境与高级应用</h1>
+
+        <h2>10.1 定义自定义 Gymnasium 环境</h2>
+
+        <p>Gymnasium 环境遵循统一接口，只需继承 <code>gymnasium.Env</code> 并实现四个核心方法：<code>reset</code>、<code>step</code>、<code>render</code> 和 <code>close</code>。</p>
+
+        <pre><code class="language-python">import gymnasium as gym
+from gymnasium import spaces
+import numpy as np
+import pygame
+
+class CustomMazeEnv(gym.Env):
+    """
+    自定义迷宫环境：Agent 需要从起点到达终点
+    - 4x4 网格地图
+    - 离散动作空间（上下左右）
+    - 连续观测空间（Agent 位置 + 终点位置）
+    """
+    metadata = {"render_modes": ["human", "rgb_array"]}
+
+    def __init__(self, render_mode=None, wall_prob=0.2):
+        super().__init__()
+        self.render_mode = render_mode
+        self.grid_size = 4
+        self.wall_prob = wall_prob
+
+        # 定义空间
+        self.observation_space = spaces.Box(
+            low=np.array([0, 0, 0, 0]),
+            high=np.array([self.grid_size-1, self.grid_size-1, self.grid_size-1, self.grid_size-1]),
+            dtype=np.float32
+        )
+        self.action_space = spaces.Discrete(4)  # 0:上 1:下 2:左 3:右
+
+        # 动作映射
+        self.action_map = {0: (-1, 0), 1: (1, 0), 2: (0, -1), 3: (0, 1)}
+
+        self._generate_maze()
+
+    def _generate_maze(self):
+        """随机生成迷宫（障碍物）"""
+        self.walls = set()
+        for _ in range(int(self.grid_size * self.grid_size * self.wall_prob)):
+            pos = (np.random.randint(self.grid_size), np.random.randint(self.grid_size))
+            if pos != (0, 0) and pos != (self.grid_size-1, self.grid_size-1):
+                self.walls.add(pos)
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.agent_pos = (0, 0)
+        self.goal_pos = (self.grid_size-1, self.grid_size-1)
+        self.steps = 0
+        self.max_steps = self.grid_size * self.grid_size * 2
+
+        state = np.array([*self.agent_pos, *self.goal_pos], dtype=np.float32)
+        return state, {}
+
+    def step(self, action):
+        dr, dc = self.action_map[action]
+        new_r = max(0, min(self.grid_size-1, self.agent_pos[0] + dr))
+        new_c = max(0, min(self.grid_size-1, self.agent_pos[1] + dc))
+        new_pos = (new_r, new_c)
+
+        if new_pos in self.walls:
+            reward = -10  # 撞墙
+            done = True
+        elif new_pos == self.goal_pos:
+            reward = 100  # 到达目标
+            done = True
+        else:
+            reward = -1  # 每步小惩罚，鼓励尽快到达
+            done = False
+
+        self.agent_pos = new_pos
+        self.steps += 1
+
+        if self.steps >= self.max_steps:
+            done = True
+            reward = -50  # 超时惩罚
+
+        state = np.array([*self.agent_pos, *self.goal_pos], dtype=np.float32)
+        return state, reward, done, False, {}
+
+    def render(self):
+        if self.render_mode == "human":
+            # 简化版：打印网格
+            grid = [['.' for _ in range(self.grid_size)] for _ in range(self.grid_size)]
+            for r, c in self.walls:
+                grid[r][c] = '#'
+            grid[self.agent_pos[0]][self.agent_pos[1]] = 'A'
+            grid[self.goal_pos[0]][self.goal_pos[1]] = 'G'
+            for row in grid:
+                print(' '.join(row))
+            print()
+
+# 测试环境
+env = CustomMazeEnv(render_mode="human")
+state, _ = env.reset()
+for _ in range(20):
+    action = env.action_space.sample()
+    state, reward, done, truncated, info = env.step(action)
+    if done:
+        break
+env.close()
+</code></pre>
+
+        <h2>10.2 视觉输入：Atari 风格处理</h2>
+
+        <p>当环境输入是图像时，需要对原始像素进行预处理才能输入神经网络：</p>
+
+        <pre><code class="language-python">import cv2
+import torch
+from torchvision import transforms
+
+class AtariPreprocessor:
+    """Atari 标准预处理流程"""
+    def __init__(self, frame_height=84, frame_width=84, n_frames=4, gray=True):
+        self.frame_height = frame_height
+        self.frame_width = frame_width
+        self.n_frames = n_frames
+        self.gray = gray
+        self.frame_buffer = []
+        self.skip = 4  # 每 4 帧采样一次
+
+    def __call__(self, frame):
+        # 1. 灰度化
+        if self.gray:
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        # 2. 下采样
+        frame = cv2.resize(frame, (self.frame_width, self.frame_height),
+                          interpolation=cv2.INTER_AREA)
+        # 3. 二值化（可选，Atari 常用）
+        frame = (frame > 0).astype(np.float32) * 255
+        return frame
+
+    def reset(self, frame):
+        self.frame_buffer = []
+        processed = self(frame)
+        self.frame_buffer = [processed] * self.n_frames
+        return self._get_observation()
+
+    def step(self, frame):
+        processed = self(frame)
+        self.frame_buffer.append(processed)
+        if len(self.frame_buffer) > self.n_frames:
+            self.frame_buffer.pop(0)
+        return self._get_observation()
+
+    def _get_observation(self):
+        """堆叠 n_frames 作为单次观测"""
+        return np.stack(self.frame_buffer, axis=-1)  # (84, 84, 4)
+
+class VisionCNN(nn.Module):
+    """处理图像输入的策略网络"""
+    def __init__(self, action_dim, input_channels=4):
+        super().__init__()
+        self.cnn = nn.Sequential(
+            nn.Conv2d(input_channels, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU()
+        )
+        # 计算 flattened 大小
+        self.fc = nn.Sequential(
+            nn.Linear(64 * 7 * 7, 512),
+            nn.ReLU(),
+            nn.Linear(512, action_dim)
+        )
+
+    def forward(self, x):
+        # x: (batch, 4, 84, 84)
+        x = self.cnn(x)
+        x = x.view(x.size(0), -1)
+        return self.fc(x)
+</code></pre>
+
+        <h2>10.3 多智能体入门</h2>
+
+        <p>多智能体强化学习（MARL）是单智能体 RL 的自然扩展。核心挑战是：<strong>环境对每个 Agent 来说不再是稳态的</strong>，因为其他 Agent 也在不断学习。</p>
+
+        <pre><code class="language-python">"""
+MAE (Multi-Agent Actor-Critic) 基础架构
+每个 Agent 有自己的 Actor 和 Critic，共享经验池
+"""
+import torch
+import torch.nn as nn
+
+class MultiAgentPPO:
+    def __init__(self, state_dim, action_dim, n_agents, hidden=64):
+        self.n_agents = n_agents
+        self.agents = []
+        for i in range(n_agents):
+            agent = ActorCriticNet(state_dim, action_dim, hidden)
+            self.agents.append({
+                'policy': agent,
+                'optimizer': torch.optim.Adam(agent.parameters(), lr=3e-4)
+            })
+
+    def select_actions(self, states):
+        """所有 Agent 同时选择动作"""
+        actions, log_probs, values = [], [], []
+        for i, (state, agent) in enumerate(zip(states, self.agents)):
+            action, log_prob, value = agent.policy.get_action_and_value(state)
+            actions.append(action)
+            log_probs.append(log_prob)
+            values.append(value)
+        return actions, log_probs, values
+
+    def update(self, all_trajectories):
+        """所有 Agent 各自更新"""
+        for i, trajectory in enumerate(all_trajectories):
+            agent = self.agents[i]
+            loss = self._update_agent(agent['policy'], agent['optimizer'], trajectory)
+        return loss
+
+    def _update_agent(self, policy, optimizer, trajectory):
+        """单个 Agent 的 PPO 更新"""
+        states, actions, log_probs, rewards, values = trajectory
+        # ... 同单 Agent PPO 逻辑 ...
+        pass
+</code></pre>
+
+        <h2>10.4 与 Unity ML-Agents 对接的思路</h2>
+
+        <p>ML-Agents 是 Unity 的机器学习插件，通过 gRPC 与 Python 通信。以下是 Python 侧 Agent 的基本结构：</p>
+
+        <pre><code class="language-python">
+"""
+ML-Agents Python Agent 框架
+注意：这是概念性示例，实际使用需要通过 mlagents 包
+"""
+from mlagents_envs.environment import UnityEnvironment
+from mlagents_envs.side_channel.environment_parameters import (
+    EnvironmentParameters
+)
+import torch
+import numpy as np
+
+class UnityRLAgent:
+    def __init__(self, brain_name="Brain"):
+        self.brain_name = brain_name
+        self.env = UnityEnvironment(file_name=None)  # 连接已运行的 Unity 场景
+        self.brain = self.env.brains[brain_name]
+        self.action_dim = self.brain.action_space[0]
+
+        # 根据动作空间类型选择网络
+        if isinstance(self.action_dim, spaces.Discrete):
+            self.policy = DiscretePolicy(self.brain.observation_space[0].shape[0],
+                                         self.action_dim.n)
+        else:
+            self.policy = ContinuousPolicy(self.brain.observation_space[0].shape[0],
+                                            self.action_dim.high.shape[0])
+
+    def get_action(self, observation):
+        obs_t = torch.FloatTensor(observation).unsqueeze(0)
+        return self.policy.get_action(obs_t)
+
+    def run_episode(self, max_steps=1000):
+        """运行一个 episode 并采集训练数据"""
+        self.env.reset()
+        decision_steps, terminal_steps = self.env.get_experiential_buffer()
+        trajectory = []
+
+        for _ in range(max_steps):
+            observations = decision_steps.observation.numpy()
+            for obs in observations:
+                action, log_prob = self.get_action(obs)
+                # 发送动作到 Unity
+                self.env.set_actions(self.brain_name, action)
+            self.env.step()
+            # 收集新数据...
+
+        return trajectory
+</code></pre>
+
+        <h2>10.5 训练加速技巧</h2>
+
+        <pre><code class="language-python">"""
+多线程环境并行采集
+每个进程运行独立的环境实例，大幅提升采样效率
+"""
+import multiprocessing as mp
+from multiprocessing import Process, Queue
+import gymnasium as gym
+import torch
+
+def worker_process(env_id, agent_state_dict, result_queue, worker_id):
+    """子进程：运行环境并返回训练数据"""
+    env = gym.make(env_id)
+    # 加载共享的 agent 参数
+    # ...
+    trajectory = []
+    for step in range(1000):
+        action = agent.select_action(state)
+        next_state, reward, done, truncated, _ = env.step(action)
+        trajectory.append((state, action, reward, next_state, done))
+        state = next_state
+        if done or truncated:
+            state, _ = env.reset()
+    result_queue.put((worker_id, trajectory))
+    env.close()
+
+# 启动多进程
+n_workers = 8
+queues = [Queue() for _ in range(n_workers)]
+processes = []
+for i in range(n_workers):
+    p = Process(target=worker_process,
+                args=("CartPole-v1", None, queues[i], i))
+    p.start()
+    processes.append(p)
+
+# 收集结果并合并
+all_trajectories = []
+for q in queues:
+    all_trajectories.extend(q.get())
+
+# 用合并的数据训练
+batch = merge_and_batch(all_trajectories)
+loss = agent.update(batch)
+</code></pre>
+
+        <h2>10.6 本章小结</h2>
+        <ul>
+            <li>自定义 Gymnasium 环境只需继承 Env 并实现 reset/step/render/close</li>
+            <li>视觉输入需要预处理（灰度化、下采样、帧堆叠）</li>
+            <li>多智能体 RL 的核心挑战是非稳态环境</li>
+            <li>ML-Agents 通过 gRPC 实现 Python-Unity 通信</li>
+            <li>多进程并行环境采集可显著提升样本效率</li>
+        </ul>
+
+        <h2>练习</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>实现一个自定义的"走迷宫"环境，用 PPO 训练 Agent 学会最短路径。评估标准：平均到达目标的步数。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶挑战</h4>
+                    <p>实现两个 Agent 的对抗环境（如简单的足球游戏），每个 Agent 独立训练 PPO，观察合作或竞争行为是否自发涌现。</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="09-实战Gym环境训练.html">← 上一章：Gym 实战</a>
+            <a href="11-分布式训练与生产实践.html">第 11 章：分布式训练 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+        function showTab(btn) {
+            const tabs = btn.closest('.tabs');
+            tabs.querySelectorAll('.tab-buttons button').forEach(b => b.classList.remove('active'));
+            tabs.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            tabs.querySelectorAll('.tab-content').forEach(c => {
+                if (c.previousElementSibling === btn) c.classList.add('active');
+            });
+        }
+    </script>
+</body>
+</html>

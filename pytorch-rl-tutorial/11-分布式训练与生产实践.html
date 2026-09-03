@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分布式训练与生产实践 - PyTorch 强化学习教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="10-自定义环境与高级应用.html">← 上一章</a>
+        <a href="12-总结与进阶资源.html">第 12 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 11 章：分布式训练与生产实践</h1>
+
+        <h2>11.1 为什么需要分布式 RL</h2>
+
+        <p>强化学习训练的瓶颈通常在<strong>采样</strong>而非<strong>计算</strong>。一个 Agent 在单卡上每天可能只能采集几万到几十万步，而复杂任务需要数十亿步。分布式 RL 通过并行采样来解决这个瓶颈：</p>
+
+        <ul>
+            <li><strong>数据并行</strong>：多个 worker 并行采集数据，汇总后统一更新</li>
+            <li><strong>模型并行</strong>：将大模型拆到多个 GPU 上（RL 中较少使用）</li>
+            <li><strong>分布式推理</strong>：多个 GPU 并行推理加速采样</li>
+        </ul>
+
+        <h2>11.2 RLlib：Ray 的强化学习框架</h2>
+
+        <p>RLlib 是 Ray 生态中的分布式 RL 框架，支持 PPO、DQN、A2C 等主流算法，自动处理分布式采样和同步。</p>
+
+        <pre><code class="language-python">"""
+使用 RLlib 训练 PPO
+无需手动实现分布式逻辑，几行代码即可扩展到多 GPU
+"""
+import ray
+from ray import air, tune
+from ray.rllib.algorithms.ppo import PPO
+from ray.tune.registry import register_env
+import gymnasium as gym
+
+# 初始化 Ray
+ray.init(num_cpus=8, num_gpus=2)
+
+# 注册自定义环境
+def env_creator(env_name):
+    return gym.make(env_name)
+
+register_env("CustomMaze", lambda cfg: CustomMazeEnv())
+
+# 配置
+config = {
+    "env": "CartPole-v1",
+    "algo": "PPO",
+    "num_workers": 4,           # 4 个并行采样 worker
+    "num_gpus": 1,              # 使用 1 个 GPU
+    "train_batch_size": 4096,   # 每轮训练使用的样本数
+    "sgd_minibatch_size": 512,  # SGD  mini-batch 大小
+    "lambda": 0.95,             # GAE lambda
+    "clip_param": 0.2,
+    "entropy_coeff": 0.01,
+    "lr": 3e-4,
+    "observation_filter": "MeanStdFilter",  # 自动标准化观测
+}
+
+# 训练
+algorithm = PPO(config=config)
+for i in range(100):
+    result = algorithm.train()
+    if i % 10 == 0:
+        print(f"Episode {i}: reward={result['episode_reward_mean']:.1f}")
+
+# 评估
+test_result = algorithm.test()
+print(f"测试奖励: {test_result['episode_reward_mean']:.1f}")
+</code></pre>
+
+        <h2>11.3 检查点管理与恢复</h2>
+
+        <pre><code class="language-python">"""
+生产环境中，训练往往需要长时间运行并支持中断恢复
+"""
+import os
+import json
+import torch
+
+class CheckpointManager:
+    def __init__(self, agent, env, save_dir="./checkpoints"):
+        self.agent = agent
+        self.env = env
+        self.save_dir = save_dir
+        os.makedirs(save_dir, exist_ok=True)
+        self.best_reward = -float('inf')
+        self.episode = 0
+
+    def save(self, episode, reward, is_best=False):
+        checkpoint = {
+            'episode': episode,
+            'agent_state': self.agent.policy.state_dict(),
+            'optimizer_state': self.agent.optimizer.state_dict(),
+            'reward': reward,
+            'epsilon': self.agent.epsilon,
+            'memory_size': len(self.agent.memory)
+        }
+        path = os.path.join(self.save_dir, f"checkpoint_ep{episode}.pt")
+        torch.save(checkpoint, path)
+
+        if is_best or reward > self.best_reward:
+            self.best_reward = reward
+            best_path = os.path.join(self.save_dir, "best.pth")
+            torch.save(checkpoint, best_path)
+            print(f"保存最佳模型: 奖励={reward:.1f}")
+
+    def load(self, path="best.pth"):
+        path = os.path.join(self.save_dir, path)
+        if os.path.exists(path):
+            checkpoint = torch.load(path, map_location='cpu')
+            self.agent.policy.load_state_dict(checkpoint['agent_state'])
+            self.agent.optimizer.load_state_dict(checkpoint['optimizer_state'])
+            self.episode = checkpoint['episode']
+            self.agent.epsilon = checkpoint['epsilon']
+            print(f"从检查点恢复: episode={self.episode}")
+            return True
+        return False
+
+    def list_checkpoints(self):
+        files = sorted(os.listdir(self.save_dir),
+                      key=lambda x: int(x.split('ep')[1].split('.')[0])
+                      if 'ep' in x else 0)
+        return [f for f in files if f.endswith('.pt')]
+</code></pre>
+
+        <h2>11.4 训练稳定性保障</h2>
+
+        <pre><code class="language-python">"""
+训练监控与自动调整
+"""
+import numpy as np
+from collections import deque
+
+class TrainingMonitor:
+    def __init__(self, window=50):
+        self.window = window
+        self.rewards = deque(maxlen=window)
+        self.losses = deque(maxlen=window)
+        self.entropies = deque(maxlen=window)
+        self.stalls = 0
+        self.max_stalls = 5
+
+    def record(self, reward, loss=None, entropy=None):
+        self.rewards.append(reward)
+        if loss is not None:
+            self.losses.append(loss)
+        if entropy is not None:
+            self.entropies.append(entropy)
+
+    def check_stall(self, min_improvement=0.95):
+        """检测训练是否停滞"""
+        if len(self.rewards) < self.window:
+            return False
+        recent = np.mean(list(self.rewards)[-10:])
+        earlier = np.mean(list(self.rewards)[:10])
+        if recent < earlier * min_improvement:
+            self.stalls += 1
+            return self.stalls >= self.max_stalls
+        self.stalls = 0
+        return False
+
+    def check_divergence(self, max_loss=100.0):
+        """检测训练发散"""
+        if self.losses and self.losses[-1] > max_loss:
+            return True
+        return False
+
+    def get_stats(self):
+        return {
+            'avg_reward': np.mean(self.rewards) if self.rewards else 0,
+            'max_reward': max(self.rewards) if self.rewards else 0,
+            'avg_loss': np.mean(self.losses) if self.losses else 0,
+            'avg_entropy': np.mean(self.entropies) if self.entropies else 0,
+            'stalls': self.stalls
+        }
+</code></pre>
+
+        <h2>11.5 性能分析与优化</h2>
+
+        <pre><code class="language-python">"""
+使用 torch.profiler 分析训练瓶颈
+"""
+import torch.profiler as profiler
+
+with profiler.profile(
+    activities=[profiler.ProfilerActivity.CPU, profiler.ProfilerActivity.CUDA],
+    record_shapes=True,
+    profile_memory=True
+) as prof:
+    for step in range(1000):
+        # ... 训练循环 ...
+        loss = agent.update()
+
+# 导出分析结果
+print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
+prof.export_chrome_trace("trace.json")
+</code></pre>
+
+        <p>常见的性能优化方向：</p>
+        <ul>
+            <li><strong>GPU 利用率低</strong>：检查 batch_size 是否太小，或是否在 CPU 上做了大量数据处理</li>
+            <li><strong>采样成为瓶颈</strong>：增加并行环境数，或使用向量化的环境（如 <code>gym.vector</code>）</li>
+            <li><strong>内存泄漏</strong>：定期检查 tensor 数量，使用 <code>torch.cuda.empty_cache()</code></li>
+            <li><strong>数据加载慢</strong>：使用 <code>torch.utils.data.DataLoader</code> 的 <code>num_workers</code> 并行加载</li>
+        </ul>
+
+        <h2>11.6 生产部署要点</h2>
+
+        <table>
+            <thead>
+                <tr><th>方面</th><th>要点</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>模型版本</strong></td><td>每个检查点打标签，记录训练配置和超参数</td></tr>
+                <tr><td><strong>A/B 测试</strong></td><td>新模型先在仿真环境中与旧模型对比，再上线</td></tr>
+                <tr><td><strong>回滚机制</strong></td><td>保留历史模型，出问题可以快速回退</td></tr>
+                <tr><td><strong>监控告警</strong></td><td>训练中断、奖励骤降、熵崩溃时自动通知</td></tr>
+                <tr><td><strong>资源成本</strong></td><td>使用 spot instances、自动关停空闲 GPU</td></tr>
+            </tbody>
+        </table>
+
+        <h2>11.7 本章小结</h2>
+        <ul>
+            <li>RLlib 可以大幅简化分布式 RL 的实现</li>
+            <li>检查点管理是生产环境的基础设施</li>
+            <li>训练监控（停滞检测、发散检测）能提前发现问题</li>
+            <li>性能分析工具帮助定位采样和计算的瓶颈</li>
+        </ul>
+
+        <h2>练习</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>实现完整的 CheckpointManager，训练 PPO 并每 50 episode 保存一次检查点，从中断处恢复训练。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶挑战</h4>
+                    <p>使用 torch.profiler 分析 PPO 在 CartPole 上的训练性能，找出最耗时的操作并优化。</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="10-自定义环境与高级应用.html">← 上一章：自定义环境</a>
+            <a href="12-总结与进阶资源.html">第 12 章：总结 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+        function showTab(btn) {
+            const tabs = btn.closest('.tabs');
+            tabs.querySelectorAll('.tab-buttons button').forEach(b => b.classList.remove('active'));
+            tabs.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            tabs.querySelectorAll('.tab-content').forEach(c => {
+                if (c.previousElementSibling === btn) c.classList.add('active');
+            });
+        }
+    </script>
+</body>
+</html>

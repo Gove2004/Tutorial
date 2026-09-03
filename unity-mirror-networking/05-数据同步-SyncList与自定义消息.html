@@ -24,117 +24,243 @@
             本章将深入这两个主题。
         </p>
 
+        <div class="callout callout-info">
+            <strong>Mirror 96 API 更新</strong><br>
+            本章已全面适配 Mirror 96.x。主要变化包括：
+            SyncList 改为<strong>泛型</strong> <code>SyncList&lt;T&gt;</code>（移除了 <code>SyncListInt</code> / <code>SyncListString</code> 等专用类型）；
+            SyncList 回调改为<strong>事件驱动</strong>（<code>OnAdd</code> / <code>OnInsert</code> / <code>OnSet</code> / <code>OnRemoveAt</code> / <code>OnClear</code>）；
+            操作枚举改为 <code>OP_ADD</code> / <code>OP_INSERT</code> / <code>OP_SET</code> / <code>OP_REMOVEAT</code> / <code>OP_CLEAR</code>；
+            自定义消息从 <code>MessageBase</code>（class）改为 <code>NetworkMessage</code>（struct 接口）。
+        </div>
+
         <h2>5.1 SyncList：同步集合数据</h2>
 
-        <p><code>SyncList</code> 是 Mirror 提供的同步集合类型。
-        它继承自 <code>NetworkBehaviour</code>，因此只能在网络脚本中使用。</p>
+        <p><code>SyncList&lt;T&gt;</code> 是 Mirror 提供的同步集合类型。
+        它可以同步任何可序列化类型的列表，并且支持自定义结构体。</p>
 
         <div class="definition">
             <h4>SyncList 的核心特性</h4>
             <p>• 服务器修改后自动同步到所有客户端<br>
-            • 支持 hook 回调（元素变化时触发）<br>
-            • 多种类型变体：SyncListInt、SyncListString、SyncListFloat 等<br>
-            • 不支持泛型——每种类型都有独立的实现</p>
+            • 支持事件回调（元素增删改时触发）<br>
+            • <strong>泛型</strong>设计：<code>SyncList&lt;int&gt;</code>、<code>SyncList&lt;string&gt;</code>、<code>SyncList&lt;MyStruct&gt;</code><br>
+            • 支持自定义结构体作为元素类型<br>
+            • 只能在 NetworkBehaviour 中使用</p>
         </div>
 
         <h3>5.1.1 基本用法</h3>
 
-        <pre><code class="language-csharp">public class InventorySystem : NetworkBehaviour
+        <pre><code class="language-csharp">using Mirror;
+
+public class InventorySystem : NetworkBehaviour
 {
-    // 同步物品列表
-    public SyncListString itemNames = new SyncListString();
+    // Mirror 96 使用泛型 SyncList&lt;T&gt;
+    public SyncList&lt;string&gt; itemNames = new SyncList&lt;string&gt;();
+    public SyncList&lt;int&gt; teamHealths = new SyncList&lt;int&gt;();
 
-    // 同步生命值列表（用于队伍系统）
-    public SyncListInt teamHealths = new SyncListInt();
-
-    void OnStartServer()
+    public override void OnStartServer()
     {
+        base.OnStartServer();
         // 服务器端初始化
         itemNames.Add("铁剑");
         itemNames.Add("护甲");
         itemNames.Add("药水");
     }
 
-    // hook 方法：当列表变化时调用
-    protected override void OnSyncListChanged(IEnumerable&lt;SyncListString.Operation&gt; operations)
+    public override void OnStartClient()
     {
-        foreach (var op in operations)
+        base.OnStartClient();
+
+        // 注册事件回调——在客户端收到同步变更时触发
+        // Mirror 96 使用事件（Event）而非旧的 Callback 属性
+        itemNames.OnAdd += OnItemAdded;
+        itemNames.OnSet += OnItemChanged;
+        itemNames.OnRemoveAt += OnItemRemoved;
+        itemNames.OnClear += OnItemsCleared;
+    }
+
+    void OnItemAdded(int index, string newItem)
+    {
+        Debug.Log($"新增物品: {newItem} 在索引 {index}");
+        RefreshInventoryUI();
+    }
+
+    void OnItemChanged(int index, string oldItem, string newItem)
+    {
+        Debug.Log($"物品变更: 索引 {index} 从 {oldItem} 变为 {newItem}");
+        RefreshInventoryUI();
+    }
+
+    void OnItemRemoved(int index, string oldItem)
+    {
+        Debug.Log($"移除物品: {oldItem} 在索引 {index}");
+        RefreshInventoryUI();
+    }
+
+    void OnItemsCleared()
+    {
+        Debug.Log("物品列表已清空");
+        RefreshInventoryUI();
+    }
+
+    void RefreshInventoryUI()
+    {
+        // 遍历 SyncList（和普通 List 一样）
+        for (int i = 0; i &lt; itemNames.Count; i++)
         {
-            switch (op.operation)
-            {
-                case SyncListString.Operation.itemAdded:
-                    Debug.Log($"新增物品: {op.item} 在索引 {op.index}");
-                    break;
-                case SyncListString.Operation.itemRemoved:
-                    Debug.Log($"移除物品: {op.item} 在索引 {op.index}");
-                    break;
-                case SyncListString.Operation.itemChanged:
-                    Debug.Log($"物品变更: {op.item} 在索引 {op.index}");
-                    break;
-            }
+            Debug.Log($"  格子 {i}: {itemNames[i]}");
         }
     }
 }</code></pre>
 
-        <h3>5.1.2 SyncList 支持的类型</h3>
+        <div class="callout callout-warning">
+            <strong>Mirror 96 SyncList API 变化</strong><br>
+            旧版 Mirror 使用专用类型：<code>SyncListInt</code>、<code>SyncListString</code>、<code>SyncListFloat</code> 等，
+            以及 <code>Callback</code> 属性和 <code>Operation</code> 枚举（<code>OP_ADD</code>、<code>OP_DIRTY</code> 等）。
+            <br><br>
+            Mirror 96 改为：
+            <ul>
+                <li><strong>泛型</strong>：<code>SyncList&lt;T&gt;</code> 支持任意可序列化类型</li>
+                <li><strong>事件驱动</strong>：<code>OnAdd</code>、<code>OnInsert</code>、<code>OnSet</code>、<code>OnRemoveAt</code>、<code>OnClear</code></li>
+                <li>操作枚举：<code>OP_ADD</code>、<code>OP_INSERT</code>、<code>OP_SET</code>、<code>OP_REMOVEAT</code>、<code>OP_CLEAR</code></li>
+            </ul>
+        </div>
+
+        <h3>5.1.2 使用自定义结构体作为 SyncList 元素</h3>
+
+        <p>Mirror 96 的泛型设计让你可以同步自定义结构体——这在旧版中是不可能的：</p>
+
+        <pre><code class="language-csharp">// 定义可序列化的结构体
+public struct ItemSlot : INetworkMessage
+{
+    public int itemId;
+    public int count;
+    public bool isEquipped;
+
+    public ItemSlot(int id, int cnt, bool equipped)
+    {
+        itemId = id;
+        count = cnt;
+        isEquipped = equipped;
+    }
+}
+
+public class PlayerInventory : NetworkBehaviour
+{
+    // 同步装备栏——元素是自定义结构体
+    public SyncList&lt;ItemSlot&gt; equipment = new SyncList&lt;ItemSlot&gt;();
+
+    public override void OnStartClient()
+    {
+        base.OnStartClient();
+        equipment.OnAdd += (index, slot) =>
+        {
+            Debug.Log($"装备栏 {index}: 物品 {slot.itemId} x{slot.count}");
+        };
+        equipment.OnSet += (index, oldSlot, newSlot) =>
+        {
+            Debug.Log($"装备栏 {index} 变更: {oldSlot.itemId} → {newSlot.itemId}");
+        };
+    }
+
+    // 服务器端操作
+    [Server]
+    public void EquipItem(int slotIndex, int itemId, int count)
+    {
+        if (slotIndex &lt; 0 || slotIndex >= equipment.Count) return;
+        // 直接修改元素——自动触发同步
+        equipment[slotIndex] = new ItemSlot(itemId, count, true);
+    }
+
+    [Server]
+    public void AddItem(int itemId, int count)
+    {
+        equipment.Add(new ItemSlot(itemId, count, false));
+    }
+
+    [Server]
+    public void RemoveItemAt(int index)
+    {
+        if (index >= 0 && index &lt; equipment.Count)
+            equipment.RemoveAt(index);
+    }
+}</code></pre>
+
+        <h3>5.1.3 SyncList 的操作与事件</h3>
+
+        <table>
+            <thead>
+                <tr><th>操作方法</th><th>事件回调</th><th>回调参数</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>Add(item)</code></td><td><code>OnAdd</code></td><td><code>(int index, T newItem)</code></td><td>末尾添加元素</td></tr>
+                <tr><td><code>Insert(index, item)</code></td><td><code>OnInsert</code></td><td><code>(int index, T newItem)</code></td><td>指定位置插入</td></tr>
+                <tr><td><code>this[index] = item</code></td><td><code>OnSet</code></td><td><code>(int index, T oldItem, T newItem)</code></td><td>替换指定位置元素</td></tr>
+                <tr><td><code>RemoveAt(index)</code></td><td><code>OnRemoveAt</code></td><td><code>(int index, T oldItem)</code></td><td>移除指定位置元素</td></tr>
+                <tr><td><code>Clear()</code></td><td><code>OnClear</code></td><td><code>()</code>（无参数）</td><td>清空列表</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>性能警告：</strong>每次 <code>Add</code> / <code>Remove</code> / <code>Insert</code>
+            都会触发同步。如果你在循环中逐个添加 100 个物品，会触发 100 次同步事件。
+            虽然Mirror会在同一帧内合并网络消息，但事件回调会触发 100 次。
+            考虑在批量操作时暂时取消注册事件，操作完成后再重新注册。
+        </div>
+
+        <h3>5.1.4 其他同步集合类型</h3>
+
+        <p>除了 <code>SyncList&lt;T&gt;</code>，Mirror 96 还提供了其他同步集合：</p>
 
         <table>
             <thead>
                 <tr><th>类型</th><th>说明</th><th>典型用途</th></tr>
             </thead>
             <tbody>
-                <tr><td><code>SyncListInt</code></td><td>整数列表</td><td>血量、分数、ID</td></tr>
-                <tr><td><code>SyncListString</code></td><td>字符串列表</td><td>物品名、玩家名、聊天消息</td></tr>
-                <tr><td><code>SyncListFloat</code></td><td>浮点列表</td><td>位置插值、伤害值</td></tr>
-                <tr><td><code>SyncListBool</code></td><td>布尔列表</td><td>开关状态、标志位</td></tr>
-                <tr><td><code>SyncListByte</code></td><td>字节列表</td><td>紧凑数据编码</td></tr>
-                <tr><td><code>SyncListUInt16</code></td><td>无符号短整型</td><td>节省带宽的 ID</td></tr>
-                <tr><td><code>SyncListHandle</code></td><td>句柄（内部使用）</td><td>不推荐直接使用</td></tr>
+                <tr><td><code>SyncList&lt;T&gt;</code></td><td>同步列表</td><td>背包、排行榜、玩家列表</td></tr>
+                <tr><td><code>SyncHashSet&lt;T&gt;</code></td><td>同步集合（唯一元素）</td><td>已解锁成就、已发现区域</td></tr>
+                <tr><td><code>SyncDictionary&lt;K,V&gt;</code></td><td>同步字典</td><td>键值映射、配置表</td></tr>
             </tbody>
         </table>
 
-        <h3>5.1.3 SyncList 的操作与开销</h3>
-
-        <p>SyncList 支持以下操作：</p>
-
-        <pre><code class="language-csharp">list.Add(value);          // 末尾添加
-list.Insert(index, value); // 指定位置插入
-list.Remove(value);        // 移除第一个匹配项
-list.RemoveAt(index);      // 移除指定位置
-list.Clear();              // 清空
-list[index];               // 索引访问（get/set）
-list.Count;                // 当前数量</code></pre>
-
-        <div class="callout callout-warning">
-            <strong>性能警告：</strong>每次 <code>Add</code> / <code>Remove</code> / <code>Insert</code>
-            都会触发同步。如果你在循环中逐个添加 100 个物品，会触发 100 次同步。
-            应该先修改本地列表，最后一次性同步：
-        </div>
-
-        <pre><code class="language-csharp">// ❌ 低效：100 次同步
-for (int i = 0; i &lt; 100; i++)
+        <pre><code class="language-csharp">// SyncDictionary 示例
+public class ScoreBoard : NetworkBehaviour
 {
-    itemNames.Add($"物品{i}");
-}
+    public SyncDictionary&lt;string, int&gt; playerScores = new SyncDictionary&lt;string, int&gt;();
 
-// ✅ 高效：先在本地构建，然后一次性赋值
-// SyncList 没有批量 Add，所以需要用 RPC 或自定义消息
-CmdBulkAddItems(new[] { "物品1", "物品2", ... });
+    public override void OnStartClient()
+    {
+        base.OnStartClient();
+        playerScores.OnAdd += (key, value) => Debug.Log($"新增分数: {key} = {value}");
+        playerScores.OnSet += (key, oldValue, newValue) => Debug.Log($"分数变更: {key} {oldValue} → {newValue}");
+        playerScores.OnRemove += (key, oldValue) => Debug.Log($"移除分数: {key}");
+    }
 
-// 更好的方案：用自定义消息批量发送</code></pre>
+    [Server]
+    public void UpdateScore(string playerName, int score)
+    {
+        if (playerScores.ContainsKey(playerName))
+            playerScores[playerName] = score;  // 触发 OnSet
+        else
+            playerScores[playerName] = score;  // 触发 OnAdd
+    }
+}</code></pre>
 
         <h2>5.2 自定义 NetworkMessage</h2>
 
-        <p>当 SyncVar / SyncList 不够用时，你可以定义完全自定义的消息结构。</p>
+        <p>当 SyncVar / SyncList 不够用时，你可以定义完全自定义的消息结构。
+        自定义消息适合<strong>一次性事件通知</strong>，而非持续状态同步。</p>
 
         <h3>5.2.1 消息的定义</h3>
+
+        <p>在 Mirror 96 中，自定义消息是<strong>结构体</strong>（struct），需实现 <code>INetworkMessage</code> 接口
+        （或旧版的 <code>NetworkMessage</code> 接口）。Mirror 的 Weaver 会自动生成序列化代码。</p>
 
         <pre><code class="language-csharp">using Mirror;
 using UnityEngine;
 
-// 定义消息结构
-[Serializable]
-public class PlayerMoveMessage : MessageBase
+// Mirror 96 的消息定义：struct + INetworkMessage
+// Weaver 会自动生成序列化/反序列化代码
+public struct PlayerMoveMessage : INetworkMessage
 {
     public Vector3 position;
     public Vector3 rotation;
@@ -142,8 +268,7 @@ public class PlayerMoveMessage : MessageBase
     public int sequenceNumber;    // 用于排序和去重
 }
 
-[Serializable]
-public class CombatReportMessage : MessageBase
+public struct CombatReportMessage : INetworkMessage
 {
     public uint attackerNetId;
     public uint targetNetId;
@@ -160,249 +285,294 @@ public enum DamageType
     Burst
 }</code></pre>
 
+        <div class="callout callout-warning">
+            <strong>Mirror 96 消息定义变化</strong><br>
+            旧版使用 <code>class XXXMessage : MessageBase</code>（引用类型，需手动实现 Serialize/Deserialize）。
+            <br>
+            Mirror 96 改为 <code>struct XXXMessage : INetworkMessage</code>（值类型，Weaver 自动生成序列化）。
+            优点：
+            <ul>
+                <li>值类型避免了 GC 压力</li>
+                <li>无需手写序列化代码</li>
+                <li>Mirror 的 Weaver 会在编译时自动生成高效的序列化逻辑</li>
+            </ul>
+        </div>
+
         <h3>5.2.2 注册与发送消息</h3>
 
-        <pre><code class="language-csharp">// 服务器端：注册消息处理器
-void OnServerStarted()
+        <pre><code class="language-csharp">public class GameServer : NetworkBehaviour
 {
-    NetworkServer.RegisterHandler&lt;PlayerMoveMessage&gt;(OnPlayerMove, replace: true);
-    NetworkServer.RegisterHandler&lt;CombatReportMessage&gt;(OnCombatReport, replace: true);
-}
-
-// 处理收到的消息
-void OnPlayerMove(NetworkConnection conn, PlayerMoveMessage msg)
-{
-    // 验证消息来源
-    if (conn == null) return;
-
-    // 找到对应的 Player 对象
-    NetworkIdentity player = conn.player?.identity;
-    if (player == null) return;
-
-    // 验证合理性（防作弊）
-    Vector3 expectedPos = player.transform.position;
-    float maxSpeed = player.GetComponent&lt;PlayerController&gt;().moveSpeed;
-    float maxDist = maxSpeed * 0.5f;  // 允许 0.5 秒的偏差
-
-    if ((msg.position - expectedPos).sqrMagnitude > maxDist * maxDist)
+    public override void OnStartServer()
     {
-        Debug.LogWarning($"[反作弊] 玩家 {conn.userId} 位置异常");
-        return;  // 忽略异常消息
+        base.OnStartServer();
+        // 服务器端注册消息处理器
+        // Mirror 96 的处理器签名：(NetworkConnectionToClient conn, T message)
+        NetworkServer.RegisterHandler&lt;PlayerMoveMessage&gt;(OnPlayerMove);
+        NetworkServer.RegisterHandler&lt;CombatReportMessage&gt;(OnCombatReport);
     }
 
-    // 应用移动
-    player.transform.position = msg.position;
-
-    // 广播给其他客户端
-    NetworkServer.SendToAll(new PlayerMoveMessage
+    // 服务器端消息处理器
+    void OnPlayerMove(NetworkConnectionToClient conn, PlayerMoveMessage msg)
     {
-        position = msg.position,
-        rotation = msg.rotation,
-        timestamp = msg.timestamp,
-        sequenceNumber = msg.sequenceNumber
-    }, conn);  // 不包括发送者（他已经有最新数据了）
-}
+        if (conn == null) return;
 
-// 服务器向特定客户端发送消息
-void SendCombatReportToClient(NetworkConnection client, CombatReport report)
-{
-    client.Send(new CombatReportMessage
+        // 通过 conn 查找对应的 Player 对象
+        if (conn.identity == null) return;
+
+        // 验证合理性（防作弊）
+        Vector3 expectedPos = conn.identity.transform.position;
+        float maxSpeed = conn.identity.GetComponent&lt;PlayerController&gt;().moveSpeed;
+        float maxDist = maxSpeed * 0.5f;
+
+        if ((msg.position - expectedPos).sqrMagnitude > maxDist * maxDist)
+        {
+            Debug.LogWarning($"[反作弊] 连接 {conn.connectionId} 位置异常");
+            return;
+        }
+
+        // 应用移动
+        conn.identity.transform.position = msg.position;
+
+        // 广播给其他客户端（通过 TargetRpc 或 ClientRpc）
+        // 或使用 NetworkServer.SendToAll
+        foreach (var kvp in NetworkServer.connections)
+        {
+            if (kvp.Value != conn)  // 不回发给发送者
+            {
+                kvp.Value.Send(new PlayerMoveMessage
+                {
+                    position = msg.position,
+                    rotation = msg.rotation,
+                    timestamp = msg.timestamp,
+                    sequenceNumber = msg.sequenceNumber
+                });
+            }
+        }
+    }
+
+    // 服务器向特定客户端发送消息
+    void SendCombatReportToClient(NetworkConnection client, CombatReport report)
     {
-        attackerNetId = report.attacker.netId,
-        targetNetId = report.target.netId,
-        damage = report.damage,
-        hitPosition = report.hitPosition,
-        damageType = report.type
-    });
+        client.Send(new CombatReportMessage
+        {
+            attackerNetId = report.attacker.netId,
+            targetNetId = report.target.netId,
+            damage = report.damage,
+            hitPosition = report.hitPosition,
+            damageType = report.type
+        });
+    }
 }</code></pre>
 
         <h3>5.2.3 客户端注册与发送</h3>
 
-        <pre><code class="language-csharp">void Start()
+        <pre><code class="language-csharp">public class GameClient : NetworkBehaviour
 {
-    // 客户端注册消息处理器
-    NetworkClient.RegisterHandler&lt;CombatReportMessage&gt;(OnCombatReport, replace: true);
-    NetworkClient.RegisterHandler&lt;PlayerMoveMessage&gt;(OnOtherPlayerMove, replace: true);
-}
-
-void OnCombatReport(CombatReportMessage msg)
-{
-    // 显示伤害数字、播放命中特效
-    ShowDamageNumber(msg.targetNetId, msg.damage, msg.hitPosition);
-}
-
-void OnOtherPlayerMove(PlayerMoveMessage msg)
-{
-    // 更新其他玩家的位置（用于插值）
-    UpdateRemotePlayerPosition(msg);
-}
-
-// 客户端发送自定义消息给服务器
-void SendMoveCommand(Vector3 pos, Vector3 rot)
-{
-    NetworkClient.connection.Send(new PlayerMoveMessage
+    public override void OnStartClient()
     {
-        position = pos,
-        rotation = rot,
-        timestamp = Time.time,
-        sequenceNumber = ++moveSequence
-    });
+        base.OnStartClient();
+        // 客户端注册消息处理器
+        // 注意：客户端处理器签名只需要消息参数（不需要 NetworkConnection）
+        NetworkClient.RegisterHandler&lt;CombatReportMessage&gt;(OnCombatReport);
+        NetworkClient.RegisterHandler&lt;PlayerMoveMessage&gt;(OnOtherPlayerMove);
+    }
+
+    void OnCombatReport(CombatReportMessage msg)
+    {
+        // 显示伤害数字、播放命中特效
+        ShowDamageNumber(msg.targetNetId, msg.damage, msg.hitPosition);
+    }
+
+    void OnOtherPlayerMove(PlayerMoveMessage msg)
+    {
+        // 更新其他玩家的位置（用于插值）
+        UpdateRemotePlayerPosition(msg);
+    }
+
+    // 客户端发送自定义消息给服务器
+    void SendMoveCommand(Vector3 pos, Vector3 rot)
+    {
+        NetworkClient.connection.Send(new PlayerMoveMessage
+        {
+            position = pos,
+            rotation = rot,
+            timestamp = Time.time,
+            sequenceNumber = ++moveSequence
+        });
+    }
+
+    int moveSequence = 0;
 }</code></pre>
 
-        <h2>5.3 消息 ID 与注册</h2>
-
-        <p>Mirror 为每种消息类型分配一个唯一的 <strong>message ID</strong>。
-        在发送和接收之前，消息必须被注册：</p>
-
-        <pre><code class="language-csharp">// 方式 1：RegisterHandler 自动注册
-NetworkServer.RegisterHandler&lt;MyMessage&gt;(Handler, replace: true);
-
-// 方式 2：手动指定 message ID
-const int MyCustomMsgId = (int)MsgType.Highest + 1;
-NetworkServer.RegisterHandler(MyCustomMsgId, Handler, authenticator);
-
-// 方式 3：在 MessagePacker 中预注册（适合大量消息）
-// Mirror 会自动为泛型 RegisterHandler&lt;T&gt; 分配 ID</code></pre>
-
-        <div class="sidebar-note">
-            <strong>为什么需要注册？</strong><br>
-            消息注册做了两件事：<br>
-            1. 建立 messageTypeId → handler 的映射表<br>
-            2. 注册序列化器（Serializer）和反序列化器（Deserializer）<br><br>
-            如果忘记注册就发送消息，Mirror 会在打包时报错："Unknown message type"。
+        <div class="callout callout-info">
+            <strong>处理器签名差异：</strong><br>
+            • 服务器端处理器：<code>void Handler(NetworkConnectionToClient conn, T msg)</code>——有连接参数<br>
+            • 客户端处理器：<code>void Handler(T msg)</code>——无连接参数<br><br>
+            这是因为客户端不需要知道消息来自哪个连接（消息只来自服务器），
+            而服务器需要知道消息来自哪个客户端连接。
         </div>
 
-        <h2>5.4 消息设计最佳实践</h2>
+        <h2>5.3 消息设计最佳实践</h2>
 
-        <h3>5.4.1 小消息优先</h3>
+        <h3>5.3.1 小消息优先</h3>
 
-        <p>每条网络消息都有头部开销（约 6-10 字节）。消息越小、越精简，带宽利用率越高：</p>
+        <p>每条网络消息都有头部开销（约 4-8 字节）。消息越小、越精简，带宽利用率越高：</p>
 
         <pre><code class="language-csharp">// ❌ 浪费：发送了整个 Transform 数据
-public class BadMoveMessage : MessageBase
+public struct BadMoveMessage : INetworkMessage
 {
-    public float x, y, z;
-    public float rx, ry, rz, rw;
-    public float scaleX, scaleY, scaleZ;
-    public int animationState;
-    public float sprintMultiplier;
-    // 总共 ~50 字节
+    public float x, y, z;        // 12 bytes
+    public float rx, ry, rz, rw; // 16 bytes
+    public float scaleX, scaleY, scaleZ; // 12 bytes
+    public int animationState;   // 4 bytes
+    public float sprintMultiplier; // 4 bytes
+    // 总共 ~48 字节
 }
 
 // ✅ 精简：只发送必要的差分数据
-public class EfficientMoveMessage : MessageBase
+public struct EfficientMoveMessage : INetworkMessage
 {
-    public int sequenceNumber;     // 4 bytes
-    public short posX, posZ;       // 4 bytes (缩放 100 倍)
-    public short rotY;             // 2 bytes
-    public byte animState;         // 1 byte
+    public int sequence;      // 4 bytes
+    public short posX, posZ;  // 4 bytes（缩放 100 倍，精度 0.01m）
+    public short rotY;        // 2 bytes（只需要 Y 轴旋转）
+    public byte animState;    // 1 byte
     // 总共 ~11 bytes
 }</code></pre>
 
-        <h3>5.4.2 使用固定精度而非浮点数</h3>
+        <h3>5.3.2 使用固定精度而非浮点数</h3>
 
-        <pre><code class="language-csharp">// ❌ float 占用 4 字节，且网络中精度可能丢失
+        <pre><code class="language-csharp">// ❌ float 占 4 字节，且浮点数在网络中可能有精度问题
 public float positionX;
 
-// ✅ 用 short 存储缩放后的坐标（精度 0.01 米）
+// ✅ 用 short 存储缩放后的坐标（精度 0.01 米，范围 ±327m）
 public short positionX_Scaled;
 
 // 转换函数
 public static short ToNetworkFloat(float value) => (short)(value * 100f);
 public static float FromNetworkShort(short value) => value / 100f;</code></pre>
 
-        <h3>5.4.3 消息分组与优先级</h3>
+        <h3>5.3.3 消息频率控制</h3>
 
-        <pre><code class="language-csharp">// 高频消息（位置同步，每帧）→ 低优先级，unreliable
-// 中频消息（技能释放，每秒几次）→ 中优先级，reliable
-// 低频消息（聊天、系统通知）→ 高优先级，reliable
+        <p>不同类型的消息需要不同的发送频率：</p>
 
-// Mirror 通过 channelId 区分
-// Channel 0: Reliable Sequenced Channel（默认，保证送达和顺序）
-// Channel 1: Unreliable Channel（不保证送达）
+        <table>
+            <thead>
+                <tr><th>消息类型</th><th>频率</th><th>传输要求</th><th>示例</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>高频位置同步</td><td>每帧 30-60 次</td><td>不可靠，丢帧可接受</td><td><code>MoveMessage</code></td></tr>
+                <tr><td>技能释放</td><td>每秒几次</td><td>可靠，必须送达</td><td><code>AttackMessage</code></td></tr>
+                <tr><td>聊天/系统通知</td><td>偶尔</td><td>可靠，有序</td><td><code>ChatMessage</code></td></tr>
+                <tr><td>状态快照</td><td>每秒 10-20 次</td><td>可靠，最新覆盖</td><td>SyncVar 自动处理</td></tr>
+            </tbody>
+        </table>
 
-// 发送 unreliable 消息
-NetworkServer.SendToAll(message, channelId: 1);
-
-// 接收 unreliable 消息时，丢弃重复/过期序列号
-void OnUnreliableMove(PlayerMoveMessage msg)
+        <pre><code class="language-csharp">// 高频消息的频率限制示例
+public class MoveSyncSystem : NetworkBehaviour
 {
-    if (msg.sequenceNumber <= lastProcessedSequence)
-        return;  // 丢弃过期消息
-    lastProcessedSequence = msg.sequenceNumber;
+    float lastSendTime;
+    float sendInterval = 1f / 30f;  // 每秒最多 30 次
+
+    void Update()
+    {
+        if (!isOwned) return;
+
+        if (Time.time - lastSendTime >= sendInterval)
+        {
+            SendMoveCommand(transform.position, transform.rotation);
+            lastSendTime = Time.time;
+        }
+    }
+
+    void SendMoveCommand(Vector3 pos, Vector3 rot)
+    {
+        NetworkClient.connection.Send(new PlayerMoveMessage
+        {
+            position = pos,
+            rotation = rot,
+            timestamp = Time.time,
+            sequenceNumber = ++moveSequence
+        });
+    }
 }</code></pre>
 
-        <h2>5.5 序列化与反序列化深度理解</h2>
+        <h2>5.4 序列化与反序列化</h2>
 
-        <p>Mirror 的消息传递依赖于序列化。理解这个过程有助于避免奇怪的 bug。</p>
+        <p>Mirror 96 的消息序列化由 Weaver（编译时代码生成器）自动处理。
+        你只需定义结构体字段，Weaver 会生成高效的序列化代码。</p>
 
-        <h3>5.5.1 Mirror 的序列化管道</h3>
+        <h3>5.4.1 Mirror 的序列化管道</h3>
 
-        <pre><code class="language-text">C# 对象
+        <pre><code class="language-text">C# 结构体
    │
    ▼
-MessagePacker.Pack()        ← 将 C# 对象序列化为 byte[]
+Weaver 生成的 Serialize()   ← 将结构体字段写入 NetworkWriter
    │
    ▼
-Transport.Send(byte[])      ← 通过 TCP/UDP/KCP 发送
+Transport.Send(byte[])        ← 通过 KCP/UDP/WebSocket 发送
    │
    ▼
-Transport.OnData(byte[])    ← 接收字节数据
+Transport.OnData(byte[])      ← 接收字节数据
    │
    ▼
-MessagePacker.Unpack&lt;T>()   ← 将 byte[] 反序列化为 C# 对象
+Weaver 生成的 Deserialize()  ← 从 NetworkReader 读取字节到结构体
    │
    ▼
-Handler(T message)          ← 业务逻辑处理</code></pre>
+Handler(T message)            ← 业务逻辑处理</code></pre>
 
-        <h3>5.5.2 常见序列化问题</h3>
+        <h3>5.4.2 支持的字段类型</h3>
+
+        <table>
+            <thead>
+                <tr><th>类型</th><th>支持</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>基本类型</td><td>✅</td><td>int, float, bool, string, byte, long 等</td></tr>
+                <tr><td>Vector2/3/4</td><td>✅</td><td>Mirror 内置支持</td></tr>
+                <tr><td>Quaternion</td><td>✅</td><td>Mirror 内置支持</td></tr>
+                <tr><td>Color / Color32</td><td>✅</td><td>Mirror 内置支持</td></tr>
+                <tr><td>Enum</td><td>✅</td><td>序列化为底层整型</td></tr>
+                <tr><td>数组</td><td>✅</td><td>支持，注意大小</td></tr>
+                <tr><td>自定义 struct（含 INetworkMessage）</td><td>✅</td><td>嵌套消息结构</td></tr>
+                <tr><td>class（引用类型）</td><td>❌</td><td>不支持，请用 struct</td></tr>
+            </tbody>
+        </table>
+
+        <h3>5.4.3 常见序列化问题</h3>
 
         <table>
             <thead>
                 <tr><th>问题</th><th>症状</th><th>解决方案</th></tr>
             </thead>
             <tbody>
-                <tr><td>消息大小超过 MTU</td><td>UDP 分包失败，TCP 头块堆积</td><td>拆分消息或使用 reliable channel</td></tr>
-                <tr><td>字段类型不匹配</td><td>反序列化后数据错乱</td><td>确保收发双方使用相同的消息结构</td></tr>
-                <tr><td>引用类型序列化</td><td>NetworkIdentity 被序列化为 netId 而非对象引用</td><td>手动在 handler 中通过 netId 查找对象</td></tr>
-                <tr><td>枚举值变更破坏兼容</td><td>旧客户端收到新消息后枚举解析错误</td><td>枚举不要删除中间值，只追加</td></tr>
+                <tr><td>消息大小过大</td><td>传输延迟增加</td><td>拆分消息，使用量化精度</td></tr>
+                <tr><td>版本不一致</td><td>反序列化后数据错乱</td><td>确保服务器和客户端使用相同的消息结构定义</td></tr>
+                <tr><td>枚举值变更</td><td>旧客户端解析错误</td><td>枚举只追加不删除中间值</td></tr>
+                <tr><td>忘记注册</td><td>"Unknown message type" 错误</td><td>发送前调用 RegisterHandler</td></tr>
             </tbody>
         </table>
 
-        <h2>5.6 实战：设计一个消息系统</h2>
+        <h2>5.5 实战：设计一个消息系统</h2>
 
         <p>让我们为一个多人竞技游戏设计完整的消息系统：</p>
 
         <pre><code class="language-csharp">// ==================== 消息定义 ====================
 
-public enum MessageType
-{
-    Move = 1,
-    Attack,
-    Skill,
-    Chat,
-    ScoreUpdate,
-    GameState
-}
-
-[Message(MessageType.Move)]
-public class MoveMessage : MessageBase
+public struct MoveMessage : INetworkMessage
 {
     public int sequence;
     public short inputX, inputY;  // 输入方向，缩放 1000 倍
     public float timestamp;
 }
 
-[Message(MessageType.Attack)]
-public class AttackMessage : MessageBase
+public struct AttackMessage : INetworkMessage
 {
     public int weaponId;
     public short aimX, aimY, aimZ;  // 瞄准方向，量化
     public float timestamp;
 }
 
-[Message(MessageType.Chat)]
-public class ChatMessage : MessageBase
+public struct ChatMessage : INetworkMessage
 {
     public string senderName;
     public string content;
@@ -410,21 +580,22 @@ public class ChatMessage : MessageBase
 }
 
 public enum ChatType { All = 0, Team = 1, Whisper = 2 }
-public enum WhisperTarget { None = 0, Player1 = 1, Player2 = 2 }
 
 // ==================== 消息路由 ====================
 
 public class MessageRouter : NetworkBehaviour
 {
-    void OnStartServer()
+    public override void OnStartServer()
     {
+        base.OnStartServer();
         // 注册所有消息处理器
-        NetworkServer.RegisterHandler&lt;MoveMessage&gt;(OnMove, replace: true);
-        NetworkServer.RegisterHandler&lt;AttackMessage&gt;(OnAttack, replace: true);
-        NetworkServer.RegisterHandler&lt;ChatMessage&gt;(OnChat, replace: true);
+        NetworkServer.RegisterHandler&lt;MoveMessage&gt;(OnMove);
+        NetworkServer.RegisterHandler&lt;AttackMessage&gt;(OnAttack);
+        NetworkServer.RegisterHandler&lt;ChatMessage&gt;(OnChat);
     }
 
-    void OnMove(NetworkConnection conn, MoveMessage msg)
+    // 移动消息：高频，需要频率限制
+    void OnMove(NetworkConnectionToClient conn, MoveMessage msg)
     {
         // 频率限制：每秒最多 30 条移动消息
         if (Time.time - conn.lastMoveTime &lt; 1f / 30f) return;
@@ -432,71 +603,122 @@ public class MessageRouter : NetworkBehaviour
 
         // 处理移动输入
         Vector2 input = new Vector2(msg.inputX / 1000f, msg.inputY / 1000f);
-        ProcessPlayerInput(conn.player, input, msg.sequence);
+        ProcessPlayerInput(conn, input, msg.sequence);
     }
 
-    void OnAttack(NetworkConnection conn, AttackMessage msg)
+    // 攻击消息：中频，需要冷却限制
+    void OnAttack(NetworkConnectionToClient conn, AttackMessage msg)
     {
         // 冷却限制
         if (Time.time - conn.lastAttackTime &lt; 0.2f) return;
         conn.lastAttackTime = Time.time;
 
         // 执行攻击
-        ExecuteAttack(conn.player, msg);
-    }
-}</code></pre>
-
-        <h2>5.7 消息调试工具</h2>
-
-        <pre><code class="language-csharp">// 拦截并打印所有消息流量
-public class MessageDebugger : MonoBehaviour
-{
-    void Start()
-    {
-        // 服务器端：拦截所有入站消息
-        NetworkServer.RegisterHandler&lt;MessageBase&gt;(OnDebugMessage, replace: true);
+        ExecuteAttack(conn, msg);
     }
 
-    void OnDebugMessage(NetworkConnection conn, MessageBase msg)
+    // 聊天消息：低频，需要内容验证
+    void OnChat(NetworkConnectionToClient conn, ChatMessage msg)
     {
-        Debug.Log($"[MSG] 来自 {conn.userId}: {msg.GetType().Name} @ {Time.time}");
+        // 内容过滤
+        if (string.IsNullOrEmpty(msg.content)) return;
+        if (msg.content.Length > 256) return;
 
-        // 可选：转发到原始处理器
-        // 但这需要维护一个 handler 链
-    }
-}
-
-// 统计消息频率
-public class BandwidthMonitor : MonoBehaviour
-{
-    long bytesReceived = 0;
-    long bytesSent = 0;
-    float lastCheckTime = 0;
-
-    void Update()
-    {
-        float elapsed = Time.time - lastCheckTime;
-        if (elapsed &gt; 1f)
+        // 广播给所有客户端
+        foreach (var kvp in NetworkServer.connections)
         {
-            float recvBps = (bytesReceived * 8) / elapsed;
-            float sentBps = (bytesSent * 8) / elapsed;
-            Debug.Log($"带宽: 收 {recvBps / 1024:F1} KB/s 发 {sentBps / 1024:F1} KB/s");
-
-            bytesReceived = 0;
-            bytesSent = 0;
-            lastCheckTime = Time.time;
+            kvp.Value.Send(msg);
         }
     }
+
+    void ProcessPlayerInput(NetworkConnectionToClient conn, Vector2 input, int sequence)
+    {
+        if (conn.identity == null) return;
+        var controller = conn.identity.GetComponent&lt;PlayerController&gt;();
+        if (controller != null)
+        {
+            controller.ApplyInput(input, sequence);
+        }
+    }
+
+    void ExecuteAttack(NetworkConnectionToClient conn, AttackMessage msg)
+    {
+        if (conn.identity == null) return;
+        // 攻击逻辑...
+    }
 }</code></pre>
 
-        <h2>5.8 本章小结</h2>
+        <div class="callout callout-info">
+            <strong>消息 vs RPC 的选择：</strong><br>
+            • 用 <strong>RPC</strong>（<code>[Command]</code> / <code>[ClientRpc]</code>）当通信绑定在特定网络对象上——
+            Mirror 会自动处理对象序列化和路由。<br>
+            • 用 <strong>自定义消息</strong>当通信是全局性的——
+            不绑定特定对象（如聊天消息、全局事件通知、登录认证）。<br><br>
+            大多数情况下，RPC 更简单、更安全。只在 RPC 不适用的场景才使用自定义消息。
+        </div>
 
-        <ul>
-            <li><strong>SyncList</strong> 是 Mirror 提供的同步集合类型，适用于简单的列表数据同步</li>
-            <li><strong>自定义 NetworkMessage</strong> 让你可以定义任意结构的数据传输，适合复杂场景</li>
-            <li>消息设计要遵循<strong>小消息优先、固定精度、频率控制</strong>原则</li>
-            <li>理解序列化管道有助于排查数据错乱、消息丢失等问题</li>
-        </ul>
+        <h2>5.6 调试消息</h2>
+
+        <pre><code class="language-csharp">// 注册调试消息处理器
+public class MessageDebugger : NetworkBehaviour
+{
+    public override void OnStartServer()
+    {
+        base.OnStartServer();
+        // 注册特定消息类型进行调试
+        NetworkServer.RegisterHandler&lt;MoveMessage&gt;((conn, msg) =>
+        {
+            Debug.Log($"[MSG-Debug] 来自 {conn.connectionId}: MoveMessage " +
+                      $"seq={msg.sequence} pos=({msg.inputX},{msg.inputY})");
+            // 注意：注册后会覆盖原有处理器
+            // 如需同时处理，在方法内调用原始处理逻辑
+        });
+    }
+
+    public override void OnStartClient()
+    {
+        base.OnStartClient();
+        NetworkClient.RegisterHandler&lt;MoveMessage&gt;(msg =>
+        {
+            Debug.Log($"[Client MSG-Debug] 收到 MoveMessage seq={msg.sequence}");
+        });
+    }
+}</code></pre>
+
+        <h2>5.7 本章小结</h2>
+
+        <table>
+            <thead>
+                <tr><th>机制</th><th>适用场景</th><th>Mirror 96 API</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>SyncVar</td>
+                    <td>单个值同步</td>
+                    <td><code>[SyncVar(hook = nameof(Hook))]</code>，双参数 hook</td>
+                </tr>
+                <tr>
+                    <td>SyncList&lt;T&gt;</td>
+                    <td>列表同步</td>
+                    <td>泛型 + 事件回调 (<code>OnAdd</code> / <code>OnSet</code> 等)</td>
+                </tr>
+                <tr>
+                    <td>SyncDictionary&lt;K,V&gt;</td>
+                    <td>键值对同步</td>
+                    <td>泛型 + 事件回调</td>
+                </tr>
+                <tr>
+                    <td>自定义消息</td>
+                    <td>一次性事件、全局通知</td>
+                    <td><code>struct : INetworkMessage</code> + <code>RegisterHandler&lt;T&gt;</code></td>
+                </tr>
+                <tr>
+                    <td>RPC</td>
+                    <td>绑定对象的方法调用</td>
+                    <td><code>[Command]</code> / <code>[ClientRpc]</code> / <code>[TargetRpc]</code></td>
+                </tr>
+            </tbody>
+        </table>
 
         <p>下一章，我们将深入传输层——理解 Mirror 如何在 TCP/UDP/KCP 之间选择，以及如何自定义 Transport。</p>
 
@@ -509,27 +731,34 @@ public class BandwidthMonitor : MonoBehaviour
                     <li><strong>设计题：</strong>你需要同步一个玩家的装备栏，包含 20 个格子，每个格子有物品 ID 和数量。
                     你会用 SyncList 还是自定义消息？如何设计？</li>
                     <li><strong>代码找错：</strong>以下代码有什么问题？
-                        <pre><code class="language-csharp">[Command]
-public void CmdSendChat(string message)
+                        <pre><code class="language-csharp">public SyncListString itemNames = new SyncListString();
+
+void OnItemAdded(Operation op, int index, string item)
 {
-    RpcChatMessage(message);  // 从 Command 内部调用 Rpc
+    Debug.Log($"新增: {item}");
 }</code></pre>
                     </li>
                     <li><strong>推理题：</strong>如果服务器和客户端对同一个 enum 的定义不一致（服务器新增了值），
                     会发生什么？如何避免？</li>
+                    <li><strong>Mirror 96 变化题：</strong>旧代码使用了
+                    <code>public class MyMessage : MessageBase</code>。
+                    在 Mirror 96 中应该怎么修改？有什么好处？</li>
                 </ol>
 
                 <div class="callout callout-tip">
-                    <strong>参考答案：</strong>
-                    1) 两者皆可。SyncList 简单但不够灵活（无法存储复合对象）。
-                    推荐用自定义消息：EquippedItemsMessage { List&lt;ItemSlot&gt; slots }，
-                    其中 ItemSlot { int itemId, int count }。
-                    2) 这在技术上是可行的（Command 内部可以调 Rpc），但要注意：
-                    Command 在服务端执行，Rpc 从服务端发出，这是正确的流向。
-                    但如果 Cmd 方法中有 return 或 early exit，Rpc 可能不会执行——
-                    应该改为在服务端直接调用 Rpc 方法，而不是通过 [Command] 包装。
+                    <strong>参考答案：</strong><br>
+                    1) 用 <code>SyncList&lt;ItemSlot&gt;</code>，其中 <code>ItemSlot</code> 是结构体
+                    <code>{ int itemId; int count; }</code>。SyncList 会自动同步增删改，
+                    通过 <code>OnSet</code> 事件更新 UI。比自定义消息更简单——不需要手动处理序列化和注册。<br><br>
+                    2) 两个错误：① <code>SyncListString</code> 在 Mirror 96 中已移除，
+                    应改为 <code>SyncList&lt;string&gt;</code>；
+                    ② <code>Operation</code> 枚举和 <code>Callback</code> 属性已被事件回调取代，
+                    应使用 <code>itemNames.OnAdd += (index, item) => { ... }</code>。<br><br>
                     3) 客户端可能将未知枚举值解析为默认值（0），导致行为异常。
-                    避免方法：enum 只追加不修改；或在消息中加入版本号字段。
+                    避免方法：枚举只追加不修改；或在消息中加入版本号字段进行兼容性检查。<br><br>
+                    4) 应改为 <code>public struct MyMessage : INetworkMessage</code>。
+                    好处：值类型避免 GC 压力；Weaver 自动生成序列化代码，无需手写
+                    <code>Serialize</code> / <code>Deserialize</code>。
                 </div>
             </div>
         </details>

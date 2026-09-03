@@ -24,6 +24,16 @@
             本章将系统讲解 Mirror 提供的所有通信方式，以及它们各自的设计意图和适用场景。
         </p>
 
+        <div class="callout callout-info">
+            <strong>Mirror 96 API 更新</strong><br>
+            本章已全面适配 Mirror 96.x。主要变化包括：
+            <code>[Command]</code>/<code>[ClientRpc]</code> 方法前缀（Cmd/Rpc）从<strong>必需变为可选</strong>；
+            SyncVar hook 签名统一为<strong>双参数</strong> <code>(T oldValue, T newValue)</code>；
+            <code>[ServerCallback]</code>/<code>[ClientCallback]</code> 语义修正（与 <code>[Server]</code>/<code>[Client]</code> 相同，仅日志行为不同）；
+            新增 <code>requiresAuthority</code> 和 <code>includeOwner</code> 选项；
+            <code>hasAuthority</code> 已更名为 <code>isOwned</code>。
+        </div>
+
         <h2>3.1 RPC 的本质：远程过程调用</h2>
 
         <p>RPC（Remote Procedure Call）的核心思想很简单：<strong>在 A 机器上调用方法，但实际执行在 B 机器上</strong>。</p>
@@ -38,9 +48,9 @@ enemy.TakeDamage(50);  // 同一进程内，立即执行</code></pre>
 
         <pre><code class="language-text">客户端                          服务器
   |                                |
-  |--- CmdTakeDamage(50) --------->|  (序列化消息 + 发送)
-  |                                |--- enemy.TakeDamage(50)  (反序列化 + 执行)
-  |<<< ClientRpc_UpdateHealth() ---|  (结果回传)</code></pre>
+  |--- CmdAttack() --------------->|  (序列化消息 + 发送)
+  |                                |--- PerformAttack()  (反序列化 + 执行)
+  |<<< RpcPlayEffect() ------------|  (结果广播)</code></pre>
 
         <h2>3.2 [Command]：客户端 → 服务器</h2>
 
@@ -48,34 +58,99 @@ enemy.TakeDamage(50);  // 同一进程内，立即执行</code></pre>
 
         <pre><code class="language-csharp">public class PlayerController : NetworkBehaviour
 {
+    // [Command] 方法前缀 Cmd 在 Mirror 96 中是可选的（旧版为必需）
+    // 但保留前缀仍然是推荐约定——便于在代码中区分 RPC 和普通方法
     [Command]
     public void CmdAttack()
     {
-        // 这段代码在<strong>服务器</strong>上执行
-        Debug.Log($"玩家 {connectionToServer.player.netId} 发起了攻击");
+        // 这段代码在服务器上执行
+        Debug.Log($"玩家 {connectionToClient} 发起了攻击");
 
         // 执行攻击逻辑
         PerformAttack();
 
         // 通知所有客户端攻击结果
-        RpcOnAttack();
+        RpcPlayAttackEffect();
     }
 
-    // 注意：[Command] 方法名必须以 Cmd 开头（约定）
-    // 注意：不能是 static
-    // 注意：不能有 return value（ RPC 是 fire-and-forget ）
+    // Mirror 96 也允许不加前缀（不推荐，但合法）
+    [Command]
+    public void AttackNoPrefix()
+    {
+        // 同样合法，但代码可读性下降
+    }
 }</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>Mirror 96 命名约定变化</strong><br>
+            在 Mirror 96 之前，<code>[Command]</code> 方法<strong>必须</strong>以 <code>Cmd</code> 开头，
+            <code>[ClientRpc]</code> 方法<strong>必须</strong>以 <code>Rpc</code> 开头，否则编译报错。
+            <br><br>
+            Mirror 96 将此约束<strong>改为可选</strong>——Mirror 通过特性（Attribute）而非方法名前缀来识别 RPC。
+            但作为代码规范，<strong>强烈建议保留前缀</strong>，因为：
+            <ul>
+                <li>代码可读性：<code>CmdAttack</code> 一眼就能看出是客户端→服务器的调用</li>
+                <li>团队协作：前缀是通用的网络编程约定</li>
+                <li>搜索友好：<code>grep "Cmd"</code> 可以快速找到所有 Command 方法</li>
+            </ul>
+        </div>
 
         <div class="callout callout-info">
             <strong>[Command] 的执行流程：</strong><br>
             1. 客户端调用 <code>CmdAttack()</code><br>
-            2. Mirror 拦截调用，序列化为 <code>RpcAttackMessage</code><br>
+            2. Mirror 拦截调用，序列化为网络消息<br>
             3. 通过 Transport 发送到服务器<br>
-            4. 服务器反序列化，在对应的 NetworkBehaviour 实例上执行 <code>CmdAttack()</code><br>
-            5. 服务器端的 <code>isServer</code> 为 true，所以逻辑在服务端运行
+            4. 服务器反序列化，在对应的 NetworkBehaviour 实例上执行方法体<br>
+            5. 服务器端的 <code>isServer</code> 为 true，逻辑在服务端运行
         </div>
 
-        <h3>3.2.1 Command 的参数限制</h3>
+        <h3>3.2.1 requiresAuthority 选项</h3>
+
+        <p>默认情况下，<code>[Command]</code> 要求调用方客户端拥有此对象的控制权（<code>isOwned == true</code>）。
+        如果没有控制权，调用会被静默丢弃。但在某些场景下，你需要让没有控制权的客户端也能调用 Command——
+        例如世界中的交互物体（按钮、宝箱）：</p>
+
+        <pre><code class="language-csharp">public class InteractableObject : NetworkBehaviour
+{
+    // requiresAuthority = false 允许任何客户端调用此 Command
+    // 适用于：不归属于特定玩家的对象，如场景中的门、宝箱、开关
+    [Command(requiresAuthority = false)]
+    public void CmdInteract(uint interactorNetId)
+    {
+        // 即使调用方不拥有此对象，Command 也能执行
+        // 注意：此时需要通过参数传入交互者的 netId 来识别是谁触发的
+        if (NetworkServer.spawned.TryGetValue(interactorNetId, out var identity))
+        {
+            Debug.Log($"{identity.name} 与 {name} 交互");
+            OpenChest();
+        }
+    }
+}</code></pre>
+
+        <h3>3.2.2 Command 的 sender 参数</h3>
+
+        <p>当使用 <code>requiresAuthority = false</code> 时，你可能需要知道是哪个客户端发送的 Command。
+        Mirror 96 支持在 Command 方法中添加一个可选的 <code>NetworkConnectionToClient sender = null</code> 参数，
+        Mirror 会自动填充发送方连接：</p>
+
+        <pre><code class="language-csharp">[Command(requiresAuthority = false)]
+public void CmdPickupItem(int itemId, NetworkConnectionToClient sender = null)
+{
+    // sender 由 Mirror 自动填充——指向发起此 Command 的客户端连接
+    if (sender != null)
+    {
+        Debug.Log($"客户端 {sender.connectionId} 请求拾取物品 {itemId}");
+        // 验证 + 执行逻辑
+    }
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>参数位置规则：</strong><code>NetworkConnectionToClient sender = null</code> 必须是方法的<strong>最后一个参数</strong>，
+            且必须有默认值 <code>= null</code>。Mirror 会在服务器端自动注入实际的连接对象。
+            这个参数对调用方是透明的——客户端调用时不传此参数。
+        </div>
+
+        <h3>3.2.3 Command 的参数限制</h3>
 
         <p>由于参数需要被序列化为网络消息，[Command] 方法的参数有严格限制：</p>
 
@@ -88,45 +163,73 @@ enemy.TakeDamage(50);  // 同一进程内，立即执行</code></pre>
                 <tr><td>Vector3 / Quaternion</td><td>✅</td><td>Mirror 内置支持</td></tr>
                 <tr><td>Enum</td><td>✅</td><td>序列化为底层整型</td></tr>
                 <tr><td>NetworkIdentity</td><td>✅</td><td>序列化为 netId</td></tr>
-                <tr><td>自定义 struct</td><td>✅</td><td>需可序列化</td></tr>
+                <tr><td>GameObject（带 NetworkIdentity）</td><td>✅</td><td>序列化为 netId</td></tr>
+                <tr><td>自定义 struct（实现 NetworkMessage）</td><td>✅</td><td>需可序列化</td></tr>
                 <tr><td>class（非 NetworkBehaviour）</td><td>❌</td><td>无法可靠序列化</td></tr>
-                <tr><td>数组 / List</td><td>⚠️</td><td>支持固定大小数组，List 需小心大小</td></tr>
+                <tr><td>数组</td><td>✅</td><td>支持，但注意大小——大数组消耗带宽</td></tr>
                 <tr><td>返回值</td><td>❌</td><td>Command 是单向的，不能返回数值</td></tr>
             </tbody>
         </table>
 
-        <h3>3.2.2 [ServerCallback]：被废弃的 Command 替代方案</h3>
+        <h3>3.2.4 [Server] 和 [ServerCallback]：方法执行端验证</h3>
 
-        <p>Mirror 后期版本引入了 <code>[ServerCallback]</code> 作为 Command 的补充：</p>
+        <p>除了 <code>[Command]</code>，Mirror 还提供了 <code>[Server]</code> 和 <code>[ServerCallback]</code> 特性。
+        它们的作用是<strong>确保方法只在服务器端执行</strong>——如果在客户端调用，直接跳过不执行。</p>
+
+        <div class="callout callout-danger">
+            <strong>Mirror 96 语义修正（重要）</strong><br>
+            旧版教程常将 <code>[ServerCallback]</code> 描述为"跳过网络层的本地调用"——这是<strong>完全错误</strong>的。
+            <br><br>
+            实际语义：
+            <ul>
+                <li><code>[Server]</code>：如果当前不是服务器，<strong>不执行</strong>并输出一条警告日志</li>
+                <li><code>[ServerCallback]</code>：如果当前不是服务器，<strong>不执行</strong>但<strong>不输出警告</strong></li>
+            </ul>
+            两者行为<strong>完全相同</strong>，唯一区别是是否在 Console 中打印警告。
+            它们都不是 RPC——不会发送网络消息，只是本地的方法守卫（guard）。
+        </div>
 
         <pre><code class="language-csharp">public class WeaponSystem : NetworkBehaviour
 {
-    // [Command] 会经过网络序列化 → 服务器反序列化 → 执行
-    // [ServerCallback] 跳过网络层，直接在服务器执行
-    // 适用于"本地客户端请求服务器执行"的场景
-
-    [ServerCallback]
-    public void ServerOnlyMethod()
+    // [Server]：非服务器调用时跳过 + 打印警告
+    [Server]
+    public void ServerReload()
     {
-        // 只在服务器执行，不走网络
-        // 只能在 hasAuthority 的客户端上调用
+        // 只有服务器端才会执行到这里
+        // 如果客户端调用了此方法，会跳过并打印警告
+        ammo = maxAmmo;
     }
 
+    // [ServerCallback]：非服务器调用时跳过 + 不打印警告
+    // 适合在 Unity 回调方法（如 OnTriggerEnter）中使用
+    // 因为这些回调在所有端都会触发，不需要看到满屏警告
+    [ServerCallback]
+    void OnTriggerEnter(Collider other)
+    {
+        // 只在服务器端执行碰撞处理
+        if (other.CompareTag("Pickup"))
+        {
+            CollectPickup(other.gameObject);
+        }
+    }
+
+    // 同理：
+    // [Client]：非客户端调用时跳过 + 打印警告
+    // [ClientCallback]：非客户端调用时跳过 + 不打印警告
+    [ClientCallback]
     void Update()
     {
-        if (hasAuthority && Input.GetKeyDown(KeyCode.Space))
-        {
-            // 本地客户端直接调用，不经过网络
-            ServerReloadWeapon();
-        }
+        // 只在客户端执行（服务器跳过，不打印警告）
+        if (!isOwned) return;
+        HandleInput();
     }
 }</code></pre>
 
         <div class="sidebar-note">
-            <strong>Command vs ServerCallback 的选择：</strong><br>
-            • <code>[Command]</code>：需要经过网络层，服务器能收到消息、做验证、记录日志。适合"客户端请求服务器执行某事"。<br>
-            • <code>[ServerCallback]</code>：不走网络序列化，性能更好，但服务器无法区分请求来自哪个客户端（因为是本地调用）。适合"本地客户端帮服务器做预处理"。<br><br>
-            新手建议统一用 <code>[Command]</code>——它更透明、更容易调试。
+            <strong>选择指南：[Command] vs [Server]</strong><br>
+            • <code>[Command]</code>：客户端通过<strong>网络</strong>请求服务器执行某操作。消息会发送到服务器，服务器能知道是谁发的。<br>
+            • <code>[Server]</code> / <code>[ServerCallback]</code>：方法只在服务器<strong>本地</strong>执行。不发网络消息，通常用于 Unity 回调或服务器内部逻辑。<br><br>
+            简单记忆：<code>[Command]</code> = 跨网络请求；<code>[Server]</code> = 本地守卫。
         </div>
 
         <h2>3.3 [ClientRpc]：服务器 → 所有客户端</h2>
@@ -135,13 +238,14 @@ enemy.TakeDamage(50);  // 同一进程内，立即执行</code></pre>
 
         <pre><code class="language-csharp">public class PlayerController : NetworkBehaviour
 {
+    // [ClientRpc] 方法前缀 Rpc 在 Mirror 96 中是可选的
     [ClientRpc]
     public void RpcPlayShootEffect(Vector3 direction)
     {
-        // 这段代码在<strong>每个客户端</strong>上执行
+        // 这段代码在每个客户端上执行
         // 通常只修改视觉/听觉表现，不改游戏逻辑
         Instantiate(shootPrefab, transform.position, Quaternion.identity);
-        AudioSource.PlaySound(shootClip);
+        AudioSource.PlayClipAt(shootClip, transform.position);
     }
 
     // 服务器端调用
@@ -154,47 +258,76 @@ enemy.TakeDamage(50);  // 同一进程内，立即执行</code></pre>
     }
 }</code></pre>
 
-        <h3>3.3.1 Rpc 参数限制</h3>
+        <h3>3.3.1 includeOwner 选项</h3>
 
-        <p>与 Command 相同，Rpc 方法的参数也需要可序列化。
-        另外注意：<strong>Rpc 方法不需要 Cmd/Rpc 前缀约定</strong>——只要在服务器上调用，
-        Mirror 就会自动将其作为 Rpc 发送给客户端。</p>
+        <p>默认情况下，<code>[ClientRpc]</code> 会发送给<strong>所有</strong>已连接的客户端，包括拥有此对象的客户端（Owner）。
+        如果你不需要 Owner 收到此 RPC（因为 Owner 可能已经在本地处理了），可以使用 <code>includeOwner = false</code>：</p>
+
+        <pre><code class="language-csharp">public class PlayerController : NetworkBehaviour
+{
+    [ClientRpc(includeOwner = false)]
+    public void RpcShowDamageIndicator(int targetNetId, int damage)
+    {
+        // 只在其他客户端上执行，拥有此对象的客户端不会收到
+        // 适合：Owner 已经在本地直接显示了伤害，不需要再通过 RPC 重复处理
+        if (NetworkClient.spawned.TryGetValue(targetNetId, out var identity))
+        {
+            DamageUI.Show(identity.transform.position, damage);
+        }
+    }
+}</code></pre>
+
+        <div class="callout callout-info">
+            <strong>includeOwner = false 的使用场景：</strong><br>
+            • Owner 已经在本地处理了视觉效果（如本地摄像机震动），不需要 RPC 重复<br>
+            • 减少不必要的网络消息（Owner 的那条消息省了）<br>
+            • 注意：在 Host 模式下，Owner 也是服务器，使用此选项时 RPC 不会在 Host 客户端执行
+        </div>
 
         <h2>3.4 [TargetRpc]：服务器 → 指定客户端</h2>
 
-        <p>当你只想通知<strong>某一个特定客户端</strong>时，使用 TargetRpc：</p>
+        <p>当你只想通知<strong>某一个特定客户端</strong>时，使用 <code>[TargetRpc]</code>：</p>
 
         <pre><code class="language-csharp">public class InventorySystem : NetworkBehaviour
 {
-    // 服务器告诉"拥有这个背包的玩家"更新 UI
+    // [TargetRpc] 可以接受一个 NetworkConnection 参数来指定目标客户端
+    // Mirror 96 中：第一个参数如果是 NetworkConnection 类型，则作为目标连接
     [TargetRpc]
-    public void TargetUpdateInventoryUI(List&lt;string&gt; items)
+    public void TargetUpdateInventoryUI(NetworkConnection target, ItemData[] items)
     {
-        // 只在目标客户端上执行
+        // 只在 target 指定的客户端上执行
         UpdateUI(items);
     }
 
     // 服务器端调用
-    public void RefreshInventory(NetworkConnection target)
+    public void RefreshInventory(NetworkConnectionToClient conn)
     {
-        List<string> myItems = GetMyItems();
-        TargetUpdateInventoryUI(myItems);  // 只发给 target 这个客户端
+        ItemData[] myItems = GetItems();
+        // 只发给 conn 这个特定客户端
+        TargetUpdateInventoryUI(conn, myItems);
     }
 }</code></pre>
 
-        <h2>3.5 三种 RPC 对比速查表</h2>
+        <div class="callout callout-info">
+            <strong>TargetRpc 的 Connection 参数规则：</strong><br>
+            • 如果方法的第一个参数是 <code>NetworkConnection</code> 类型，它被用作<strong>目标连接</strong>，不会被序列化发送<br>
+            • 如果第一个参数不是 <code>NetworkConnection</code>，Mirror 会默认发送给拥有此对象的客户端连接<br>
+            • 调用时，<code>NetworkConnection</code> 参数由服务器端传入，其他参数会被序列化
+        </div>
+
+        <h2>3.5 四种 RPC 对比速查表</h2>
 
         <table>
             <thead>
-                <tr><th>特性</th><th>[Command]</th><th>[ClientRpc]</th><th>[TargetRpc]</th></tr>
+                <tr><th>特性</th><th>[Command]</th><th>[ClientRpc]</th><th>[TargetRpc]</th><th>[Server]/[ServerCallback]</th></tr>
             </thead>
             <tbody>
-                <tr><td>方向</td><td>客户端 → 服务器</td><td>服务器 → 所有客户端</td><td>服务器 → 指定客户端</td></tr>
-                <tr><td>调用方</td><td>客户端</td><td>服务器</td><td>服务器</td></tr>
-                <tr><td>接收方</td><td>服务器</td><td>所有已连接的客户端</td><td>指定的 NetworkConnection</td></tr>
-                <tr><td>命名约定</td><td>方法名前加 Cmd</td><td>无强制约定</td><td>无强制约定</td></tr>
-                <tr><td>典型用途</td><td>发送输入、请求操作</td><td>广播事件（死亡、得分）</td><td>私有通知（UI 更新）</td></tr>
-                <tr><td>带宽消耗</td><td>1 条消息</td><td>N 条消息（N = 客户端数）</td><td>1 条消息</td></tr>
+                <tr><td>方向</td><td>客户端 → 服务器</td><td>服务器 → 所有客户端</td><td>服务器 → 指定客户端</td><td>本地守卫（非 RPC）</td></tr>
+                <tr><td>是否走网络</td><td>✅ 序列化+发送</td><td>✅ 序列化+发送</td><td>✅ 序列化+发送</td><td>❌ 纯本地判断</td></tr>
+                <tr><td>命名前缀</td><td>Cmd（可选）</td><td>Rpc（可选）</td><td>Target（可选）</td><td>无前缀要求</td></tr>
+                <tr><td>Mirror 96 新选项</td><td><code>requiresAuthority = false</code></td><td><code>includeOwner = false</code></td><td>自动识别 Connection 参数</td><td>—</td></tr>
+                <tr><td>典型用途</td><td>发送输入、请求操作</td><td>广播事件（死亡、得分）</td><td>私有通知（UI 更新）</td><td>Unity 回调守卫</td></tr>
+                <tr><td>带宽消耗</td><td>1 条消息</td><td>N 条（N = 客户端数）</td><td>1 条消息</td><td>0</td></tr>
             </tbody>
         </table>
 
@@ -205,14 +338,21 @@ enemy.TakeDamage(50);  // 同一进程内，立即执行</code></pre>
         <pre><code class="language-csharp">public class HealthSystem : NetworkBehaviour
 {
     // 服务器修改 health 后，新值自动同步到所有客户端
-    [SyncVar(hook = "OnHealthChanged")]
+    // hook 指定一个回调方法，在值变化时被调用
+    [SyncVar(hook = nameof(OnHealthChanged))]
     public int health = 100;
 
-    // hook 方法会在每次 health 值变化时自动调用
-    // 这让你可以在同步时触发 UI 更新、动画等
-    void OnHealthChanged(int newHealth)
+    // Mirror 96 中，hook 方法签名必须是双参数：(旧值, 新值)
+    // 旧值 = 变更前的 SyncVar 值
+    // 新值 = 变更后的 SyncVar 值
+    void OnHealthChanged(int oldHealth, int newHealth)
     {
         UpdateHealthBar(newHealth);
+
+        // 可以利用旧值做差值动画
+        int delta = newHealth - oldHealth;
+        if (delta < 0)
+            ShowDamageIndicator(-delta);
     }
 
     // 服务器端：扣血
@@ -221,63 +361,90 @@ enemy.TakeDamage(50);  // 同一进程内，立即执行</code></pre>
         if (!isServer) return;
 
         health -= amount;  // 修改 SyncVar → 自动同步
-        // OnHealthChanged 在每个客户端自动被调用
+        // hook 方法在所有客户端（以及服务器自己）上自动被调用
 
         if (health <= 0)
             Die();
     }
 }</code></pre>
 
+        <div class="callout callout-warning">
+            <strong>Mirror 96 SyncVar Hook 签名变化</strong><br>
+            在 Mirror 96 中，SyncVar hook 方法<strong>必须</strong>是双参数签名：<code>(T oldValue, T newValue)</code>。
+            <br><br>
+            旧写法（已过时）：
+            <pre><code class="language-csharp">// ❌ 单参数 hook 在 Mirror 96 中不再被支持
+[SyncVar(hook = "OnHealthChanged")]
+public int health = 100;
+void OnHealthChanged(int newHealth) { ... }  // 编译报错</code></pre>
+            正确写法：
+            <pre><code class="language-csharp">// ✅ 双参数 hook
+[SyncVar(hook = nameof(OnHealthChanged))]
+public int health = 100;
+void OnHealthChanged(int oldHealth, int newHealth) { ... }</code></pre>
+            hook 还支持使用 <code>nameof()</code> 运算符引用方法名（比字符串更安全，支持重构）。
+        </div>
+
         <h3>3.6.1 SyncVar 的工作原理</h3>
 
-        <p>很多人误以为 SyncVar 是"变量值通过网络发送"。实际上它的机制更精细：</p>
+        <p>很多人误以为 SyncVar 是"变量值通过网络即时发送"。实际上它的机制更精细：</p>
 
         <div class="steps">
             <div class="step">
                 <div class="step-number">1</div>
                 <div class="step-content">
                     <h4>服务器修改 SyncVar 字段</h4>
-                    <p>Mirror 在序列化时会跟踪哪些 SyncVar 发生了变化。</p>
+                    <p>Mirror 在内部标记该 SyncVar 为"脏"（dirty），并记录新值。
+                    同时在<strong>服务器端</strong>也调用 hook 方法（旧值 → 新值）。</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-number">2</div>
                 <div class="step-content">
                     <h4>每帧打包变更</h4>
-                    <p>服务器每帧将所有发生变化的 SyncVar 打包到一个状态快照中发送。</p>
+                    <p>服务器在每个同步间隔（通常每帧或每几帧）将所有"脏"SyncVar 打包到一个状态快照中发送。
+                    如果同一 SyncVar 在一帧内被修改多次，<strong>只发送最终值</strong>。</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-number">3</div>
                 <div class="step-content">
                     <h4>客户端应用变更</h4>
-                    <p>客户端收到后，按顺序应用变更，并调用 hook 方法。</p>
+                    <p>客户端收到后，将旧值保存，设置新值，然后调用 hook 方法（旧值 → 新值）。
+                    hook 在<strong>值已经被设置之后</strong>才调用。</p>
                 </div>
             </div>
         </div>
 
         <div class="callout callout-tip">
-            <strong>关键理解：</strong>SyncVar 的变化不是"即时发送"的。它们在服务器每帧结束时批量打包，
-            然后通过 <code>UpdateVars</code> 消息发送给客户端。这意味着 SyncVar 同步有一帧的延迟（在 60fps 下约 16ms）。
+            <strong>关键理解：</strong>SyncVar 的变化不是"即时发送"的。它们在服务器批量打包后发送。
+            这意味着 SyncVar 同步有<strong>一帧的延迟</strong>（在 60fps 下约 16ms）。
             对于大多数场景这个延迟完全可以接受，但对于高精度同步需求需要考虑这一点。
+            <br><br>
+            另外，Mirror 96 会对 SyncVar 做<strong>去重</strong>——如果一帧内修改了同一个 SyncVar 多次，只发送最后一次的值，
+            hook 也只调用一次。这比手动发 RPC 高效得多。
         </div>
 
-        <h3>3.6.2 SyncVar 的钩子（Hook）机制</h3>
+        <h3>3.6.2 SyncVar Hook 的调用时机</h3>
 
-        <p>Hook 方法是 SyncVar 最有价值的特性之一。它让你在值变化时自动执行回调：</p>
+        <p>理解 hook 在<strong>何时</strong>被调用至关重要：</p>
 
-        <pre><code class="language-csharp">[SyncVar(hook = nameof(OnArmorChanged))]
-public int armor = 0;
+        <table>
+            <thead>
+                <tr><th>调用场景</th><th>调用位置</th><th>oldValue</th><th>newValue</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>服务器修改 SyncVar</td><td>服务器</td><td>修改前的值</td><td>修改后的新值</td></tr>
+                <tr><td>客户端收到同步消息</td><td>客户端</td><td>客户端之前持有的旧值</td><td>服务器发来的新值</td></tr>
+                <tr><td>对象 Spawn 时（初始同步）</td><td>客户端</td><td>类型的默认值（如 0, null）</td><td>服务器发来的初始值</td></tr>
+            </tbody>
+        </table>
 
-// hook 方法签名必须是：void HookName(旧值, 新值)
-void OnArmorChanged(int oldArmor, int newArmor)
-{
-    Debug.Log($"护甲从 {oldArmor} 变为 {newArmor}");
-
-    // 可以计算差值做增量动画
-    float delta = newArmor - oldArmor;
-    AnimateArmorChange(delta);
-}</code></pre>
+        <div class="callout callout-info">
+            <strong>Hook 在 Spawn 时的行为：</strong>当对象在客户端 Spawn 时，SyncVar 的初始值从服务器同步过来。
+            此时 hook <strong>也会被调用</strong>，oldValue 是该类型的默认值（如 int 的 0、string 的 null）。
+            你可以利用这一点在 Spawn 时初始化 UI——不需要在 <code>OnStartClient</code> 中额外读取 SyncVar 值。
+        </div>
 
         <h3>3.6.3 SyncVar 的限制</h3>
 
@@ -288,9 +455,9 @@ void OnArmorChanged(int oldArmor, int newArmor)
             <tbody>
                 <tr><td>不能是 static</td><td>静态变量不属于实例，无法逐实例同步</td><td>改用实例变量</td></tr>
                 <tr><td>不能是 readonly</td><td>Mirror 需要通过反射修改字段值</td><td>去掉 readonly</td></tr>
-                <tr><td>复杂对象序列化有限</td><td>只能序列化基础类型和简单结构</td><td>用自定义消息</td></tr>
-                <tr><td>高频更新影响性能</td><td>每个 SyncVar 变化都要序列化</td><td>合并多个值为一组发送</td></tr>
-                <tr><td>初始值问题</td><td>客户端 Spawn 时同步的是初始值</td><td>在 OnStartClient 中手动设置</td></tr>
+                <tr><td>复杂对象序列化有限</td><td>只能序列化基础类型和简单结构体</td><td>用 SyncList 或自定义消息</td></tr>
+                <tr><td>不支持 List/Dictionary</td><td>集合类型需要特殊处理</td><td>用 SyncList（见第 5 章）</td></tr>
+                <tr><td>高频更新影响性能</td><td>每个 SyncVar 变化都要序列化</td><td>合并多个值或使用 NetworkTransform</td></tr>
             </tbody>
         </table>
 
@@ -310,11 +477,11 @@ void OnArmorChanged(int oldArmor, int newArmor)
 
         <pre><code class="language-csharp">public class PlayerStats : NetworkBehaviour
 {
-    // SyncVar：同步"当前值"
-    [SyncVar(hook = "OnHealthChanged")]
+    // SyncVar：同步"当前值"——hook 自动更新 UI
+    [SyncVar(hook = nameof(OnHealthChanged))]
     public int currentHealth = 100;
 
-    [SyncVar(hook = "OnAmmoChanged")]
+    [SyncVar(hook = nameof(OnAmmoChanged))]
     public int currentAmmo = 30;
 
     // Command：客户端请求开火
@@ -324,10 +491,9 @@ void OnArmorChanged(int oldArmor, int newArmor)
         if (currentAmmo <= 0) return;
 
         // 服务器执行开火逻辑
-        currentAmmo--;  // 修改 SyncVar → 自动同步给所有客户端
-        currentHealth -= CalculateDamage();
+        currentAmmo--;  // 修改 SyncVar → 自动同步 + 调用 hook
 
-        // Rpc：通知客户端播放特效
+        // Rpc：通知客户端播放特效（事件型，不适合 SyncVar）
         RpcPlayFireEffect();
     }
 
@@ -336,6 +502,17 @@ void OnArmorChanged(int oldArmor, int newArmor)
     {
         // 所有客户端播放枪口火焰
         PlayMuzzleFlash();
+    }
+
+    // hook：值变化时自动更新 UI
+    void OnHealthChanged(int oldHealth, int newHealth)
+    {
+        healthBar.SetHealth(newHealth);
+    }
+
+    void OnAmmoChanged(int oldAmmo, int newAmmo)
+    {
+        ammoText.text = $"弹药: {newAmmo}";
     }
 }</code></pre>
 
@@ -347,12 +524,15 @@ void OnArmorChanged(int oldArmor, int newArmor)
         <h3>3.8.1 合并多个值为一个 RPC</h3>
 
         <pre><code class="language-csharp">// ❌ 低效：多次 RPC 调用，每条都有头部开销
-RpcSetPosition(x, y, z);       // 第一次
-RpcSetRotation(rx, ry, rz, rw); // 第二次
-RpcsetScale(sx, sy, sz);       // 第三次
+RpcSetPosition(x, y, z);
+RpcSetRotation(rx, ry, rz, rw);
+RpcSetScale(sx, sy, sz);
 
 // ✅ 高效：一次 RPC 传递所有数据
-RpcSetTransform(position, rotation, scale);</code></pre>
+RpcSetTransform(position, rotation, scale);
+
+// 更好的方案：使用 NetworkTransform 组件自动处理变换同步
+// 无需手写任何 RPC</code></pre>
 
         <h3>3.8.2 条件同步：只在值变化时发送</h3>
 
@@ -363,7 +543,7 @@ RpcSetTransform(position, rotation, scale);</code></pre>
 
     void Update()
     {
-        if (!isLocalPlayer) return;
+        if (!isOwned) return;
 
         float distance = (transform.position - lastSyncedPosition).sqrMagnitude;
         if (distance > syncThreshold * syncThreshold)
@@ -377,14 +557,9 @@ RpcSetTransform(position, rotation, scale);</code></pre>
     [Command]
     void CmdReportPosition(Vector3 pos)
     {
-        // 服务器收到后广播
-        RpcUpdatePosition(pos);
-    }
-
-    [ClientRpc]
-    void RpcUpdatePosition(Vector3 pos)
-    {
-        targetTransform.position = pos;
+        // 服务器验证后更新位置
+        // NetworkTransform 会自动处理后续同步
+        transform.position = pos;
     }
 }</code></pre>
 
@@ -410,26 +585,30 @@ public void AddScore(int amount)
     score += amount;  // 一帧内加 10 次，只发 1 条更新消息
 }</code></pre>
 
-        <h2>3.9 消息可靠性：哪些 RPC 需要保证送达？</h2>
+        <h2>3.9 消息可靠性</h2>
 
-        <p>Mirror 默认使用可靠的传输（TCP 或 KCP），所有 RPC 都会保证送达。
-        但在某些场景下你可能需要不可靠传输（允许丢包以换取更低延迟）：</p>
+        <p>Mirror 的 Transport 层决定了消息的可靠性。不同的 Transport 有不同的保证：</p>
 
-        <pre><code class="language-csharp">// Mirror 支持 unreliable RPC
-// 在 NetworkServer.Send 中可以指定 channelId
-// Reliable (channel 0): 保证送达，可能乱序（UDP 时）
-// Unreliable (channel 1): 不保证送达，保持顺序
+        <table>
+            <thead>
+                <tr><th>Transport</th><th>可靠性</th><th>适用场景</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>KCP Transport（默认）</td><td>可靠 + 有序</td><td>大多数游戏，平衡性能和可靠性</td></tr>
+                <tr><td>UnityTransport</td><td>可配置（可靠/不可靠虚拟连接）</td><td>需要 Unity 生态集成</td></tr>
+                <tr><td>Simple Web Transport</td><td>可靠（WebSocket）</td><td>浏览器端客户端</td></tr>
+            </tbody>
+        </table>
 
-// 高频位置同步（每帧 30-60 次）→ 用 unreliable
-// 伤害计算（每秒几次）→ 用 reliable
-
-// 手动发送 unreliable 消息
-NetworkServer.SendToAll(msgType, message, channelId: 1);</code></pre>
+        <p>对于位置同步等高频数据，建议使用 <code>NetworkTransform</code> 组件——
+        它内置了插值（Interpolation）和预测（Extrapolation），无需手动处理丢包。
+        对于必须保证送达的消息（如伤害、得分），SyncVar 和 RPC 会通过可靠通道传输。</p>
 
         <div class="callout callout-warning">
-            <strong>不可靠传输的语义：</strong>"不可靠"不代表"没用"。对于位置同步这类高频数据，
-            最新的值永远比"确保送达但过期"的值更有价值。如果一帧的位置数据丢了，
-            下一帧（几毫秒后）的新位置会覆盖它——玩家几乎感知不到差异。
+            <strong>Mirror 96 传输层变化：</strong>Mirror 96 的 Transport 是抽象类（非接口），
+            方法名为 <code>ServerSend</code> / <code>ClientSend</code>，
+            事件为 <code>OnServerConnected</code> / <code>OnClientData</code> 等。
+            如果你自定义 Transport，需要继承 <code>Transport</code> 抽象类。
         </div>
 
         <h2>3.10 实战：一个完整的战斗系统示例</h2>
@@ -439,23 +618,18 @@ NetworkServer.SendToAll(msgType, message, channelId: 1);</code></pre>
         <pre><code class="language-csharp">public class CombatSystem : NetworkBehaviour
 {
     [SyncVar(hook = nameof(OnHealthChanged))]
-    public int health;
+    public int health = 100;
 
-    [SyncVar(hook = nameof(OnStateUpdated))]
-    public CombatState state;
+    [SyncVar(hook = nameof(OnStateChanged))]
+    public CombatState state = CombatState.Idle;
 
     [SyncVar] public int comboCount;
 
+    [SerializeField] float attackCooldown = 0.5f;
+    [SerializeField] int attackDamage = 20;
     float lastAttackTime;
-    float attackCooldown = 0.5f;
 
-    enum CombatState
-    {
-        Idle,
-        Attacking,
-        Blocking,
-        Stunned
-    }
+    public enum CombatState { Idle, Attacking, Blocking, Stunned }
 
     // 客户端请求攻击
     [Command]
@@ -464,26 +638,47 @@ NetworkServer.SendToAll(msgType, message, channelId: 1);</code></pre>
         if (Time.time - lastAttackTime < attackCooldown) return;
         if (state != CombatState.Idle) return;
 
-        state = CombatState.Attacking;  // SyncVar → 自动同步
+        state = CombatState.Attacking;  // SyncVar → 自动同步 + 调用 hook
         lastAttackTime = Time.time;
 
-        // 对目标造成伤害
-        if (target != null && target.TryGetComponent(out HealthSystem hs))
+        // 服务器端查找附近的敌人并造成伤害
+        Collider[] hits = Physics.OverlapSphere(transform.position, 2f);
+        foreach (var hit in hits)
         {
-            hs.TakeDamage(attackDamage);
+            if (hit.TryGetComponent&lt;CombatSystem&gt;(out var target) && target != this)
+            {
+                target.TakeDamage(attackDamage, connectionToClient);
+            }
         }
 
         // 通知所有客户端播放攻击动画
         RpcPlayAttackAnimation();
 
-        // 攻击结束后恢复状态
+        // 攻击结束后恢复状态（Invoke 在服务器端运行）
         Invoke(nameof(ResetState), 0.3f);
     }
 
-    [TargetRpc]
-    public void TargetShowDamageNumber(NetworkConnection conn, Vector3 position, int damage)
+    // 服务器端调用：对目标造成伤害
+    [Server]
+    public void TakeDamage(int amount, NetworkConnectionToClient attacker = null)
     {
-        // 只给特定客户端显示伤害数字（视觉效果）
+        // [Server] 确保只有服务器端执行
+        // attacker 参数可选，用于记录伤害来源
+        health -= amount;
+        if (health <= 0)
+        {
+            Die();
+            // 给攻击者加分
+            if (attacker != null)
+                ScoreManager.Instance.AddScore(attacker, 100);
+        }
+    }
+
+    // 只给特定客户端显示伤害数字（视觉效果）
+    [TargetRpc]
+    public void TargetShowDamageNumber(NetworkConnection target, Vector3 position, int damage)
+    {
+        // 只在 target 指定的客户端上执行
         DamageNumberPool.Show(position, damage);
     }
 
@@ -494,30 +689,47 @@ NetworkServer.SendToAll(msgType, message, channelId: 1);</code></pre>
         audioSource.PlayOneShot(attackClip);
     }
 
-    void OnHealthChanged(int oldVal, int newVal)
+    // SyncVar hook：值变化时自动调用
+    void OnHealthChanged(int oldHealth, int newHealth)
     {
-        healthBar.SetHealth(newVal);
-        if (newVal <= 0 && isLocalPlayer)
+        healthBar.SetHealth(newHealth);
+
+        // 利用差值做伤害飘字动画
+        if (newHealth < oldHealth)
         {
-            RpcOnDeath();
+            int damage = oldHealth - newHealth;
+            ShowLocalDamageIndicator(damage);
+        }
+
+        if (newHealth <= 0)
+        {
+            PlayDeathEffect();
         }
     }
 
-    void OnStateUpdated(CombatState oldState, CombatState newState)
+    void OnStateChanged(CombatState oldState, CombatState newState)
     {
-        // 可以根据状态切换不同的行为
+        // 根据状态切换动画
+        animator.SetInteger("State", (int)newState);
+    }
+
+    [Server]
+    void ResetState()
+    {
+        state = CombatState.Idle;
+    }
+
+    void Die()
+    {
+        // 服务器端死亡逻辑
+        RpcOnDeath();
+        NetworkServer.Destroy(gameObject);
     }
 
     [ClientRpc]
     void RpcOnDeath()
     {
         animator.SetTrigger("Die");
-        GetComponent&lt;Collider&gt;.enabled = false;
-    }
-
-    void ResetState()
-    {
-        state = CombatState.Idle;
     }
 }</code></pre>
 
@@ -525,51 +737,107 @@ NetworkServer.SendToAll(msgType, message, channelId: 1);</code></pre>
 
         <h3>3.11.1 追踪 RPC 调用链</h3>
 
-        <p>当 RPC 没有按预期触发时，可以用以下方式调试：</p>
+        <p>当 RPC 没有按预期触发时，常见原因和调试方法：</p>
 
-        <pre><code class="language-csharp">// 在服务器端拦截所有 RPC 调用
-NetworkServer.RegisterHandler&lt;RpcMessage&gt;(msg =>
+        <pre><code class="language-csharp">public class PlayerController : NetworkBehaviour
 {
-    Debug.Log($"[RPC-Debug] 收到来自 {msg.connectionId} 的消息: {msg.messageType}");
-    Debug.Log($"[RPC-Debug] 调用堆栈: {System.Environment.StackTrace}");
-}, replace: true);
+    void Update()
+    {
+        if (!isOwned) return;
 
-// 在客户端检查 NetworkIdentity 的 connectionToServer
-if (identity.connectionToServer == null)
-{
-    Debug.LogWarning($"[RPC-Debug] 对象 {name} 没有连接到服务器！");
-    // 这通常意味着客户端还没完成连接就尝试调用 Command
+        if (Input.GetKeyDown(KeyCode.Space))
+        {
+            // 调试 Command 前检查前置条件
+            Debug.Log($"[Debug] isServer={isServer}, isClient={isClient}, " +
+                      $"isOwned={isOwned}, netId={netId}");
+
+            // 确保对象已 Spawn 且有有效连接
+            if (connectionToServer == null)
+            {
+                Debug.LogError("connectionToServer 为 null！对象可能未正确 Spawn 或客户端未连接。");
+                return;
+            }
+
+            CmdJump();
+        }
+    }
+
+    [Command]
+    void CmdJump()
+    {
+        // 在服务器端加日志确认收到
+        Debug.Log($"[Server] 收到 CmdJump from netId={netId}");
+        // 执行逻辑...
+    }
 }</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>Command 不执行的常见原因：</strong>
+            <ul>
+                <li>客户端没有此对象的 <code>isOwned</code>（authority）—— 使用 <code>requiresAuthority = false</code> 或修正权限</li>
+                <li>对象尚未 Spawn（<code>netId == 0</code>）—— 等待 <code>OnStartClient</code> 后再调用</li>
+                <li><code>connectionToServer</code> 为 null —— 客户端尚未连接或对象不是网络对象</li>
+                <li>调用了 <code>base.Method()</code> 而非实例方法 —— 确保 RPC 方法不是 <code>static</code></li>
+            </ul>
+        </div>
 
         <h3>3.11.2 观察 SyncVar 同步</h3>
 
-        <p>Mirror 提供了观察 SyncVar 变化的工具方法：</p>
+        <p>SyncVar 的 hook 方法本身就是最好的调试入口。你也可以在 hook 中添加日志：</p>
 
         <pre><code class="language-csharp">public class DebugSyncVar : NetworkBehaviour
 {
-    [SyncVar]
+    [SyncVar(hook = nameof(OnValueChanged))]
     public int debugValue = 0;
 
-    // Mirror 自动生成 GetSyncVarGameObject / GetSyncVarString 等方法
-    // 你也可以手动检查同步状态
-    void OnSyncEvent()
+    void OnValueChanged(int oldValue, int newValue)
     {
-        // 在 SyncVar 同步后调用
-        Debug.Log($"SyncVar 已同步: debugValue = {debugValue}");
+        Debug.Log($"[SyncVar] {name} 的 debugValue: {oldValue} → {newValue} " +
+                  $"(isServer={isServer}, isClient={isClient})");
+
+        // 可以在这里设断点观察同步行为
     }
 }</code></pre>
 
         <h2>3.12 本章小结</h2>
 
-        <p>本章我们系统学习了 Mirror 的通信机制：</p>
-
-        <ul>
-            <li><strong>[Command]</strong>：客户端向服务器发请求——"我想做某事"</li>
-            <li><strong>[ClientRpc]</strong>：服务器向所有客户端广播——"发生了某事"</li>
-            <li><strong>[TargetRpc]</strong>：服务器向指定客户端发消息——"这件事只告诉你"</li>
-            <li><strong>[SyncVar]</strong>：状态自动同步——"我的值是 X"</li>
-            <li><strong>[ServerCallback]</strong>：本地调服务器的捷径——性能优化用</li>
-        </ul>
+        <table>
+            <thead>
+                <tr><th>机制</th><th>方向</th><th>用途</th><th>Mirror 96 变化</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>[Command]</code></td>
+                    <td>客户端 → 服务器</td>
+                    <td>客户端请求服务器执行操作</td>
+                    <td>Cmd 前缀可选；新增 <code>requiresAuthority</code> 选项</td>
+                </tr>
+                <tr>
+                    <td><code>[ClientRpc]</code></td>
+                    <td>服务器 → 所有客户端</td>
+                    <td>广播事件</td>
+                    <td>Rpc 前缀可选；新增 <code>includeOwner</code> 选项</td>
+                </tr>
+                <tr>
+                    <td><code>[TargetRpc]</code></td>
+                    <td>服务器 → 指定客户端</td>
+                    <td>定向通知</td>
+                    <td>自动识别 NetworkConnection 参数</td>
+                </tr>
+                <tr>
+                    <td><code>[Server]</code> / <code>[ServerCallback]</code></td>
+                    <td>本地守卫（非 RPC）</td>
+                    <td>确保方法只在服务器执行</td>
+                    <td>语义修正：两者行为相同，仅日志不同</td>
+                </tr>
+                <tr>
+                    <td><code>[SyncVar]</code></td>
+                    <td>服务器 → 客户端</td>
+                    <td>状态自动同步</td>
+                    <td>Hook 签名统一为双参数 <code>(T, T)</code></td>
+                </tr>
+            </tbody>
+        </table>
 
         <p>核心原则：<strong>动作用 RPC，状态用 SyncVar；客户端只发请求，服务器做决定。</strong></p>
 
@@ -588,24 +856,36 @@ if (identity.connectionToServer == null)
                         <pre><code class="language-csharp">[SyncVar]
 public List&lt;GameObject&gt; inventory = new List&lt;GameObject&gt;();
 
-[Command]
-public void CmdAddItem(GameObject item)
+[SyncVar(hook = "OnHealthChanged")]
+public int health = 100;
+
+void OnHealthChanged(int newHealth)
 {
-    inventory.Add(item);  // 修改 SyncVar
+    UpdateHealthBar(newHealth);
 }</code></pre>
                     </li>
                     <li><strong>推理题：</strong>如果在 <code>Awake()</code> 中调用 <code>CmdXXX()</code>，会发生什么？
                     为什么？应该在哪个生命周期方法中调用？</li>
+                    <li><strong>Mirror 96 变化题：</strong><code>[ServerCallback]</code> 的真正含义是什么？
+                    它和 <code>[Command]</code> 有什么本质区别？</li>
                 </ol>
 
                 <div class="callout callout-tip">
-                    <strong>参考答案：</strong>
-                    1) ① CmdAttack() → ② 服务器内部计算 → ③ RpcPlayMuzzleFlash() →
-                    ④ TargetRpcShowBlood(hitClient) → ⑤ SyncVar score（自动同步）
-                    2) SyncVar 不支持 List&lt;GameObject&gt;（GameObject 不是可序列化的网络类型）。
-                    应改为 List&lt;int&gt; 存储物品 ID，或用自定义消息同步库存。
-                    3) Awake 时网络未初始化，connectionToServer 为 null，调用会静默失败。
-                    应在 OnStartClient 之后调用。
+                    <strong>参考答案：</strong><br>
+                    1) ① <code>CmdFire()</code> Command → ② 服务器内部逻辑（Raycast 等） →
+                    ③ <code>RpcPlayMuzzleFlash()</code> ClientRpc →
+                    ④ <code>TargetRpcShowBlood(hitConn)</code> TargetRpc →
+                    ⑤ <code>[SyncVar] int score</code>（自动同步 + hook 更新 UI）<br><br>
+                    2) 两个错误：① SyncVar <strong>不支持</strong> <code>List&lt;GameObject&gt;</code>——
+                    应使用 SyncList 存储物品 ID；② Hook 方法签名错误——Mirror 96 要求<strong>双参数</strong>
+                    <code>(int oldHealth, int newHealth)</code>，单参数会编译报错。<br><br>
+                    3) Awake 时网络未初始化，<code>connectionToServer</code> 为 null，<code>netId</code> 为 0，
+                    Command 调用会被 Mirror 静默丢弃。应在 <code>OnStartClient</code>（客户端）或
+                    <code>OnStartServer</code>（服务器）之后调用。<br><br>
+                    4) <code>[ServerCallback]</code> 是<strong>本地方法守卫</strong>，确保方法只在服务器端执行，
+                    非服务器调用时跳过且不打印警告。它<strong>不是 RPC</strong>——不走网络，不序列化消息。
+                    <code>[Command]</code> 才是真正的远程过程调用——通过网络发送消息到服务器。
+                    两者完全不同：<code>[ServerCallback]</code> = 本地判断；<code>[Command]</code> = 跨网络请求。
                 </div>
             </div>
         </details>

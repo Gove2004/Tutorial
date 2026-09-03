@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>探索与利用 - PyTorch 强化学习教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="07-PPO算法深入.html">← 上一章</a>
+        <a href="09-实战Gym环境训练.html">第 9 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 8 章：探索与利用的平衡</h1>
+
+        <h2>8.1 探索的核心困境</h2>
+
+        <p>强化学习中最根本的难题是<strong>探索-利用权衡（Exploration-Exploitation Dilemma）</strong>：</p>
+        <ul>
+            <li><strong>利用</strong>：选择当前已知最好的动作，最大化即时收益</li>
+            <li><strong>探索</strong>：尝试未知动作，可能发现更好的策略，但可能损失即时收益</li>
+        </ul>
+
+        <p>没有足够的探索，Agent 容易陷入局部最优；没有足够的利用，Agent 无法收敛到好策略。不同的探索策略适用于不同的场景。</p>
+
+        <h2>8.2 ε-greedy：最简单的探索</h2>
+
+        <pre><code class="language-python">import random
+
+def epsilon_greedy_action(q_values, epsilon):
+    """
+    Q 值表 / Q 网络的 ε-greedy 选择
+    Args:
+        q_values: 每个动作的 Q 值 [q_1, q_2, ..., q_n]
+        epsilon: 探索概率
+    """
+    if random.random() < epsilon:
+        return random.randint(0, len(q_values) - 1)
+    else:
+        return int(np.argmax(q_values))
+
+# 典型衰减策略：从强探索逐渐过渡到强利用
+epsilon = 1.0
+epsilon_min = 0.01
+epsilon_decay = 0.995
+
+for episode in range(1000):
+    action = epsilon_greedy_action(q_values, epsilon)
+    # ... 训练 ...
+    epsilon = max(epsilon_min, epsilon * epsilon_decay)
+</code></pre>
+
+        <div class="callout callout-info">
+            <strong>ε-greedy 的局限</strong>：随机探索是盲目的——它不会区分"有趣的未知状态"和"无关紧要的随机动作"。在复杂环境中，这导致探索效率很低。
+        </div>
+
+        <h2>8.3 基于不确定性的探索：UCB</h2>
+
+        <p>Upper Confidence Bound（UCB）给每个动作一个"乐观估计"：Q(s,a) + 不确定性奖励。探索自然偏向那些访问次数少（不确定性高）的动作。</p>
+
+        <pre><code class="language-python">def ucb_action(q_values, visit_counts, c=2.0, total_visits=None):
+    """
+    UCB1 算法
+    Args:
+        q_values: 每个动作的平均 Q 值
+        visit_counts: 每个动作的访问次数
+        c: 探索系数，越大越探索
+        total_visits: 总访问次数（不传则自动计算）
+    """
+    if total_visits is None:
+        total_visits = sum(visit_counts)
+
+    # 对未访问过的动作给无穷大，确保首次访问
+    ucb_values = []
+    for q, count in zip(q_values, visit_counts):
+        if count == 0:
+            ucb_values.append(float('inf'))
+        else:
+            exploration = c * np.sqrt(np.log(total_visits) / count)
+            ucb_values.append(q + exploration)
+
+    return int(np.argmax(ucb_values))
+</code></pre>
+
+        <h2>8.4 熵正则化：隐式探索</h2>
+
+        <p>与其显式添加探索机制，不如<strong>让策略本身就保持一定的���机性</strong>。熵正则化通过在损失函数中添加熵项来实现：</p>
+
+        <pre><code class="language-python">"""
+熵的定义：H(π) = -Σ π(a|s) log π(a|s)
+
+- 熵 = 0：策略是确定性的（退化）
+- 熵 = log(n)：策略是均匀随机的
+
+熵正则化目标：J(θ) = E[回报] + β · H(π_θ)
+其中 β 控制探索强度
+"""
+
+# 在 PyTorch 中计算多项式分布的熵
+probs = F.softmax(logits, dim=-1)
+entropy = -(probs * F.log_softmax(logits, dim=-1)).sum(dim=-1).mean()
+
+# 在损失函数中加入
+loss = policy_loss - entropy_coef * entropy
+</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>熵退化的诊断</strong>：如果训练过程中熵快速下降到接近 0，说明策略过早收敛到了确定性行为。这通常意味着：
+            <ol>
+                <li>奖励信号太稀疏，Agent 没有找到差异化的动作价值</li>
+                <li>entropy_coef 太小，探索不足</li>
+                <li>学习率过大，策略快速退化</li>
+            </ol>
+            解决方案：增大 entropy_coef（如从 0.01 到 0.1），或检查奖励设计。
+        </div>
+
+        <h2>8.5 内在激励：好奇心驱动探索</h2>
+
+        <p>Intrinsic Curiosity Module（ICM, 2017）的核心思想：<strong>给"不可预测的"状态增加内在奖励</strong>。Agent 被鼓励去探索那些它不理解的环境区域。</p>
+
+        <pre><code class="language-python">class IntrinsicCuriosityModule(nn.Module):
+    """
+    ICM: 包含前进模型（forward）和反向模型（inverse）
+    - 前进模型：学习状态转移 dynamics f: (s, a) → s'
+    - 反向模型：从 (s, s') 预测动作 a
+    - 内在奖励 = 前进模型的预测误差（不可预测性）
+    """
+    def __init__(self, state_dim, action_dim, hidden_dim=64):
+        super().__init__()
+        # 前进模型：预测下一状态
+        self.forward_model = nn.Sequential(
+            nn.Linear(state_dim * 2, hidden_dim),  # 输入: [s, a]
+            nn.ReLU(),
+            nn.Linear(hidden_dim, state_dim)       # 输出: s'
+        )
+        # 反向模型：从状态对预测动作
+        self.inverse_model = nn.Sequential(
+            nn.Linear(state_dim * 2, hidden_dim),  # 输入: [s, s']
+            nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim)       # 输出: a (logits)
+        )
+
+    def forward(self, state, action):
+        sa = torch.cat([state, action], dim=-1)
+        return self.forward_model(sa)
+
+    def get_intrinsic_reward(self, state, action, next_state):
+        """
+        计算内在奖励 = 前进模型的预测误差
+        """
+        predicted_next = self(state, action)
+        prediction_error = torch.mean((predicted_next - next_state) ** 2)
+
+        # 反向模型的预测损失（辅助训练）
+        sa_next = torch.cat([state, next_state], dim=-1)
+        predicted_action = self.inverse_model(sa_next)
+        inverse_loss = F.cross_entropy(
+            predicted_action,
+            torch.argmax(action, dim=-1) if action.dim() > 1 else action.long()
+        )
+
+        return prediction_error, inverse_loss
+</code></pre>
+
+        <h2>8.6 课程学习：渐进式训练</h2>
+
+        <p>课程学习（Curriculum Learning）的核心思想：<strong>从简单任务开始，逐步增加难度</strong>。这类似于人类学习——先学走路，再学跑步。</p>
+
+        <pre><code class="language-python">class CurriculumLearner:
+    """
+    基于任务难度的课程学习
+    适用于有多个难度等级的环境变体
+    """
+    def __init__(self, agent, difficulty_schedule):
+        """
+        Args:
+            difficulty_schedule: list of (difficulty, min_episodes)
+            例如: [(0, 50), (1, 100), (2, 200)]
+            表示：难度 0 至少练 50 episode，然后升到难度 1
+        """
+        self.agent = agent
+        self.schedule = sorted(difficulty_schedule)
+        self.current_difficulty = 0
+        self.episode_count = 0
+
+    def get_current_difficulty(self):
+        """根据已完成的 episode 数决定当前难度"""
+        while (self.current_difficulty < len(self.schedule) - 1 and
+               self.episode_count >= self.schedule[self.current_difficulty + 1][1]):
+            self.current_difficulty += 1
+        return self.schedule[self.current_difficulty][0]
+
+    def step(self, reward, done):
+        self.episode_count += 1
+        if done:
+            difficulty = self.get_current_difficulty()
+            return difficulty
+        return self.schedule[self.current_difficulty][0]
+
+# 应用示例：在 MountainCar 中使用课程学习
+# 阶段 1: 从靠近目标的位置开始（容易）
+# 阶段 2: 从中间位置开始（中等）
+# 阶段 3: 从最底部开始（困难）
+</code></pre>
+
+        <h2>8.7 噪声注入：参数空间探索</h2>
+
+        <p>除了对策略输出添加噪声（如高斯噪声），还可以直接在<strong>网络参数</strong>上添加噪声，这被称为 Noisy Networks：</p>
+
+        <pre><code class="language-python">class NoisyLinear(nn.Module):
+    """
+    参数化噪声层：每个权重的噪声是独立采样的
+    噪声随训练逐步衰减
+    """
+    def __init__(self, in_features, out_features, sigma_init=0.1):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.sigma_init = sigma_init
+
+        # 噪声权重
+        self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features))
+        self.weight_epsilon = nn.Parameter(torch.Tensor(out_features, in_features))
+        # 噪声偏置
+        self.bias_mu = nn.Parameter(torch.Tensor(out_features))
+        self.bias_epsilon = nn.Parameter(torch.Tensor(out_features))
+
+        self.reset_parameters()
+        self.noise_scale = sigma_init
+
+    def reset_parameters(self):
+        mu_range = 1 / np.sqrt(self.in_features)
+        self.weight_mu.data.uniform_(-mu_range, mu_range)
+        self.bias_mu.data.uniform_(-mu_range, mu_range)
+        self.weight_epsilon.data.fill_(self.sigma_init / np.sqrt(self.in_features))
+        self.bias_epsilon.data.fill_(self.sigma_init / np.sqrt(self.in_features))
+
+    def forward(self, x):
+        # 采样噪声
+        epsilon_w = torch.randn_like(self.weight_epsilon)
+        epsilon_b = torch.randn_like(self.bias_epsilon)
+        # 带噪声的前向传播
+        weight = self.weight_mu + self.noise_scale * self.weight_epsilon
+        bias = self.bias_mu + self.noise_scale * self.bias_epsilon
+        return F.linear(x, weight, bias)
+
+    def sample_noise(self):
+        """重置噪声采样"""
+        self.weight_epsilon.data.copy_(torch.randn_like(self.weight_epsilon))
+        self.bias_epsilon.data.copy_(torch.randn_like(self.bias_epsilon))
+
+    def set_noise_scale(self, scale):
+        """衰减噪声尺度"""
+        self.noise_scale = scale
+</code></pre>
+
+        <h2>8.8 探索策略选择指南</h2>
+
+        <table>
+            <thead>
+                <tr><th>场景</th><th>推荐策略</th><th>原因</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>简单离散环境（CartPole）</td><td>ε-greedy 或熵正则化</td><td>足够简单，无需复杂探索</td></tr>
+                <tr><td>稀疏奖励环境</td><td>内在好奇心 / 课程学习</td><td>需要额外激励来发现稀疏奖励</td></tr>
+                <tr><td>连续动作空间</td><td>高斯噪声 / Noisy Net</td><td>ε-greedy 不适用于连续空间</td></tr>
+                <tr><td>多模态策略</td><td>熵正则化 + 温度参数</td><td>保持策略分布的多样性</td></tr>
+                <tr><td>视觉输入（Atari）</td><td>帧堆叠 + ε-greedy 衰减</td><td>减少状态空间的噪声</td></tr>
+            </tbody>
+        </table>
+
+        <h2>8.9 本章小结</h2>
+        <ul>
+            <li>ε-greedy 简单但盲目，UCB 利用访问频率做更聪明的探索</li>
+            <li>熵正则化是隐式探索，防止策略过早退化</li>
+            <li>内在好奇心通过预测误差驱动探索，适合稀疏奖励</li>
+            <li>课程学习通过渐进难度加速学习</li>
+            <li>Noisy Net 在参数空间注入噪声，无需额外超参数</li>
+        </ul>
+
+        <h2>练习</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>在 MountainCar-v0 上对比 ε-greedy（ε=0.1）和熵正则化（entropy_coef=0.01）两种探索策略的训练效果，记录达到目标所需的 episode 数。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶挑战</h4>
+                    <p>为 PPO Agent 实现 NoisyNet 层，在 Atari 风格的稀疏奖励环境中（如 Breakout）比较带/不带噪声注入的样本效率差异。</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="07-PPO算法深入.html">← 上一章：PPO</a>
+            <a href="09-实战Gym环境训练.html">第 9 章：实战 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+        function showTab(btn) {
+            const tabs = btn.closest('.tabs');
+            tabs.querySelectorAll('.tab-buttons button').forEach(b => b.classList.remove('active'));
+            tabs.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            tabs.querySelectorAll('.tab-content').forEach(c => {
+                if (c.previousElementSibling === btn) c.classList.add('active');
+            });
+        }
+    </script>
+</body>
+</html>

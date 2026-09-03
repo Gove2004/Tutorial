@@ -24,6 +24,12 @@
     "updated": "2026-07-02"
   },
   {
+    "dir": "pytorch-rl-tutorial",
+    "title": "PyTorch 强化学习教程 - 目录",
+    "chapters": 11,
+    "updated": "2026-08-03"
+  },
+  {
     "dir": "software-engineering-tutorial",
     "title": "软件工程完整教程",
     "chapters": 10,
@@ -33,6 +39,6 @@
     "dir": "unity-mirror-networking",
     "title": "Unity Mirror 从入门到底层 - 教程目录",
     "chapters": 10,
-    "updated": "2026-07-25"
+    "updated": "2026-07-31"
   }
 ]

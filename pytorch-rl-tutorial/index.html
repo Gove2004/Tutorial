@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PyTorch 强化学习教程 - 目录</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <h1>PyTorch 强化学习：从原理到实战</h1>
+
+        <p class="intro">
+            这是一套系统性的强化学习教程，从强化学习的核心概念出发，逐步深入 DQN、策略梯度、Actor-Critic、PPO 等经典算法，
+            最终通过完整的 PyTorch 代码实现一个可运行的强化学习 Agent。教程强调数学直觉与工程实践的结合，
+            每章都包含原理推导、代码实现和调试经验。
+        </p>
+
+        <div class="version-info">
+            <p><strong>版本：</strong>v1.0 | <strong>更新日期：</strong>2026-08-03</p>
+            <p><strong>适用版本：</strong>PyTorch 2.0+ / Python 3.10+ / Gymnasium 0.29+</p>
+            <p><strong>主题风格：</strong>theme-tech（技术类教程，红色系强调 PyTorch 品牌色）</p>
+        </div>
+
+        <div class="callout callout-info">
+            <strong>前置知识假设：</strong>
+            你熟悉 Python 编程、了解神经网络基础（前向传播、反向传播、梯度下降），
+            以及基本的 PyTorch 张量操作。如果从未接触过强化学习，本教程会从零讲起。
+        </div>
+
+        <h2>课程结构</h2>
+        <p>本课程分为四个阶段，由浅入深：</p>
+
+        <h3>第一阶段：强化学习基础（第 1-3 章）</h3>
+        <p>建立对强化学习的整体认知，理解 Agent、Environment、Reward 等核心概念，
+        掌握价值函数与贝尔曼方程的数学基础。</p>
+
+        <h3>第二阶段：经典算法原理与实现（第 4-7 章）</h3>
+        <p>从 Q-Learning 和 DQN 入手，逐步过渡到策略梯度、Actor-Critic、PPO，
+        每章都包含完整的 PyTorch 实现。</p>
+
+        <h3>第三阶段：实战项目（第 8-10 章）</h3>
+        <p>在 Gymnasium 标准环境中训练 Agent，探索高级技巧，
+        并尝试自定义环境与连续控制任务。</p>
+
+        <h3>第四阶段：进阶与生产（第 11-12 章）</h3>
+        <p>分布式训练、工程优化、进阶资源，帮助你走向实际项目。</p>
+
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-导论与强化学习基础.html">第 1 章：导论：强化学习与 PyTorch 配置</a></h3>
+                <p>强化学习是什么？与监督学习、无监督学习的根本区别。环境交互循环的完整流程。
+                PyTorch 安装与 Gymnasium 环境搭建，第一个训练循环示例。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-核心概念-Agent-Environment-Reward.html">第 2 章：核心概念：Agent、Environment、Reward</a></h3>
+                <p>MDP 形式化定义：状态、动作、转移概率、奖励函数。策略与价值函数的角色。
+                回报（Return）与折扣因子 γ 的直觉理解。环境交互的完整生命周期。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-价值函数与贝尔曼方程.html">第 3 章：价值函数与贝尔曼方程</a></h3>
+                <p>状态价值函数 V(s) 与动作价值函数 Q(s,a) 的数学定义与区别。
+                贝尔曼方程的推导与迭代求解。动态规划、蒙特卡罗与时序差分学习的三大路线。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-Q-Learning与DQN.html">第 4 章：Q-Learning 与 DQN</a></h3>
+                <p>Q-Learning 的 off-policy 更新规则与 ε-greedy 探索策略。
+                深度 Q 网络（DQN）如何用神经网络拟合 Q 函数。经验回放与目标网络的工程技巧。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-策略梯度与REINFORCE.html">第 5 章：策略梯度与 REINFORCE</a></h3>
+                <p>为什么直接优化策略？策略梯度定理的推导。REINFORCE 算法的实现与方差问题。
+                基线（Baseline）与优势函数（Advantage Function）降低方差的方法。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-Actor-Critic与A2C.html">第 6 章：Actor-Critic 与 A2C</a></h3>
+                <p>Actor-Critic 架构的设计思想：策略网络评估动作、价值网络评估状态。
+                A2C 的同步批量训练与 GAE（广义优势估计）。与 REINFORCE 的效率对比。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="07-PPO算法深入.html">第 7 章：PPO 算法深入</a></h3>
+                <p>近端策略优化（PPO）的裁剪（clip）机制与目标函数设计。
+                PPO-Clip 与 PPO-Penalty 两种变体。完整 PPO 实现与超参数调优经验。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="08-探索与利用.html">第 8 章：探索与利用的平衡</a></h3>
+                <p>ε-greedy、 softmax、UCB、熵正则化的原理与适用场景。
+                内在激励（Intrinsic Curiosity）、课程学习、噪声注入等高级探索策略。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="09-实战Gym环境训练.html">第 9 章：实战：Gymnasium 环境训练</a></h3>
+                <p>使用 DQN 训练 CartPole-v1，使用 PPO 训练 Pendulum-v1。
+                训练曲线分析、超参数敏感性、常见失败模式与调试方法。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="10-自定义环境与高级应用.html">第 10 章：实战：自定义环境与高级应用</a></h3>
+                <p>定义自定义 Gymnasium 环境（离散与连续动作空间）。
+                视觉输入处理（Atari 风格）、多智能体入门、与 Unity ML-Agents 的对接思路。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="11-分布式训练与生产实践.html">第 11 章：分布式训练与生产实践</a></h3>
+                <p>多进程并行采集、RLlib 与 Ray 分布式框架入门。
+                检查点管理、性能分析、训练稳定性保障与生产部署要点。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="12-总结与进阶资源.html">第 12 章：总结与进阶路径</a></h3>
+                <p>全课程知识图谱回顾。算法选型决策树。
+                进阶方向：离线强化学习、层次强化学习、大模型与 RLHF。推荐书单与论文清单。</p>
+            </div>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>学习建议：</strong>按顺序学习，每章读完后立即运行配套代码。
+            第 4-7 章是核心，建议在理解原理后自己从头实现一遍，而非仅复制代码。
+            实战章节（第 9-10 章）可作为能力验证的最终目标。
+        </div>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

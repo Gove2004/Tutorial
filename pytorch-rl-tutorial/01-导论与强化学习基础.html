@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>导论：强化学习与 PyTorch 配置 - PyTorch 强化学习教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <span>← 第一章</span>
+        <a href="02-核心概念-Agent-Environment-Reward.html">第 2 章：核心概念 →</a>
+    </nav>
+
+    <main>
+        <h1>第 1 章：导论：强化学习与 PyTorch 配置</h1>
+
+        <h2>1.1 强化学习是什么</h2>
+
+        <p>强化学习（Reinforcement Learning, RL）是机器学习的三大范式之一，与监督学习、无监督学习并列。它的核心思想可以用一句话概括：</p>
+
+        <div class="definition">
+            <h4>强化学习的定义</h4>
+            <p>强化学习研究的是<strong>智能体（Agent）</strong>如何在<strong>环境（Environment）</strong>中通过与环境的持续交互，学习出最优行为策略，以最大化累积奖励。</p>
+        </div>
+
+        <p>与监督学习的关键区别在于：</p>
+
+        <table class="comparison">
+            <thead>
+                <tr><th>维度</th><th>监督学习</th><th>强化学习</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>学习方式</strong></td>
+                    <td>从标注数据中学映射</td>
+                    <td>从试错交互中学策略</td>
+                </tr>
+                <tr>
+                    <td><strong>反馈信号</strong></td>
+                    <td>明确的正确答案</td>
+                    <td>延迟的标量奖励（Reward）</td>
+                </tr>
+                <tr>
+                    <td><strong>数据独立性</strong></td>
+                    <td>样本独立同分布（i.i.d.）</td>
+                    <td>样本序列相关（非 i.i.d.）</td>
+                </tr>
+                <tr>
+                    <td><strong>时间维度</strong></td>
+                    <td>无时间概念</td>
+                    <td>关键维度：当前动作影响未来状态</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>直觉类比</strong>：想象一只狗学指令。你不可能每次都告诉它"左边转 30 度、然后前进两步"，而是通过零食（正奖励）和斥责（负奖励）来引导。狗需要通过多次试错，自己发现"坐下→得到零食"的因果关联。这就是强化学习的本质。
+        </div>
+
+        <h2>1.2 环境交互循环</h2>
+
+        <p>强化学习的核心是一个循环过程，如下所示：</p>
+
+        <pre><code class="language-python"># 强化学习交互循环（伪代码）
+# 初始化环境
+state = env.reset()
+
+for episode in range(num_episodes):
+    done = False
+    while not done:
+        # Agent 根据当前状态选择动作
+        action = agent.select_action(state)
+
+        # 执行动作，获取新状态和奖励
+        next_state, reward, done, info = env.step(action)
+
+        # Agent 学习：存储经验并更新策略
+        agent.learn(state, action, reward, next_state, done)
+
+        # 状态转移
+        state = next_state
+</code></pre>
+
+        <p>这个循环看似简单，但它蕴含了强化学习的所有核心问题：</p>
+        <ul>
+            <li><strong>Agent 如何选择动作？</strong> —— 这是 <code>agent.select_action</code> 要解决的问题（探索 vs 利用）</li>
+            <li><strong>奖励如何设计？</strong> —— 这是任务建模的核心，奖励信号直接决定了 Agent 学到什么</li>
+            <li><strong>Agent 如何学习？</strong> —— 这是算法的核心，如何将经验转化为更好的策略</li>
+            <li><strong>状态如何表示？</strong> —— 输入空间的结构决定了神经网络的设计和泛化能力</li>
+        </ul>
+
+        <h2>1.3 环境类型：离散 vs 连续</h2>
+
+        <p>Gymnasium（OpenAI Gym 的继任者）提供了丰富的环境，按动作空间可分为：</p>
+
+        <div class="tabs">
+            <div class="tab-buttons">
+                <button class="active" onclick="showTab(this)">离散动作</button>
+                <button onclick="showTab(this)">连续动作</button>
+                <button onclick="showTab(this)">混合动作</button>
+            </div>
+            <div class="tab-content active">
+                <p><strong>离散动作空间</strong>：动作集合有限且可枚举。</p>
+                <pre><code class="language-python">import gymnasium as gym
+env = gym.make("CartPole-v1")
+print(f"动作空间: {env.action_space}")
+print(f"动作数: {env.action_space.n}")  # 输出: 2 (左移 / 右移)
+</code></pre>
+                <p>适用算法：DQN、REINFORCE、PPO（多项式分布）</p>
+            </div>
+            <div class="tab-content">
+                <p><strong>连续动作空间</strong>：动作是连续向量。</p>
+                <pre><code class="language-python">env = gym.make("Pendulum-v1")
+print(f"动作空间: {env.action_space}")
+# Box(1,) 表示 1 维连续空间，范围 [-2, 2]
+print(f"动作范围: [{env.action_space.low}, {env.action_space.high}]")
+</code></pre>
+                <p>适用算法：PPO（高斯分布）、DDPG、SAC（不适用 DQN）</p>
+            </div>
+            <div class="tab-content">
+                <p><strong>混合动作空间</strong>：同时包含离散和连续维度。</p>
+                <pre><code class="language-python"># 例如：选择移动方向（离散）+ 施加力度（连续）
+# Gymnasium 支持 MultiDiscrete 和 MultiBinary 空间
+from gymnasium.spaces import MultiDiscrete, MultiBinary
+</code></pre>
+                <p>适用算法：专用网络结构（分别输出离散和连续部分），通常使用 PPO 变体</p>
+            </div>
+        </div>
+
+        <h2>1.4 PyTorch 环境配置</h2>
+
+        <p>本教程使用 PyTorch 2.x 作为深度学习框架。下面是完整的安装流程：</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>安装 PyTorch</h4>
+                    <p>根据你的 GPU 情况选择对应命令。如果没有 NVIDIA GPU，使用 CPU 版本即可：</p>
+                    <pre><code class="language-bash"># CPU 版本（推荐初学者）
+pip install torch torchvision torchaudio
+
+# CUDA 12.1 GPU 版本
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+</code></pre>
+                    <p>验证安装：</p>
+                    <pre><code class="language-python">import torch
+print(f"PyTorch 版本: {torch.__version__}")
+print(f"CUDA 可用: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"GPU 名称: {torch.cuda.get_device_name(0)}")
+</code></pre>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>安装 Gymnasium 及环境</h4>
+                    <pre><code class="language-bash"># 核心库
+pip install gymnasium
+
+# 经典控制环境（本教程使用）
+pip install "gymnasium[all]"
+
+# 可选：Atari 环境（第 10 章进阶使用）
+pip install gymnasium[atari] accept-the-backend
+</code></pre>
+                    <p>验证环境：</p>
+                    <pre><code class="language-python">import gymnasium as gym
+
+# 列出所有可用环境
+envs = gym.envs.registry.keys()
+print(f"可用环境数量: {len(envs)}")
+
+# 创建一个环境并观察
+env = gym.make("CartPole-v1")
+print(f"观测空间: {env.observation_space}")  # Box(4,) - 4 维连续值
+print(f"动作空间: {env.action_space}")        # Discrete(2) - 2 个离散动作
+env.close()
+</code></pre>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>安装辅助库</h4>
+                    <pre><code class="language-bash"># 数值计算
+pip install numpy
+
+# 可视化
+pip install matplotlib
+
+# 训练进度跟踪（可选）
+pip install tqdm tensorboard
+
+# 随机种子管理
+pip install seed-util
+</code></pre>
+                </div>
+            </div>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>为什么用 Gymnasium 而不是 Gym？</strong>
+            <code>gym</code> 库已于 2023 年进入维护模式，官方推荐使用其继任者 <code>gymnasium</code>。主要区别是 API 返回格式从 <code>(state, reward, done, info)</code> 变为 <code>(state, reward, terminated, truncated, info)</code>，更清晰地区分了"任务失败"和"超时截断"两种终止条件。
+        </div>
+
+        <h2>1.5 第一个强化学习程序</h2>
+
+        <p>在深入算法之前，我们先写一个最简单的强化学习循环——随机策略（Random Policy），作为后续比较的基线：</p>
+
+        <pre><code class="language-python">import gymnasium as gym
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 创建环境
+env = gym.make("CartPole-v1")
+
+# 随机策略运行 100 个 episode
+rewards = []
+for episode in range(100):
+    state, info = env.reset()
+    total_reward = 0
+    done = False
+    truncated = False
+
+    while not done and not truncated:
+        # 随机选择动作
+        action = env.action_space.sample()
+        state, reward, done, truncated, info = env.step(action)
+        total_reward += reward
+
+    rewards.append(total_reward)
+    if (episode + 1) % 10 == 0:
+        print(f"Episode {episode + 1}: 总奖励 = {total_reward}")
+
+env.close()
+
+# 统计结果
+print(f"\n随机策略 - 平均奖励: {np.mean(rewards):.2f}")
+print(f"随机策略 - 最佳奖励: {np.max(rewards)}")
+
+# 绘制奖励分布
+plt.figure(figsize=(10, 4))
+plt.subplot(1, 2, 1)
+plt.hist(rewards, bins=20, edgecolor='black', alpha=0.7)
+plt.xlabel('总奖励')
+plt.ylabel('Episode 数')
+plt.title('随机策略奖励分布')
+plt.axvline(np.mean(rewards), color='r', linestyle='--', label=f'均值: {np.mean(rewards):.1f}')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(rewards)
+plt.xlabel('Episode')
+plt.ylabel('总奖励')
+plt.title('100 个 Episode 的奖励曲线')
+plt.tight_layout()
+plt.savefig('random-baseline.png', dpi=150)
+plt.show()
+</code></pre>
+
+        <p>运行这个程序后，你会观察到随机策略的 CartPole 通常只能维持几秒（奖励约 20 左右，而满分是 500）。接下来的章节将逐步教你如何让 Agent 学会完美平衡杆子。</p>
+
+        <h2>1.6 本章小结</h2>
+        <ul>
+            <li>强化学习 = Agent 通过与环境交互试错来学习最优策略</li>
+            <li>核心循环：观察状态 → 选择动作 → 执行动作 → 获得奖励 → 更新策略</li>
+            <li>离散动作 vs 连续动作决定了算法的选择方向</li>
+            <li>使用 Gymnasium 而非已停更的 gym 库</li>
+            <li>随机策略是重要的基线，用于验证算法确实学到了东西</li>
+        </ul>
+
+        <h2>练习</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>安装 Gymnasium，运行上述随机策略代码，观察不同环境（如 <code>LunarLander-v2</code>、<code>MountainCar-v0</code>）的奖励分布差异。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>思考题</h4>
+                    <p>CartPole 的奖励函数是每存活一步 +1。如果改为每步 +0.1，但 Episode 结束时额外奖励 100，这会对学习产生什么影响？</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 目录</a>
+            <a href="02-核心概念-Agent-Environment-Reward.html">第 2 章：核心概念 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+        function showTab(btn) {
+            const tabs = btn.closest('.tabs');
+            tabs.querySelectorAll('.tab-buttons button').forEach(b => b.classList.remove('active'));
+            tabs.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            tabs.querySelectorAll('.tab-content').forEach(c => {
+                if (c.previousElementSibling === btn) c.classList.add('active');
+            });
+        }
+    </script>
+</body>
+</html>

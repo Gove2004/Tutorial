@@ -61,7 +61,7 @@
 
         <ul>
             <li> matchmaking / 房间系统（你需要自己实现或用第三方服务）</li>
-            <li>NAT 穿透 / Relay 服务（但可以通过自定义 Transport 接入）</li>
+            <li>NAT 穿透 / Relay 服务（但可以通过自定义 Transport 接入，如 Edgegap Relay）</li>
             <li>反作弊引擎（但提供了 Client Authority 等机制让你防范作弊）</li>
             <li>客户端预测 / 延迟补偿（这些需要你自己基于 Mirror 的基础设施实现）</li>
         </ul>
@@ -84,16 +84,17 @@
                 <tr><th>问题领域</th><th>UNet 的缺陷</th><th>Mirror 的改进</th></tr>
             </thead>
             <tbody>
-                <tr><td>维护状态</td><td>Unity 官方停止维护，文档链接大量失效</td><td>社区活跃维护，GitHub 持续更新</td></tr>
+                <tr><td>维护状态</td><td>Unity 官方停止维护，文档链接大量失效</td><td>社区活跃维护，GitHub 持续更新（当前 v96.x）</td></tr>
                 <tr><td>架构复杂度</td><td>内部实现臃肿，大量抽象层，难以理解和二次开发</td><td>代码量约 UNet 的 1/3，结构扁平清晰</td></tr>
-                <tr><td>Transport 层</td><td>绑定 Unity 的 Relay 服务，无法灵活替换</td><td>Transport 接口抽象，可插拔</td></tr>
-                <tr><td>文档与社区</td><td>官方文档消失，社区分散</td><td>中文/英文文档齐全，Discord 活跃</td></tr>
-                <tr><td>包管理</td><td>只能通过 Package Manager 安装，版本锁定</td><td>可直接导入 Unity Package 或 via UPM</td></tr>
+                <tr><td>Transport 层</td><td>绑定 Unity 的 Relay 服务，无法灵活替换</td><td>Transport 抽象类，可插拔（KCP/TCP/WebSocket 等）</td></tr>
+                <tr><td>文档与社区</td><td>官方文档消失，社区分散</td><td>英文文档齐全，Discord 活跃</td></tr>
+                <tr><td>包管理</td><td>只能通过 Package Manager 安装，版本锁定</td><td>可直接导入 Unity Package 或 via UPM / Asset Store</td></tr>
             </tbody>
         </table>
 
-        <p>2018 年，UNet 宣布停更后，原 Unity 网络团队成员 <strong>Johan Andersson (Revenant)</strong>
-        基于 UNet 源码 fork 出了 Mirror，目标是做一个<strong>更简单、更透明、更好改</strong>的网络框架。</p>
+        <p>2018 年，UNet 宣布停更后，社区开发者基于 UNet 源码 fork 出了 Mirror，
+        目标是做一个<strong>更简单、更透明、更好改</strong>的网络框架。Mirror 由 <strong>MirrorNetworking</strong> 组织维护，
+        在 GitHub 上持续更新至今。</p>
 
         <div class="sidebar-note">
             <strong>为什么"好改"很重要？</strong>
@@ -119,8 +120,7 @@
    │            │          │             │
    │ Player A   │          │  Authority  │
    │ Player B   │          │  全部真相    │
-   └────────────┘          └─────────────┘
-</code></pre>
+   └────────────┘          └─────────────┘</code></pre>
 
         <p>在这个模型中：</p>
 
@@ -148,8 +148,7 @@
      ┌────┴────┐
      │ Client  │
      │ 玩家 B  │
-     └─────────┘
-</code></pre>
+     └─────────┘</code></pre>
 
         <div class="callout callout-info">
             <strong>开发时的便利：</strong>在 Unity Editor 中点击 "Host" 按钮，当前实例就同时变成了服务器和客户端。
@@ -195,13 +194,13 @@
 enemy.Health -= damage;  // ❌ 服务器不认可！
 
 // 正确做法：发送请求给服务器
-Shoot();  // [Command] 方法</code></pre>
+CmdShoot();  // [Command] 方法</code></pre>
                 </div>
             </div>
             <div class="step">
                 <div class="step-number">2</div>
                 <div class="step-content">
-                    <h4>Command RPC 序列化与发送</h4>
+                    <h4>Command 序列化与发送</h4>
                     <p><code>[Command]</code> 标记的方法被 Mirror 拦截，序列化为网络消息，
                     通过 Transport 层发送到服务器。消息内容通常包含：目标位置、武器类型、时间戳等。</p>
                 </div>
@@ -215,7 +214,8 @@ Shoot();  // [Command] 方法</code></pre>
                     • 武器还在冷却中吗？<br>
                     • 敌人在视野范围内吗？<br>
                     验证通过后才执行逻辑。</p>
-                    <pre><code class="language-csharp">public override void CmdShoot(Vector3 origin, Vector3 direction)
+                    <pre><code class="language-csharp">[Command]
+void CmdShoot(Vector3 origin, Vector3 direction)
 {
     // 验证 1：冷却时间
     if (Time.time < lastShootTime + fireRate) return;
@@ -225,13 +225,12 @@ Shoot();  // [Command] 方法</code></pre>
     if (distance > weaponRange) { Debug.LogWarning("射程溢出"); return; }
 
     // 验证 3：射线检测（敌人是否真的在准星方向）
-    RaycastHit hit;
-    if (Physics.Raycast(origin, direction, out hit, weaponRange))
+    if (Physics.Raycast(origin, direction, out RaycastHit hit, weaponRange))
     {
         if (hit.collider.TryGetComponent(out NetworkIdentity target))
         {
             // 验证通过，造成伤害
-            TargetTakeDamage(target, damage, hit.point);
+            target.GetComponent&lt;HealthSystem&gt;().TakeDamage(damage);
         }
     }
 
@@ -243,7 +242,7 @@ Shoot();  // [Command] 方法</code></pre>
                 <div class="step-number">4</div>
                 <div class="step-content">
                     <h4>服务器广播结果</h4>
-                    <p>服务器通过 <code>[TargetRpc]</code> 或 <code>[ClientRpc]</code> 通知所有相关客户端：
+                    <p>服务器通过 <code>[ClientRpc]</code> 通知所有相关客户端：
                     "玩家 A 射击了，命中了敌人 B，造成了 X 点伤害"。每个客户端播放枪口火焰特效、
                     血条动画、音效——但这些只是<strong>表现层</strong>，真正的伤害计算在服务器已经完成了。</p>
                 </div>
@@ -275,17 +274,23 @@ Shoot();  // [Command] 方法</code></pre>
             </thead>
             <tbody>
                 <tr><td><code>NetworkIdentity</code></td><td>标识一个 GameObject 是网络对象。每个网络对象必须有且仅有一个。</td><td>第 2 章</td></tr>
-                <tr><td><code>NetworkServer</code></td><td>服务器端单例。管理所有连接、Spawn 的对象、游戏逻辑。</td><td>第 2 章</td></tr>
-                <tr><td><code>NetworkClient</code></td><td>客户端端单例。管理连接状态、向服务器发送消息。</td><td>第 2 章</td></tr>
-                <tr><td><code>Transport</code></td><td>传输层抽象。封装 TCP/UDP/KCP/WebSocket 的细节，向上提供统一的发送/接收接口。</td><td>第 6 章</td></tr>
-                <tr><td><code>[Command]</code></td><td>客户端→服务器的 RPC。标记后可以从客户端调用，服务器自动接收。</td><td>第 3 章</td></tr>
-                <tr><td><code>[ClientRpc]</code></td><td>服务器→所有客户端的广播。</td><td>第 3 章</td></tr>
+                <tr><td><code>NetworkServer</code></td><td>服务器端静态类。管理所有连接、Spawn 的对象、游戏逻辑。</td><td>第 2 章</td></tr>
+                <tr><td><code>NetworkClient</code></td><td>客户端端静态类。管理连接状态、向服务器发送消息。</td><td>第 2 章</td></tr>
+                <tr><td><code>Transport</code></td><td>传输层抽象类。封装 TCP/UDP/KCP/WebSocket 的细节，向上提供统一的发送/接收接口。</td><td>第 6 章</td></tr>
+                <tr><td><code>[Command]</code></td><td>客户端→服务器的 RPC。标记后可以从客户端调用，服务器自动接收。支持 <code>requiresAuthority</code> 选项。</td><td>第 3 章</td></tr>
+                <tr><td><code>[ClientRpc]</code></td><td>服务器→所有客户端的广播。支持 <code>includeOwner</code> 选项。</td><td>第 3 章</td></tr>
                 <tr><td><code>[TargetRpc]</code></td><td>服务器→指定客户端的单播。</td><td>第 3 章</td></tr>
-                <tr><td><code>[SyncVar]</code></td><td>标记字段后，服务器修改时自动同步到所有客户端。</td><td>第 3 章</td></tr>
-                <tr><td><code>NetworkManager</code></td><td>开箱即用的管理器。处理连接流程、场景切换、Player Spawn 点选择。可继承扩展。</td><td>贯穿全教程</td></tr>
-                <tr><td><code>NetworkBehaviour</code></td><td>所有附加在网络对象上的脚本的基类。提供 <code>isServer</code>、<code>isClient</code> 等属性。</td><td>第 2 章</td></tr>
+                <tr><td><code>[SyncVar]</code></td><td>标记字段后，服务器修改时自动同步到所有客户端。支持 <code>hook</code> 回调。</td><td>第 3 章</td></tr>
+                <tr><td><code>NetworkManager</code></td><td>开箱即用的管理器组件。处理连接流程、场景切换、Player Spawn 点选择。可继承扩展。</td><td>贯穿全教程</td></tr>
+                <tr><td><code>NetworkBehaviour</code></td><td>所有附加在网络对象上的脚本的基类。提供 <code>isServer</code>、<code>isClient</code>、<code>isOwned</code> 等属性。</td><td>第 2 章</td></tr>
             </tbody>
         </table>
+
+        <div class="callout callout-info">
+            <strong>Mirror 96 的命名变化：</strong>旧版 Mirror 中 <code>hasAuthority</code> 属性在新版本中已更名为
+            <code>isOwned</code>。两者含义相同——表示当前客户端是否拥有此对象的控制权。
+            本教程统一使用 <code>isOwned</code>。
+        </div>
 
         <h2>1.7 本章小结</h2>
 
@@ -324,7 +329,7 @@ Shoot();  // [Command] 方法</code></pre>
                     1) 作弊防范、NAT 穿透简单、掉线不影响其他人、服务器可无头部署。
                     2) 应该发给服务器——客户端直接放动画会导致服务器不认可、其他玩家看到不一致。
                     3) 这是单机代码，在网络游戏中客户端直接移动角色意味着服务器不认可你的位置，
-                    服务器下一帧的状态更新会把你的位置"拉回去"（interpolation 除外）。
+                    服务器下一帧的状态更新会把你的位置"拉回去"（插值除外）。
                     4) 本地同屏不需要网络框架。但如果要"局域网联机"，就需要。Mirror 主要针对远程联网场景。
                 </div>
             </div>

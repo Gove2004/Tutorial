@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>价值函数与贝尔曼方程 - PyTorch 强化学习教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-核心概念-Agent-Environment-Reward.html">← 上一章</a>
+        <a href="04-Q-Learning与DQN.html">第 4 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 3 章：价值函数与贝尔曼方程</h1>
+
+        <h2>3.1 为什么要学习价值函数</h2>
+
+        <p>在上一章我们定义了 V(s) 和 Q(s,a)，但还没有解释<strong>如何计算它们</strong>。价值函数是整个强化学习算法的理论基石——几乎所有主流算法都在以某种方式估计或利用价值函数。</p>
+
+        <p>想象你在玩一个迷宫游戏，目标是找到出口。你可以：</p>
+        <ul>
+            <li><strong>试错走完全程</strong>：每次从起点走到出口，记录路径长度（蒙特卡罗方法）</li>
+            <li><strong>从出口倒推</strong>：知道出口值为 0，那么出口邻居的值为 1，邻居的邻居为 2……（动态规划）</li>
+            <li><strong>边走边更新</strong>：每走一步，根据"这步值多少"就地更新（时序差分）</li>
+        </ul>
+
+        <p>这三种方法对应了强化学习的三大学习路线。</p>
+
+        <h2>3.2 贝尔曼方程：价值函数的递归定义</h2>
+
+        <div class="definition">
+            <h4>贝尔曼期望方程</h4>
+            <p>价值函数的递归定义是强化学习最核心的方程：</p>
+            <p><strong>状态价值函数：</strong><code>V^π(s) = E_π[R_t + γV^π(s_{t+1}) | s_t = s]</code></p>
+            <p><strong>动作价值函数：</strong><code>Q^π(s,a) = E_π[R_t + γQ^π(s_{t+1}, a_{t+1}) | s_t = s, a_t = a]</code></p>
+            <p>直觉：<strong>当前价值 = 即时奖励 + 折扣后的未来价值</strong></p>
+        </div>
+
+        <p>贝尔曼方程的妙处在于它把"无限未来的期望"递归地表达成了"一步奖励 + 下一步的价值"。这意味着我们不需要枚��所有可能的未来路径，只需知道下一步的值即可。</p>
+
+        <pre><code class="language-python">"""
+贝尔曼方程的直觉推导
+假设我们有两个状态：A（安全）和 B（危险）
+从 A 出发：
+  - 以概率 0.9 留在 A，获得奖励 +1
+  - 以概率 0.1 进入 B，获得奖励 0
+
+从 B 出发：
+  - 以概率 1.0 进入终态，获得奖励 -10
+
+根据贝尔曼方程：
+V(A) = 0.9 * (1 + γ*V(A)) + 0.1 * (0 + γ*V(B))
+V(B) = 1.0 * (-10 + γ*V(terminal))
+V(terminal) = 0
+
+代入 γ = 0.9：
+V(B) = -10
+V(A) = 0.9 * (1 + 0.9*V(A)) + 0.1 * (0.9*(-10))
+     = 0.9 + 0.81*V(A) - 0.9
+     = 0.81*V(A)
+
+解得：V(A) = 0 / 0.19 = 0  (有趣的结果！)
+
+这说明了什么？长期来看，进入 B 的代价 (-10) 被高折扣完全抵消了。
+如果 γ = 0.99，则 V(A) = 0.9/(1-0.81) ≈ 4.74，说明长期规划者更看重安全。
+"""
+
+def bellman_value_iteration(transitions, rewards, gamma=0.9, iterations=100):
+    """
+    用动态规划（值迭代）求解最优价值函数
+    transitions: dict, transitions[s][a] = [(s', prob), ...]
+    rewards: dict, rewards[s][a] = reward_value
+    """
+    V = {s: 0.0 for s in transitions}
+
+    for i in range(iterations):
+        V_new = {}
+        for s in transitions:
+            # 计算每个动作的 Q 值
+            q_values = []
+            for a in transitions[s]:
+                q = rewards[s][a]
+                for s_prime, prob in transitions[s][a]:
+                    q += gamma * prob * V[s_prime]
+                q_values.append(q)
+            # 取最大值（最优策略）
+            V_new[s] = max(q_values) if q_values else 0
+
+        # 检查收敛
+        max_delta = max(abs(V_new[s] - V[s]) for s in V)
+        V = V_new
+        if max_delta < 1e-6:
+            print(f"收敛于第 {i+1} 次迭代")
+            break
+
+    return V
+
+# 示例：简单迷宫
+transitions = {
+    'A': {'up': [('A', 0.9), ('B', 0.1)], 'down': [('A', 1.0)]},
+    'B': {'up': [('A', 0.1), ('B', 0.9)], 'down': [('terminal', 1.0)]},
+}
+rewards = {'A': {'up': 1.0, 'down': 0.5}, 'B': {'up': 0.0, 'down': -10.0}}
+
+V_opt = bellman_value_iteration(transitions, rewards, gamma=0.9)
+print(f"最优价值函数: {V_opt}")
+</code></pre>
+
+        <h2>3.3 贝尔曼最优方程</h2>
+
+        <p>上面我们计算的是<strong>遵循某个固定策略</strong>的价值。但如果 Agent 可以选择最优策略呢？贝尔曼最优方程给出了答案：</p>
+
+        <div class="definition">
+            <h4>贝尔曼最优方程</h4>
+            <p><strong>最优状态价值函数：</strong><code>V*(s) = max_a E[R_t + γV*(s_{t+1}) | s_t = s, a_t = a]</code></p>
+            <p><strong>最优动作价值函数：</strong><code>Q*(s,a) = E[R_t + γ max_{a'} Q*(s_{t+1}, a') | s_t = s, a_t = a]</code></p>
+            <p>关键区别：右端出现了 <code>max</code> 操作符——Agent 总是选择能让未来价值最大化的动作。</p>
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>最优值函数 ≠ 最优策略</strong>：知道 V*(s) 只是第一步，从 V* 提取最优策略还需要：<code>π*(s) = argmax_a Q*(s,a)</code>。在连续动作空间中，这个最大化操作本身就是一个优化问题。
+        </div>
+
+        <h2>3.4 三大学习路线对比</h2>
+
+        <p>如何计算价值函数？三种方法各有优劣：</p>
+
+        <table>
+            <thead>
+                <tr><th>方法</th><th>原理</th><th>优点</th><th>缺点</th><th>对应算法</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>蒙特卡罗 (MC)</strong></td>
+                    <td>跑完整 episode，用实际回报估计价值</td>
+                    <td>无偏估计，实现简单</td>
+                    <td>需要 episode 结束，方差大，不能在线学习</td>
+                    <td>REINFORCE</td>
+                </tr>
+                <tr>
+                    <td><strong>动态规划 (DP)</strong></td>
+                    <td>利用已知的 MDP 模型，迭代求解贝尔曼方程</td>
+                    <td>收敛保证，无方差</td>
+                    <td>需要完整的转移模型 P 和 R，状态空间大时计算不可行</td>
+                    <td>值迭代、策略迭代</td>
+                </tr>
+                <tr>
+                    <td><strong>时序差分 (TD)</strong></td>
+                    <td>用一步 TD 目标 <code>R + γV(s')</code> 作为价值目标的估计</td>
+                    <td>在线学习，有偏但低方差，无需完整模型</td>
+                    <td>引入偏差，需要合适的学习率</td>
+                    <td>Q-Learning、DQN、A2C、PPO</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>3.5 TD 误差：学习的核心信号</h2>
+
+        <p>时序差分方法的核心是 <strong>TD 误差（Temporal Difference Error）</strong>，它衡量了"预测"和"实际"之间的差距：</p>
+
+        <pre><code class="language-python">"""
+TD 误差：δ = R + γV(s') - V(s)
+
+物理直觉：
+- δ > 0：实际比预期好，应该提高 V(s)
+- δ < 0：实际比预期差，应该降低 V(s)
+- δ = 0：预测准确，不需要更新
+"""
+
+import torch
+import torch.nn as nn
+
+class ValueNetwork(nn.Module):
+    """简单的状态价值网络"""
+    def __init__(self, state_dim, hidden_dim=64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+    def forward(self, state):
+        return self.net(state)
+
+# 模拟一个 TD 更新
+state_dim = 4
+gamma = 0.99
+lr = 0.001
+
+value_net = ValueNetwork(state_dim)
+optimizer = torch.optim.Adam(value_net.parameters(), lr=lr)
+
+# 假设从某个状态 s 执行动作后到达 s'，获得奖励 r
+state = torch.randn(1, state_dim)
+action = 0  # 假设
+next_state = torch.randn(1, state_dim)
+reward = 1.0
+
+# 计算当前价值预测
+current_q = value_net(state).squeeze()  # V(s)
+
+# 计算 TD 目标（使用 next_state 的价值）
+with torch.no_grad():
+    target = reward + gamma * value_net(next_state).squeeze()  # R + γV(s')
+
+# TD 误差
+td_error = target - current_q
+
+# 计算损失并更新
+loss = td_error.pow(2)
+optimizer.zero_grad()
+loss.backward()
+optimizer.step()
+
+print(f"V(s)  = {current_q.item():.4f}")
+print(f"目标  = {target.item():.4f}")
+print(f"TD误差 = {td_error.item():.4f}")
+</code></pre>
+
+        <h2>3.6 优势函数：从 Q 和 V 中提炼</h2>
+
+        <p>在策略梯度算法中，我们常用<strong>优势函数（Advantage Function）</strong>来衡量某个动作比平均好多少：</p>
+
+        <pre><code class="language-python">"""
+优势函数：A(s,a) = Q(s,a) - V(s)
+
+解释：
+- A(s,a) > 0：动作 a 比平均好，应该增加其概率
+- A(s,a) < 0：动作 a 比平均差，应该减少其概率
+- A(s,a) = 0：动作 a 就是平均水平
+"""
+
+def compute_advantage(rewards, values, gamma=0.99):
+    """
+    从轨迹数据计算优势函数
+    使用广义优势估计 (GAE) 的简化版：TD(lambda)
+    """
+    advantages = []
+    gae = 0
+    for t in reversed(range(len(rewards))):
+        if t == len(rewards) - 1:
+            next_value = 0
+        else:
+            next_value = values[t + 1]
+
+        td_delta = rewards[t] + gamma * next_value - values[t]
+        gae = td_delta + gamma * 0.95 * gae  # lambda=0.95 的 GAE
+        advantages.insert(0, gae)
+
+    return advantages
+
+# 优势函数在 PPO 中至关重要，下一章会详细讲解
+</code></pre>
+
+        <h2>3.7 本章小结</h2>
+        <ul>
+            <li>贝尔曼方程将无限未来价值递归为"即时奖励 + 折扣后未来价值"</li>
+            <li>蒙特卡罗需要完整 episode，动态规划需要完整模型，时序差分折中两者</li>
+            <li>TD 误差是时序差分学习的最基本信号</li>
+            <li>优势函数 A(s,a) = Q(s,a) - V(s) 衡量动作的相对优劣</li>
+            <li>GAE（广义优势估计）是连接 TD 和蒙特卡罗的桥梁</li>
+        </ul>
+
+        <h2>练习</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>推导练习</h4>
+                    <p>在一个简单的 3 状态 MDP 中（状态 A→B→C，C 是终止状态），手动用贝尔曼方程计算 V*(A)、V*(B)、V*(C)，假设 γ=0.9，R(A→B)=1，R(B→C)=2，R(终端)=0。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>编程练习</h4>
+                    <p>实现一个简单的 2D 迷宫环境（4x4 网格），包含障碍物和奖励。分别用值迭代和 Q-Learning 求解，比较两者的收敛速度和最终策略。</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="02-核心概念-Agent-Environment-Reward.html">← 上一章：核心概念</a>
+            <a href="04-Q-Learning与DQN.html">第 4 章：Q-Learning →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+        function showTab(btn) {
+            const tabs = btn.closest('.tabs');
+            tabs.querySelectorAll('.tab-buttons button').forEach(b => b.classList.remove('active'));
+            tabs.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            tabs.querySelectorAll('.tab-content').forEach(c => {
+                if (c.previousElementSibling === btn) c.classList.add('active');
+            });
+        }
+    </script>
+</body>
+</html>

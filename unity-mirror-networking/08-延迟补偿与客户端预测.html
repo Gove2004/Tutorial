@@ -25,6 +25,17 @@
             本章从零搭建一套可工作的预测+插值系统。
         </p>
 
+        <div class="callout callout-info">
+            <strong>📌 Mirror 96 API 更新要点（本章涉及）：</strong><br>
+            • <code>hasAuthority</code> → <code>isOwned</code>：NetworkBehaviour 属性更名<br>
+            • <code>isLocalPlayer</code> 已隐含 <code>isOwned</code>，无需双重检查<br>
+            • <code>NetworkClient.RegisterHandler&lt;T&gt;</code> 不再有 <code>replace</code> 参数<br>
+            • 自定义消息必须为 <code>struct : INetworkMessage</code>（非 <code>class : MessageBase</code>）<br>
+            • Command 中可通过 <code>NetworkConnectionToClient sender = null</code> 获取发送方<br>
+            • <code>connectionToClient.rtt</code> 可直接获取往返延迟<br>
+            • <code>[Command]</code> / <code>[ClientRpc]</code> 方法前缀（Cmd/Rpc）从必需变为<strong>可选</strong>（推荐保留）
+        </div>
+
         <h2>8.1 问题的本质：延迟为什么影响体验？</h2>
 
         <p>假设你和服务器的 RTT（往返延迟）是 200ms：</p>
@@ -49,9 +60,9 @@ t=200ms  客户端: 收到新位置更新
 
         <div class="definition">
             <h4>关键指标</h4>
-            <p><strong>RTT（Round Trip Time）</strong>：数据包从客户端到服务器再返回的时间。<br>
+            <p><strong>RTT（Round Trip Time）</strong>：数据包从客户端到服务器再返回的时间。在 Mirror 96 中可通过 <code>connectionToClient.rtt</code> 获取。<br>
             <strong>服务端 Tick Rate</strong>：服务器每秒更新游戏的次数。常见值：20Hz（50ms）、30Hz（33ms）、60Hz（16ms）。<br>
-            <strong>Input Lag</strong>：从玩家按下按键到看到效果的时间。</strong></p>
+            <strong>Input Lag</strong>：从玩家按下按键到看到效果的时间。</p>
         </div>
 
         <h2>8.2 客户端预测（Client-side Prediction）</h2>
@@ -59,41 +70,50 @@ t=200ms  客户端: 收到新位置更新
         <p>核心思想：<strong>不等服务器确认，客户端先自己移动</strong>。
         如果服务器的反馈和客户端的预测不一致，再修正回来。</p>
 
-        <pre><code class="language-csharp">public class ClientPrediction : NetworkBehaviour
+        <pre><code class="language-csharp">using Mirror;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class ClientPrediction : NetworkBehaviour
 {
     public float moveSpeed = 5f;
 
     // 输入缓存：存储尚未被服务器确认的输入
-    List&lt;PlayerInput&gt; pendingInputs = new List&lt;PlayerInput&gt;();
+    readonly List&lt;PlayerInput&gt; pendingInputs = new List&lt;PlayerInput&gt;();
     int serverConfirmedSeq = 0;
+    int inputSequence = 0;
+    float lastSendTime = 0f;
 
     // 服务器确认的移动速度（可能和客户端略有不同）
     public float serverMoveSpeed = 5f;
 
     void Update()
     {
-        if (!isLocalPlayer || !hasAuthority) return;
+        // Mirror 96: isLocalPlayer 已隐含 isOwned，无需额外检查 hasAuthority
+        if (!isLocalPlayer) return;
+
+        PlayerInput? newInput = null;
 
         // ===== 第 1 步：收集输入 =====
         Vector2 input = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
         if (input.sqrMagnitude > 0.01f)
         {
-            PlayerInput newInput = new PlayerInput
+            newInput = new PlayerInput
             {
                 sequence = ++inputSequence,
                 timestamp = Time.time,
                 direction = input
             };
-            pendingInputs.Add(newInput);
+            pendingInputs.Add(newInput.Value);
 
             // ===== 第 2 步：预测性执行（本地立即应用）====
             PredictMove(input * moveSpeed * Time.deltaTime);
         }
 
         // ===== 第 3 步：发送输入给服务器 =====
-        if (Time.time - lastSendTime > 1f / 30f)  // 30Hz 发送频率
+        if (newInput.HasValue && Time.time - lastSendTime > 1f / 30f)  // 30Hz 发送频率
         {
-            CmdSendInput(newInput);
+            CmdSendInput(newInput.Value);
             lastSendTime = Time.time;
         }
     }
@@ -103,6 +123,7 @@ t=200ms  客户端: 收到新位置更新
         transform.position += delta;
     }
 
+    // Mirror 96: Cmd 前缀可选但推荐保留作为约定
     [Command]
     void CmdSendInput(PlayerInput input)
     {
@@ -111,11 +132,26 @@ t=200ms  客户端: 收到新位置更新
         RpcBroadcastInput(input);
     }
 
+    void ServerProcessInput(PlayerInput input)
+    {
+        // 服务器端执行移动逻辑...
+        transform.position += (Vector3)(input.direction * serverMoveSpeed * Time.deltaTime);
+    }
+
+    // Mirror 96: Rpc 前缀可选但推荐保留作为约定
     [ClientRpc]
     void RpcBroadcastInput(PlayerInput input)
     {
         // 所有客户端收到后更新对应玩家的位置
-        UpdatePlayerPosition(input.sequence, input.estimatedPosition);
+        UpdatePlayerPosition(input);
+    }
+
+    void UpdatePlayerPosition(PlayerInput input)
+    {
+        if (!isLocalPlayer)  // 远程玩家才需要更新
+        {
+            // 应用位置更新...
+        }
     }
 
     // 服务器回传确认状态
@@ -141,13 +177,22 @@ t=200ms  客户端: 收到新位置更新
     }
 }
 
-[Serializable]
+[System.Serializable]
 public struct PlayerInput
 {
     public int sequence;
     public float timestamp;
     public Vector2 direction;
 }</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>Mirror 96 变化：</strong>
+            <ul>
+                <li><code>hasAuthority</code> 已更名为 <code>isOwned</code>。对于 <strong>Player 对象</strong>，<code>isLocalPlayer</code> 为 true 时 <code>isOwned</code> 也必为 true，因此 <code>isLocalPlayer && hasAuthority</code> 可简化为 <code>isLocalPlayer</code>。</li>
+                <li><code>[Command]</code> 和 <code>[ClientRpc]</code> 的 Cmd/Rpc 前缀从<strong>必需</strong>变为<strong>可选</strong>，但社区约定仍推荐保留前缀以提高可读性。</li>
+                <li>如需在 Command 中获取发送方连接，可添加 <code>NetworkConnectionToClient sender = null</code> 可选参数，Mirror 会自动填充。</li>
+            </ul>
+        </div>
 
         <h3>8.2.1 预测的核心难点：校正（Reconciliation）</h3>
 
@@ -169,7 +214,9 @@ public struct PlayerInput
   不删除pending输入，而是在每一帧将预测位置向服务器位置靠拢。
   优点：视觉平滑。缺点：需要调参（校正速度不能太快也不能太慢）。</code></pre>
 
-        <pre><code class="language-csharp">// 平滑校正的实现
+        <pre><code class="language-csharp">using UnityEngine;
+
+// 平滑校正组件（不需要网络功能，挂载在客户端预测对象上）
 public class SmoothCorrection : MonoBehaviour
 {
     public float correctionSpeed = 5f;
@@ -217,7 +264,33 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
 关键：引入 bufferTime（缓冲时间），让渲染永远落后服务器一小段时间。
       这样即使网络抖动导致数据包迟到，也有余量补偿。</code></pre>
 
-        <pre><code class="language-csharp">public class StateInterpolation : NetworkBehaviour
+        <pre><code class="language-csharp">using Mirror;
+using System.Collections.Generic;
+using UnityEngine;
+
+// Mirror 96: 自定义消息必须是 struct : INetworkMessage
+public struct PositionUpdateMessage : INetworkMessage
+{
+    public float timestamp;
+    public Vector3 position;
+    public Quaternion rotation;
+
+    public void Serialize(NetworkWriter writer)
+    {
+        writer.WriteSingle(timestamp);
+        writer.WriteVector3(position);
+        writer.WriteQuaternion(rotation);
+    }
+
+    public void Deserialize(NetworkReader reader)
+    {
+        timestamp = reader.ReadSingle();
+        position = reader.ReadVector3();
+        rotation = reader.ReadQuaternion();
+    }
+}
+
+public class StateInterpolation : NetworkBehaviour
 {
     // 存储最近的状态历史
     struct StateRecord
@@ -227,19 +300,23 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
         public Quaternion rotation;
     }
 
-    Queue&lt;StateRecord&gt; stateBuffer = new Queue&lt;StateRecord&gt;();
+    readonly Queue&lt;StateRecord&gt; stateBuffer = new Queue&lt;StateRecord&gt;();
 
     public float interpolationFactor = 0.1f;  // 插值系数（越小越平滑，但延迟越大）
-    public float maxBufferSize = 10;           // 最大缓冲状态数
+    public int maxBufferSize = 10;             // 最大缓冲状态数
 
-    void OnStartClient()
+    // Mirror 96: OnStartClient() 是 NetworkBehaviour 的虚方法
+    public override void OnStartClient()
     {
-        // 注册位置更新消息处理器
-        NetworkClient.RegisterHandler&lt;PositionUpdateMessage&gt;(OnPositionUpdate, replace: true);
+        // Mirror 96: RegisterHandler 不再有 replace 参数
+        // 消息处理器签名：void Handler(T msg) — 无连接参数
+        NetworkClient.RegisterHandler&lt;PositionUpdateMessage&gt;(OnPositionUpdate);
     }
 
     void OnPositionUpdate(PositionUpdateMessage msg)
     {
+        // 注意：客户端消息处理器签名是 void Handler(T msg)
+        // 不含 NetworkConnection 参数（与服务器端处理器不同）
         StateRecord record = new StateRecord
         {
             serverTime = msg.timestamp,
@@ -258,10 +335,12 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
 
     void Update()
     {
+        // 只对远程玩家做插值（本地玩家用预测）
         if (!isLocalPlayer && stateBuffer.Count >= 2)
         {
-            StateRecord older = stateBuffer.ToArray()[0];
-            StateRecord newer = stateBuffer.ToArray()[1];
+            StateRecord[] records = stateBuffer.ToArray();
+            StateRecord older = records[0];
+            StateRecord newer = records[1];
 
             // 计算插值因子
             float timeSpan = newer.serverTime - older.serverTime;
@@ -277,6 +356,16 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
         }
     }
 }</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>Mirror 96 变化：</strong>
+            <ul>
+                <li><code>NetworkClient.RegisterHandler&lt;T&gt;(handler)</code> 不再有 <code>replace</code> 参数。如需替换已有处理器，直接再次注册即可。</li>
+                <li>自定义消息从 <code>class XXXMessage : MessageBase</code> 改为 <code>struct XXXMessage : INetworkMessage</code>，需实现 <code>Serialize()</code> 和 <code>Deserialize()</code> 方法。</li>
+                <li>客户端消息处理器签名为 <code>void Handler(T msg)</code>（无连接参数）；服务器端为 <code>void Handler(NetworkConnectionToClient conn, T msg)</code>。</li>
+                <li><code>OnStartClient()</code> 需使用 <code>override</code> 关键字，因为它是 NetworkBehaviour 的虚方法。</li>
+            </ul>
+        </div>
 
         <h3>8.3.1 插值的延迟权衡</h3>
 
@@ -306,8 +395,15 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
         当你看到他在某个位置时，实际上他已经移动了 100ms。
         如果你朝"看到的位置"射击，大概率打不中——因为那已经是"过去"了。</p>
 
-        <pre><code class="language-csharp">public class LagCompensation : MonoBehaviour
+        <pre><code class="language-csharp">using Mirror;
+using System.Collections.Generic;
+using UnityEngine;
+
+// Mirror 96: 使用 NetworkBehaviour（需要 [Command] 和 connectionToClient）
+public class LagCompensation : NetworkBehaviour
 {
+    [SerializeField] Rigidbody rb;  // Mirror 96: 使用 SerializeField 而非废弃的 rigidbody 属性
+
     // 服务器端：回放敌人的历史位置
     struct PositionHistory
     {
@@ -316,8 +412,8 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
         public Vector3 velocity;
     }
 
-    Queue&lt;PositionHistory&gt; positionHistory = new Queue&lt;PositionHistory&gt;();
-    const int HistoryLength = 2;  // 保留最近 2 秒的历史
+    readonly Queue&lt;PositionHistory&gt; positionHistory = new Queue&lt;PositionHistory&gt;();
+    const int HistoryLengthSeconds = 2;  // 保留最近 2 秒的历史
 
     void RecordPosition()
     {
@@ -325,12 +421,12 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
         {
             timestamp = Time.time,
             position = transform.position,
-            velocity = rigidbody.velocity
+            velocity = rb != null ? rb.velocity : Vector3.zero
         };
 
         positionHistory.Enqueue(record);
 
-        while (positionHistory.Count > HistoryLength * 60)  // 假设 60fps
+        while (positionHistory.Count > HistoryLengthSeconds * 60)  // 假设 60fps
         {
             positionHistory.Dequeue();
         }
@@ -350,54 +446,100 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
         }
 
         // 没找到精确匹配，用最近的
-        return positionHistory.Last().position;
+        if (positionHistory.Count > 0)
+        {
+            // 遍历找最接近的
+            Vector3 closest = transform.position;
+            float minDiff = float.MaxValue;
+            foreach (var record in positionHistory)
+            {
+                float diff = Mathf.Abs(record.timestamp - targetTime);
+                if (diff < minDiff)
+                {
+                    minDiff = diff;
+                    closest = record.position;
+                }
+            }
+            return closest;
+        }
+
+        return transform.position;
     }
 
     // 射击时
-    [Command]
-    void CmdShoot(Vector3 shootDirection, float shotTime)
+    // Mirror 96: requiresAuthority = false 允许无权限对象也调用此 Command
+    // NetworkConnectionToClient sender = null 自动填充发送方连接
+    [Command(requiresAuthority = false)]
+    void CmdShoot(Vector3 shootDirection, float shotTime, Vector3 shootOrigin,
+                  NetworkConnectionToClient sender = null)
     {
-        float rtt = connectionToClient.rtt;
+        // Mirror 96: 通过 sender 参数获取 RTT（也可用 connectionToClient.rtt）
+        float rtt = sender != null ? sender.rtt : connectionToClient.rtt;
 
         // 获取敌人在射击时刻的位置（而不是现在的位置）
         Vector3 enemyPosAtShotTime = GetPositionAtTime(shotTime, rtt);
 
         // 用回溯后的位置做射线检测
         RaycastHit hit;
-        if (Physics.Raycast(shootOrigin, shootDirection, out hit, weaponRange))
+        if (Physics.Raycast(shootOrigin, shootDirection, out hit, 100f))
         {
-            if (hit.collider.gameObject == enemy)
+            var healthSystem = hit.collider.GetComponent&lt;HealthSystem&gt;();
+            if (healthSystem != null)
             {
-                // 命中！
-                enemy.GetComponent&lt;HealthSystem&gt;().TakeDamage(damage);
+                healthSystem.TakeDamage(25);
             }
         }
     }
 }</code></pre>
 
+        <div class="callout callout-warning">
+            <strong>Mirror 96 变化：</strong>
+            <ul>
+                <li>需要在 Command 中获取发送方连接时，添加 <code>NetworkConnectionToClient sender = null</code> 可选参数，Mirror 自动填充。也可直接使用 <code>connectionToClient.rtt</code>。</li>
+                <li><code>[Command(requiresAuthority = false)]</code>：当非拥有权限的对象需要调用 Command 时使用（如非 Player 对象上的射击逻辑）。</li>
+                <li>Unity 的 <code>rigidbody</code> 快捷属性已废弃，应使用 <code>[SerializeField] Rigidbody rb;</code> 在 Inspector 中引用。</li>
+            </ul>
+        </div>
+
         <h2>8.5 完整整合：预测 + 插值 + 延迟补偿</h2>
 
         <p>一个完整的联网运动系统应该同时包含这三个组件：</p>
 
-        <pre><code class="language-csharp">public class CompleteNetworkedMovement : NetworkBehaviour
+        <pre><code class="language-csharp">using Mirror;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class CompleteNetworkedMovement : NetworkBehaviour
 {
     // ===== 客户端预测相关 =====
-    List&lt;MovementCommand&gt; clientCommands = new List&lt;MovementCommand&gt;();
+    readonly List&lt;MovementCommand&gt; clientCommands = new List&lt;MovementCommand&gt;();
     int nextCommandSeq = 0;
     Vector3 predictedPosition;
+    float lastSendTime = 0f;
+    public float sendRate = 30f;
 
     // ===== 服务器插值相关 =====
-    Queue&lt;ServerState&gt; serverStateBuffer = new Queue&lt;ServerState&gt;();
-    ServerState prevState;
-    ServerState nextState;
+    // 使用可空类型（struct 不能直接与 null 比较）
+    struct ServerState
+    {
+        public float timestamp;
+        public Vector3 position;
+        public Quaternion rotation;
+    }
+
+    readonly Queue&lt;ServerState&gt; serverStateBuffer = new Queue&lt;ServerState&gt;();
+    ServerState? prevState = null;
+    ServerState? nextState = null;
 
     // ===== 配置 =====
     public float interpolationDelay = 0.1f;  // 100ms 插值延迟
     public float correctionSpeed = 5f;
+    public float moveSpeed = 5f;
 
     void Update()
     {
-        if (isLocalPlayer && hasAuthority)
+        // Mirror 96: isLocalPlayer 已隐含 isOwned，无需检查 hasAuthority
+        if (isLocalPlayer)
         {
             UpdatePrediction();
         }
@@ -424,14 +566,16 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
             clientCommands.Add(cmd);
 
             // 预测执行
-            predictedPosition += input * moveSpeed * Time.deltaTime;
+            predictedPosition += (Vector3)(input * moveSpeed * Time.deltaTime);
             transform.position = predictedPosition;
         }
 
         // 发送输入
-        if (Time.time - lastSendTime > 1f / sendRate)
+        if (clientCommands.Count > 0 && Time.time - lastSendTime > 1f / sendRate)
         {
-            SendMovementCommand(clientCommands);
+            // Mirror 96: List&lt;T&gt; 作为 RPC 参数需要 Reader/Writer 支持
+            // 更推荐使用数组：MovementCommand[] 
+            CmdSendMovementCommand(clientCommands.ToArray());
             clientCommands.Clear();
             lastSendTime = Time.time;
         }
@@ -439,7 +583,7 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
 
     // ---------- 服务器处理部分 ----------
     [Command]
-    void CmdSendMovementCommand(List&lt;MovementCommand&gt; commands)
+    void CmdSendMovementCommand(MovementCommand[] commands)
     {
         foreach (var cmd in commands)
         {
@@ -452,9 +596,25 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
 
     void ProcessMovementCommand(MovementCommand cmd)
     {
-        Vector3 move = cmd.input * serverMoveSpeed * Time.deltaTime;
+        Vector3 move = (Vector3)(cmd.input * moveSpeed * Time.deltaTime);
         transform.position += move;
         RecordServerState();
+    }
+
+    void RecordServerState()
+    {
+        ServerState state = new ServerState
+        {
+            timestamp = Time.time,
+            position = transform.position,
+            rotation = transform.rotation
+        };
+        RpcReceiveServerState(state);
+    }
+
+    void BroadcastServerState()
+    {
+        // 服务器处理时 RecordServerState 已调用 RpcReceiveServerState
     }
 
     // ---------- 客户端插值部分 ----------
@@ -465,7 +625,7 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
         {
             ServerState latest = serverStateBuffer.Peek();
 
-            if (nextState == null || latest.timestamp > nextState.timestamp)
+            if (!nextState.HasValue || latest.timestamp > nextState.Value.timestamp)
             {
                 prevState = nextState ?? latest;
                 nextState = latest;
@@ -473,15 +633,15 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
             }
         }
 
-        if (prevState != null &amp;&amp; nextState != null)
+        if (prevState.HasValue && nextState.HasValue)
         {
-            float elapsed = Time.time - prevState.timestamp;
-            float duration = nextState.timestamp - prevState.timestamp;
+            float elapsed = Time.time - prevState.Value.timestamp;
+            float duration = nextState.Value.timestamp - prevState.Value.timestamp;
             float t = duration > 0 ? elapsed / duration : 0;
             t = Mathf.Clamp01(t);
 
-            transform.position = Vector3.Lerp(prevState.position, nextState.position, t);
-            transform.rotation = Quaternion.Slerp(prevState.rotation, nextState.rotation, t);
+            transform.position = Vector3.Lerp(prevState.Value.position, nextState.Value.position, t);
+            transform.rotation = Quaternion.Slerp(prevState.Value.rotation, nextState.Value.rotation, t);
         }
     }
 
@@ -496,30 +656,39 @@ t=66ms   收到位置 C（t=66时的位置）→ 渲染时用 B 和 C 之间的�
     }
 }
 
-[Serializable]
+[System.Serializable]
 public struct MovementCommand
 {
     public int seq;
     public float timestamp;
     public Vector2 input;
-}
-
-[Serializable]
-public struct ServerState
-{
-    public float timestamp;
-    public Vector3 position;
-    public Quaternion rotation;
 }</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>Mirror 96 注意事项：</strong>
+            <ul>
+                <li><code>ServerState</code> 是 <code>struct</code>，不能与 <code>null</code> 比较。使用 <code>ServerState?</code>（Nullable&lt;ServerState&gt;）或布尔标志位来判断是否已赋值。</li>
+                <li>RPC 参数推荐使用<strong>数组</strong>（<code>T[]</code>）而非 <code>List&lt;T&gt;</code>，因为数组是 Mirror 原生支持的序列化类型，性能更好且无需额外 Reader/Writer。</li>
+                <li>自定义 struct（如 <code>MovementCommand</code>、<code>ServerState</code>）作为 RPC 参数时，需要添加 <code>[System.Serializable]</code> 特性，Mirror 会自动生成序列化代码。</li>
+            </ul>
+        </div>
 
         <h2>8.6 调试与可视化</h2>
 
         <p>预测和插值的问题往往很难通过日志发现。可视化是关键：</p>
 
-        <pre><code class="language-csharp">public class NetworkDebugVisualizer : MonoBehaviour
+        <pre><code class="language-csharp">using Mirror;
+using UnityEngine;
+
+// Mirror 96: 使用 NetworkBehaviour（需要 isClient 属性）
+public class NetworkDebugVisualizer : NetworkBehaviour
 {
+    [SerializeField] Vector3 predictedPosition;
+    [SerializeField] Vector3 serverPosition;
+
     void OnDrawGizmos()
     {
+        // isClient 是 NetworkBehaviour 的只读属性
         if (!isClient) return;
 
         // 绘制预测位置（绿色球）
@@ -564,19 +733,38 @@ public struct ServerState
                 <tr><td>插值缓冲</td><td>2-3 个状态</td><td>太少容易断档，太多增加延迟</td></tr>
                 <tr><td>校正阈值</td><td>1-2 米</td><td>超过这个值说明模型不一致，需要调查根因</td></tr>
                 <tr><td>历史长度</td><td>2-3 秒</td><td>覆盖最大可能的 RTT + 抖动</td></tr>
+                <tr><td>RPC 参数类型</td><td>数组优于 List</td><td>Mirror 原生支持数组序列化，无需额外 Reader/Writer</td></tr>
+                <tr><td>RTT 获取方式</td><td><code>connectionToClient.rtt</code> 或 <code>sender.rtt</code></td><td>直接读取，无需额外消息往返</td></tr>
             </tbody>
         </table>
 
         <h2>8.8 本章小结</h2>
 
-        <ul>
-            <li><strong>客户端预测</strong>解决"自己的操作有延迟"的问题——不等服务器确认就执行</li>
-            <li><strong>状态插值</strong>解决"看别人一卡一卡"的问题——在两个状态间平滑过渡</li>
-            <li><strong>延迟补偿</strong>解决"明明瞄准了却打不中"的问题——回溯目标在射击时刻的位置</li>
-            <li>三者结合，才能在 200ms+ 延迟下获得可玩的体验</li>
-        </ul>
+        <table>
+            <thead>
+                <tr><th>技术</th><th>解决的问题</th><th>Mirror 96 API 要点</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>客户端预测</strong></td>
+                    <td>自己的操作有延迟 → 不等服务器确认就执行</td>
+                    <td><code>isLocalPlayer</code> 隐含 <code>isOwned</code>；<code>[Command]</code> 前缀可选</td>
+                </tr>
+                <tr>
+                    <td><strong>状态插值</strong></td>
+                    <td>看别人一卡一卡 → 在两个状态间平滑过渡</td>
+                    <td><code>RegisterHandler&lt;T&gt;</code> 无 <code>replace</code> 参数；消息为 <code>INetworkMessage</code></td>
+                </tr>
+                <tr>
+                    <td><strong>延迟补偿</strong></td>
+                    <td>明明瞄准了却打不中 → 回溯目标在射击时刻的位置</td>
+                    <td><code>sender.rtt</code> 获取延迟；<code>[Command(requiresAuthority = false)]</code></td>
+                </tr>
+            </tbody>
+        </table>
 
-        <p>这些技术是所有商业级联网游戏的标配。实现它们不需要高深数学，
+        <p>三者结合，才能在 200ms+ 延迟下获得可玩的体验。
+        这些技术是所有商业级联网游戏的标配。实现它们不需要高深数学，
         只需要理解延迟的来源和每一方看到的"时间线"。</p>
 
         <p>下一章，我们学习如何部署和运行——从本地测试到专用服务器到云端部署。</p>
@@ -590,16 +778,24 @@ public struct ServerState
                     <li><strong>场景推理：</strong>如果 RTT 是 0ms（局域网），还需要预测和插值吗？为什么？</li>
                     <li><strong>设计题：</strong>预测校正时，如果客户端和服务器对物理模拟的结果不一致（比如一个撞墙了，另一个穿过去了），应该如何处理？</li>
                     <li><strong>数值题：</strong>服务器 60Hz，RTT 100ms。插值延迟应该设多少？缓冲队列应该保持多少个状态？</li>
+                    <li><strong>Mirror 96 变化题：</strong>在 Mirror 96 中，如果要在一个非 Player 对象上实现延迟补偿射击逻辑，<code>[Command]</code> 需要添加什么参数？如何获取发送方的 RTT？</li>
+                    <li><strong>Mirror 96 变化题：</strong>自定义消息 <code>PositionUpdateMessage</code> 在 Mirror 96 中应该如何定义？客户端消息处理器的签名是什么？</li>
                 </ol>
 
                 <div class="callout callout-tip">
-                    <strong>参考答案：</strong>
+                    <strong>参考答案：</strong><br>
                     1) 理论上 RTT=0 时不需要预测。但实际上"零延迟"几乎不存在（即使是局域网也有 1-5ms）。
-                    而且插值不是为了 RTT，而是为了平滑服务器 tick 之间的抖动。所以插值始终需要。
+                    而且插值不是为了 RTT，而是为了平滑服务器 tick 之间的抖动。所以插值始终需要。<br><br>
                     2) 这是最常见的预测问题根源。解决方案：确保客户端和服务器的物理参数完全一致（重力、摩擦力、碰撞体）。
-                    如果仍然不一致，应该以服务器为准进行强制校正，而不是尝试让两边一致。
+                    如果仍然不一致，应该以服务器为准进行强制校正，而不是尝试让两边一致。<br><br>
                     3) 插值延迟建议 60-100ms（1-2 个 tick）。缓冲队列保持 3-5 个状态。
-                    60Hz 下 100ms = 6 个 tick，所以缓冲 5-6 个状态足够覆盖大多数抖动。
+                    60Hz 下 100ms ≈ 6 个 tick，所以缓冲 5-6 个状态足够覆盖大多数抖动。<br><br>
+                    4) 需要 <code>[Command(requiresAuthority = false)]</code>，因为非 Player 对象没有客户端权限。
+                    获取 RTT 两种方式：① 添加 <code>NetworkConnectionToClient sender = null</code> 参数，用 <code>sender.rtt</code>；
+                    ② 直接使用 <code>connectionToClient.rtt</code>（NetworkBehaviour 属性）。<br><br>
+                    5) 定义为 <code>public struct PositionUpdateMessage : INetworkMessage</code>，实现 <code>Serialize(NetworkWriter)</code> 和 <code>Deserialize(NetworkReader)</code> 方法。
+                    客户端消息处理器签名为 <code>void OnPositionUpdate(PositionUpdateMessage msg)</code>（无连接参数）。
+                    使用 <code>NetworkClient.RegisterHandler&lt;PositionUpdateMessage&gt;(OnPositionUpdate)</code> 注册（无 <code>replace</code> 参数）。
                 </div>
             </div>
         </details>

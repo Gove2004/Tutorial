@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Actor-Critic 与 A2C - PyTorch 强化学习教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="05-策略梯度与REINFORCE.html">← 上一章</a>
+        <a href="07-PPO算法深入.html">第 7 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 6 章：Actor-Critic 与 A2C</h1>
+
+        <h2>6.1 从 REINFORCE 到 Actor-Critic</h2>
+
+        <p>REINFORCE 的问题是：它需要等整个 episode 结束才能计算回报，这导致了：</p>
+        <ul>
+            <li>高方差：回报受整条轨迹随机性影响</li>
+            <li>不能在线学习：必须在 episode 结束后才能更新</li>
+            <li>长 episode 时内存消耗大：需要存储整条轨迹</li>
+        </ul>
+
+        <p>Actor-Critic 的核心改进：<strong>用价值网络（Critic）替代蒙特卡罗回报作为 baseline</strong>，让 Agent 可以每步都更新，且使用低方差的 TD 误差。</p>
+
+        <div class="definition">
+            <h4>Actor-Critic 架构</h4>
+            <p>两个网络协同工作：</p>
+            <ul>
+                <li><strong>Actor（策略网络）</strong>：输出动作概率分布 π(a|s; θ)，负责"做什么"</li>
+                <li><strong>Critic（价值网络）</strong>：输出状态价值 V(s; φ)，负责"评估当前状态有多好"</li>
+            </ul>
+            <p>更新规则：</p>
+            <p><code>∇θ J(θ) ≈ E[∇θ log π(a|s; θ) · (r + γV(s') - V(s))]</code></p>
+            <p>其中 <code>r + γV(s') - V(s)</code> 就是 TD 误差，作为优势估计。</p>
+        </div>
+
+        <h2>6.2 A2C：异步到同步</h2>
+
+        <p>A3C（Asynchronous Actor-Critic）使用多个并行的 Agent 各自采集数据后异步更新共享参数。A2C 是它的同步版本——多个 Agent 同时采样，同步更新后重置。</p>
+
+        <pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+
+class ActorCriticNetwork(nn.Module):
+    """Actor-Critic 共享底层网络"""
+    def __init__(self, state_dim, action_dim, hidden_dim=64):
+        super().__init__()
+        self.shared = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        )
+        # Actor: 输出动作 logit
+        self.actor = nn.Linear(hidden_dim, action_dim)
+        # Critic: 输出状态价值
+        self.critic = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        features = self.shared(x)
+        action_logits = self.actor(features)
+        state_value = self.critic(features)
+        return action_logits, state_value
+
+    def get_action_and_log_prob(self, state):
+        logits, value = self(state)
+        probs = F.softmax(logits, dim=-1)
+        dist = torch.distributions.Categorical(probs)
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
+        return action, log_prob, value
+
+class A2CAgent:
+    def __init__(self, state_dim, action_dim, lr=0.001, gamma=0.99,
+                 entropy_coef=0.01, max_grad_norm=0.5):
+        self.gamma = gamma
+        self.entropy_coef = entropy_coef
+        self.model = ActorCriticNetwork(state_dim, action_dim)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.max_grad_norm = max_grad_norm
+
+    def get_action(self, state):
+        state_t = torch.FloatTensor(state).unsqueeze(0)
+        return self.model.get_action_and_log_prob(state_t)
+
+    def learn(self, states, actions, log_probs, rewards, values):
+        """
+        使用收集到的轨迹进行 A2C 更新
+        states: list of states
+        actions: list of actions
+        log_probs: list of log probabilities
+        rewards: list of rewards
+        values: list of state values V(s)
+        """
+        states_t = torch.FloatTensor(np.array(states))
+        actions_t = torch.LongTensor(actions)
+        log_probs_t = torch.stack(log_probs)
+        rewards_t = torch.FloatTensor(rewards)
+        values_t = torch.FloatTensor(values)
+
+        # 计算每个时刻的回报
+        returns = []
+        G = 0
+        for r in reversed(rewards_t):
+            G = r + self.gamma * G
+            returns.insert(0, G)
+        returns = torch.stack(returns)
+
+        # 计算优势函数 A(s,a) = G - V(s)
+        advantages = returns - values_t.detach()
+
+        # Actor loss：策略梯度 × 优势
+        actor_loss = -(log_probs_t * advantages.detach()).mean()
+
+        # Critic loss：TD 误差的 MSE
+        critic_loss = F.mse_loss(values_t, returns)
+
+        # 熵正则化：鼓励探索
+        logits, _ = self.model(states_t)
+        probs = F.softmax(logits, dim=-1)
+        entropy = -(probs * torch.log(probs + 1e-10)).sum(dim=-1).mean()
+        entropy_loss = -self.entropy_coef * entropy
+
+        # 总损失
+        loss = actor_loss + 0.5 * critic_loss + entropy_loss
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+        self.optimizer.step()
+
+        return {
+            'actor_loss': actor_loss.item(),
+            'critic_loss': critic_loss.item(),
+            'entropy': entropy.item()
+        }
+</code></pre>
+
+        <h2>6.3 完整训练循环</h2>
+
+        <pre><code class="language-python">import gymnasium as gym
+import matplotlib.pyplot as plt
+
+env = gym.make("CartPole-v1")
+agent = A2CAgent(
+    state_dim=env.observation_space.shape[0],
+    action_dim=env.action_space.n,
+    lr=0.001,
+    gamma=0.99,
+    entropy_coef=0.01
+)
+
+num_episodes = 500
+rollout_length = 20  # 每个 rollout 的步数
+reward_history = []
+loss_history = []
+
+for episode in range(num_episodes):
+    state, info = env.reset()
+    states, actions, log_probs, rewards, values = [], [], [], [], []
+    total_reward = 0
+    episode_losses = []
+    done = False
+    truncated = False
+
+    while not done and not truncated:
+        action, log_prob, value = agent.get_action(state)
+        next_state, reward, done, truncated, info = env.step(action)
+
+        states.append(state)
+        actions.append(action)
+        log_probs.append(log_prob)
+        rewards.append(reward)
+        values.append(value)
+
+        state = next_state
+        total_reward += reward
+
+        # 每 rollout_length 步更新一次
+        if len(states) >= rollout_length or done or truncated:
+            # 处理终止状态的价值
+            if done or truncated:
+                next_value = 0
+            else:
+                next_value = agent.model(
+                    torch.FloatTensor(next_state).unsqueeze(0)
+                )[1].item()
+            values.append(next_value)
+
+            loss_info = agent.learn(states, actions, log_probs, rewards, values)
+            episode_losses.append(loss_info)
+
+            # 清空轨迹
+            states, actions, log_probs, rewards, values = [], [], [], [], []
+
+    reward_history.append(total_reward)
+    if episode_losses:
+        avg_loss = np.mean([l['actor_loss'] for l in episode_losses])
+        loss_history.append(avg_loss)
+
+    if episode % 50 == 0:
+        avg = np.mean(reward_history[-50:])
+        print(f"Episode {episode}: 奖励 = {total_reward}, 近50平均 = {avg:.1f}")
+
+env.close()
+
+# 可视化
+plt.figure(figsize=(14, 4))
+plt.subplot(1, 2, 1)
+plt.plot(reward_history, alpha=0.3)
+plt.plot(np.convolve(reward_history, np.ones(50)/50, mode='valid'), 'r-', lw=2)
+plt.axhline(y=500, color='g', linestyle='--', label='满分')
+plt.xlabel('Episode')
+plt.ylabel('Total Reward')
+plt.title('A2C 训练曲线 (CartPole)')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(loss_history)
+plt.xlabel('Update Step')
+plt.ylabel('Actor Loss')
+plt.title('A2C 训练损失')
+plt.tight_layout()
+plt.savefig('a2c-training.png', dpi=150)
+plt.show()
+</code></pre>
+
+        <h2>6.4 GAE：优势估计的进阶</h2>
+
+        <p>A2C 中使用 GAE（Generalized Advantage Estimation）可以进一步降低方差。GAE 在 TD(0)（低方差、有偏）和蒙特卡罗（无偏、高方差）之间提供了灵活的插值：</p>
+
+        <pre><code class="language-python">def compute_gae_advantages(rewards, values, gamma=0.99, lambda_=0.95):
+    """
+    计算 GAE 优势估计
+    lambda_=0: 退化为 TD(0)，只用一步
+    lambda_=1: 退化为蒙特卡罗，用完整回报
+    典型取值：0.95
+    """
+    n = len(rewards)
+    advantages = torch.zeros(n)
+    gae = 0
+
+    for t in reversed(range(n)):
+        if t == n - 1:
+            next_value = 0
+        else:
+            next_value = values[t + 1]
+
+        delta = rewards[t] + gamma * next_value - values[t]
+        gae = delta + gamma * lambda_ * gae
+        advantages[t] = gae
+
+    return advantages
+
+# 在 learn 中使用 GAE
+def learn_with_gae(self, states, actions, log_probs, rewards, values, lambda_=0.95):
+    returns = []
+    G = 0
+    for r in reversed(rewards):
+        G = r + self.gamma * G
+        returns.insert(0, G)
+    returns = torch.stack(returns)
+
+    values_t = torch.FloatTensor(values)
+    advantages = compute_gae_advantages(rewards, values_t, self.gamma, lambda_)
+
+    # 后续 loss 计算与上面相同...
+</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>λ 的选择</strong>：<code>λ=0.95</code> 是最常用的默认值。λ 越大越接近蒙特卡罗（无偏但高方差），λ 越小越接近 TD(0)（有偏但低方差）。对于 CartPole 这种短 episode 任务，λ=1.0（纯 MC）也能工作，但对于长 episode 任务，λ=0.95 更安全。
+        </div>
+
+        <h2>6.5 A2C vs REINFORCE 对比</h2>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>REINFORCE</th><th>A2C</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>回报��计</td><td>完整 episode 蒙特卡罗</td><td>价值网络 TD 估计</td></tr>
+                <tr><td>方差</td><td>高</td><td>低（Critic 降低了方差）</td></tr>
+                <tr><td>更新频率</td><td>每 episode 一次</td><td>每 N 步一次</td></tr>
+                <tr><td>样本效率</td><td>低</td><td>较高</td></tr>
+                <tr><td>网络数量</td><td>1（策略）</td><td>2（Actor + Critic）</td></tr>
+                <tr><td>实现复杂度</td><td>简单</td><td>中等</td></tr>
+            </tbody>
+        </table>
+
+        <h2>6.6 本章小结</h2>
+        <ul>
+            <li>Actor-Critic 用价值网络作为基线，将高方差的蒙特卡罗回报替换为低方差的 TD 误差</li>
+            <li>A2C 是 A3C 的同步版本，多个 actor 同步采样、同步更新</li>
+            <li>GAE 在偏差和方差之间提供了灵活的平衡</li>
+            <li>熵正则化鼓励探索，防止策略过早收敛到次优解</li>
+        </ul>
+
+        <h2>练习</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>修改 A2C 代码中的 entropy_coef（0.0 → 0.01 → 0.1），观察对 CartPole 训练收敛速度和稳定性的影响。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶练习</h4>
+                    <p>在 Pendulum-v1（连续动作空间）上训练 A2C Agent。需要将策略网络改为输出高斯分布的参数（均值和标准差），并相应修改 log_prob 的计算。</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="05-策略梯度与REINFORCE.html">← 上一章：策略梯度</a>
+            <a href="07-PPO算法深入.html">第 7 章：PPO →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+        function showTab(btn) {
+            const tabs = btn.closest('.tabs');
+            tabs.querySelectorAll('.tab-buttons button').forEach(b => b.classList.remove('active'));
+            tabs.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            tabs.querySelectorAll('.tab-content').forEach(c => {
+                if (c.previousElementSibling === btn) c.classList.add('active');
+            });
+        }
+    </script>
+</body>
+</html>

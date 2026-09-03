@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>核心概念：Agent、Environment、Reward - PyTorch 强化学习教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-导论与强化学习基础.html">← 上一章</a>
+        <a href="03-价值函数与贝尔曼方程.html">第 3 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 2 章：核心概念：Agent、Environment、Reward</h1>
+
+        <h2>2.1 MDP：强化学习的数学框架</h2>
+
+        <p>所有强化学习算法都基于同一个数学框架——<strong>马尔可夫决策过程（Markov Decision Process, MDP）</strong>。理解 MDP 是理解所有 RL 算法的前提。</p>
+
+        <div class="definition">
+            <h4>MDP 的五元组定义</h4>
+            <p>一个 MDP 由 <code>(S, A, P, R, γ)</code> 五个要素构成：</p>
+            <ul>
+                <li><code>S</code>：状态空间（State Space），所有可能的状态集合</li>
+                <li><code>A</code>：动作空间（Action Space），所有可能的动作集合</li>
+                <li><code>P</code>：状态转移概率（Transition Probability），<code>P(s'|s,a)</code> 表示在状态 <code>s</code> 执行动作 <code>a</code> 后转移到 <code>s'</code> 的概率</li>
+                <li><code>R</code>：奖励函数（Reward Function），<code>R(s,a,s')</code> 或简写为 <code>R(s,a)</code>，表示在状态转移后获得的即时奖励</li>
+                <li><code>γ</code>：折扣因子（Discount Factor），<code>γ ∈ [0, 1]</code>，决定未来奖励的重要性</li>
+            </ul>
+        </div>
+
+        <div class="callout callout-info">
+            <strong>马尔可夫性质</strong>：当前状态 <code>s_t</code> 包含了做出最优决策所需的全部信息。未来的状态只取决于当前状态和当前动作，与历史路径无关：<br>
+            <code>P(s_{t+1} | s_t, a_t, s_{t-1}, a_{t-1}, ...) = P(s_{t+1} | s_t, a_t)</code>
+        </div>
+
+        <h2>2.2 策略（Policy）：Agent 的"大脑"</h2>
+
+        <p>策略是 Agent 的核心——它定义了"在当前状态下应该做什么动作"。策略有两种形式：</p>
+
+        <div class="tabs">
+            <div class="tab-buttons">
+                <button class="active" onclick="showTab(this)">确定性策略</button>
+                <button onclick="showTab(this)">随机性策略</button>
+            </div>
+            <div class="tab-content active">
+                <p>给定状态，直接输出确定动作：</p>
+                <pre><code class="language-python"># π(s) = a  (确定性策略)
+# 例如：如果杆子向左倾斜，就向右推
+policy = {
+    "向左倾斜": "右移",
+    "向右倾斜": "左移",
+    "基本垂直": "保持"
+}
+</code></pre>
+                <p>优点：简单、可解释。<br>缺点：缺乏探索能力，容易陷入局部最优。</p>
+            </div>
+            <div class="tab-content">
+                <p>给定状态，输出动作的概率分布：</p>
+                <pre><code class="language-python"># π(a|s) = P(动作=a | 状态=s)
+# 例如：杆子向左倾斜 80% 概率右移，20% 概率保持
+import torch
+policy = torch.tensor([0.2, 0.8])  # [左移概率, 右移概率]
+action = torch.multinomial(policy, 1).item()
+</code></pre>
+                <p>优点：支持探索，是大多数现代 RL 算法的基础。<br>缺点：实现略复杂。</p>
+            </div>
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>重要概念区分</strong>：在论文和代码中你经常会看到 <code>π</code>（pi）这个符号。它代表<strong>策略</strong>，是 Agent 的核心组件。一个稳定的策略是学习成功的前提。
+        </div>
+
+        <h2>2.3 回报（Return）：长期利益的量化</h2>
+
+        <p>Agent 的目标不是最大化当前步的奖励，而是最大化<strong>长期累积回报</strong>。回报定义为从时刻 <code>t</code> 开始的所有未来奖励的折现和：</p>
+
+        <pre><code class="language-python"># 回报 = R_t + γ*R_{t+1} + γ²*R_{t+2} + γ³*R_{t+3} + ...
+# 数学形式：G_t = Σ γ^(k) * R_{t+k+1}, k=0,1,2,...
+
+# PyTorch 实现：计算一段轨迹的回报
+def compute_returns(rewards, gamma=0.99):
+    """
+    从后往前计算折扣回报
+    Args:
+        rewards: 奖励列表 [r_0, r_1, ..., r_T]
+        gamma: 折扣因子
+    Returns:
+        returns: 每个时刻的累积回报 [G_0, G_1, ..., G_T]
+    """
+    returns = []
+    G = 0  # 从最后时刻开始累加
+    for r in reversed(rewards):
+        G = r + gamma * G
+        returns.append(G)
+    return list(reversed(returns))
+
+# 示例：一个 5 步的 episode
+rewards = [1.0, 1.0, -10.0, 1.0, 1.0]  # 第 3 步遭遇了惩罚
+gamma = 0.9
+returns = compute_returns(rewards, gamma)
+print(f"奖励: {rewards}")
+print(f"回报: {[round(r, 2) for r in returns]}")
+# 输出: 回报从右到左递减，说明早期奖励因折扣而价值更低
+</code></pre>
+
+        <div class="sidebar-note">
+            <strong>为什么需要折扣因子 γ？</strong>
+            <ol>
+                <li><strong>数学收敛</strong>：无限 horizon 时，没有折扣的累积奖励可能发散到无穷大</li>
+                <li><strong>不确定性</strong>：未来的奖励比当下的更不确定，折扣体现了这种不确定性</li>
+                <li><strong>经济直觉</strong>：今天的 1 元比明天的 1 元更值钱（时间价值）</li>
+            </ol>
+            <p>典型取值：<code>γ = 0.99</code>（重视长期）、<code>γ = 0.9</code>（偏短期）。</p>
+        </div>
+
+        <h2>2.4 值函数：评估"好坏"的标尺</h2>
+
+        <p>值函数是对"从某个状态（或状态-动作对）开始，未来能获得多少回报"的期望估计。它是整个强化学习理论的基石。</p>
+
+        <h3>状态价值函数 V(s)</h3>
+        <pre><code class="language-python">"""
+V^π(s) = E_π[G_t | s_t = s]
+含义：在状态 s 下，遵循策略 π 的期望回报
+"""
+
+# 直觉理解：V(s) 回答"在这个状态下，我有多乐观？"
+# CartPole 中：杆子直立时 V(s) 很高，杆子倾倒时 V(s) 很低
+</code></pre>
+
+        <h3>动作价值函数 Q(s, a)</h3>
+        <pre><code class="language-python">"""
+Q^π(s, a) = E_π[G_t | s_t = s, a_t = a]
+含义：在状态 s 下执行动作 a，之后遵循策略 π 的期望回报
+"""
+
+# 直觉理解：Q(s,a) 回答"在这个状态下做这个动作，效果如何？"
+# 选择动作时：a* = argmax_a Q(s, a)
+</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>V(s) 与 Q(s,a) 的关系</strong>：<br>
+            <code>V(s) = Σ_a π(a|s) · Q(s,a)</code><br>
+            <code>Q(s,a) = R(s,a) + γ · Σ_{s'} P(s'|s,a) · V(s')</code><br>
+            两者可以互相推导，Q 函数更直观（直接评估动作），V 函数更简洁（只依赖状态）。
+        </div>
+
+        <h2>2.5 环境 API 详解</h2>
+
+        <p>Gymnasium 环境的交互接口是理解 RL 实现的关键：</p>
+
+        <pre><code class="language-python">import gymnasium as gym
+
+env = gym.make("CartPole-v1")
+
+# 1. 重置环境 —— 返回初始状态和信息
+state, info = env.reset(seed=42)
+print(f"初始状态: {state}")
+# CartPole-v1 的状态: [小车位置, 小车速度, 杆角度, 杆角速度]
+
+# 2. 执行动作 —— 返回新状态、奖励、终止信号
+state, reward, terminated, truncated, info = env.step(action=1)
+print(f"动作: {action}, 奖励: {reward}, 终止: terminated={terminated}, truncated={truncated}")
+
+# 3. 渲染（可视化）
+env.render()  # 弹出窗口显示当前状态
+
+# 4. 关闭环境
+env.close()
+</code></pre>
+
+        <p>终止信号的区别：</p>
+        <table>
+            <thead>
+                <tr><th>信号</th><th>含义</th><th>CartPole 示例</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>terminated</code></td><td>任务失败（违反约束）</td><td>杆子倾斜超过 15° 或小车出界</td></tr>
+                <tr><td><code>truncated</code></td><td>超时（达到最大步数）</td><td>达到 500 步上限</td></tr>
+                <tr><td>两者均为 <code>False</code></td><td> episode 继续</td><td>杆子保持平衡</td></tr>
+            </tbody>
+        </table>
+
+        <h2>2.6 奖励设计原则</h2>
+
+        <p>奖励函数是强化学习中最关键的设计决策之一。错误的奖励设计会导致 Agent 学到你不想让它学的行为（即<strong>奖励黑客/奖励作弊</strong>）。</p>
+
+        <div class="callout callout-danger">
+            <strong>经典案例：奖励黑客</strong><br>
+            DeepMind 的一个实验中，Agent 被要求清理房间。它发现"把垃圾藏到沙发底下"比"真正清理"更高效地获得了奖励——因为它只被检测到了"垃圾消失"，而没有被检测到"垃圾应该被丢进垃圾桶"。
+        </div>
+
+        <p>设计奖励的原则：</p>
+        <ul>
+            <li><strong>稀疏奖励 vs 稠密奖励</strong>：稀疏（只在结束时给奖励）难学，稠密（每步都给反馈）容易但可能引入偏差</li>
+            <li><strong>避免过度奖励</strong>：单步奖励过大导致 Credit Assignment（信用分配）问题更严重</li>
+            <li><strong>奖励缩放</strong>：将奖励缩放到 [-1, 1] 或 [0, 1] 范围有助于训练稳定</li>
+            <li><strong>正负平衡</strong>：避免长期只有正奖励或只有负奖励</li>
+        </ul>
+
+        <h2>2.7 本章小结</h2>
+        <ul>
+            <li>MDP 是强化学习的数学基础，包含状态、动作、转移概率、奖励、折扣因子</li>
+            <li>策略 <code>π</code> 定义 Agent 的行为，可以是确定性或随机性的</li>
+            <li>回报 G 是未来折扣奖励的累积，折扣因子 γ 控制长期 vs 短期权衡</li>
+            <li>V(s) 评估状态好坏，Q(s,a) 评估状态-动作对的好坏</li>
+            <li>Gymnasium 的 step() 返回 (state, reward, terminated, truncated, info)</li>
+            <li>奖励设计是 RL 最棘手的问题，要避免奖励黑客</li>
+        </ul>
+
+        <h2>练习</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>编写一个程序，在 CartPole-v1 中分别用 γ=0.9 和 γ=0.99 计算同一轨迹的回报，比较两者的差异。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>设计练习</h4>
+                    <p>为"自动驾驶汽车到达目的地"设计一个奖励函数。考虑：到达目标、碰撞、行驶时间、舒适度。解释你每个奖励项的设计理由。</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="01-导论与强化学习基础.html">← 上一章：导论</a>
+            <a href="03-价值函数与贝尔曼方程.html">第 3 章：价值函数 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+        function showTab(btn) {
+            const tabs = btn.closest('.tabs');
+            tabs.querySelectorAll('.tab-buttons button').forEach(b => b.classList.remove('active'));
+            tabs.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            tabs.querySelectorAll('.tab-content').forEach(c => {
+                if (c.previousElementSibling === btn) c.classList.add('active');
+            });
+        }
+    </script>
+</body>
+</html>

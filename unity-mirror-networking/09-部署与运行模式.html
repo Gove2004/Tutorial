@@ -20,9 +20,19 @@
 
         <p class="intro">
             代码写完了，功能跑通了——但现在你面对一个全新的问题：<strong>怎么让别人连进来玩？</strong>
-            从 Editor 里的 Host 模式到生产环境中的专用服务器，部署涉及到编译、配置、网络、运维多个层面。
+            从 Editor 中的 Host 模式到生产环境中的专用服务器，部署涉及到编译、配置、网络、运维多个层面。
             本章覆盖从本地测试到云端部署的完整链路。
         </p>
+
+        <div class="callout callout-info">
+            <strong>📌 Mirror 96 API 更新要点（本章涉及）：</strong><br>
+            • 命令行参数解析使用 <code>Environment.GetCommandLineArgs()</code>（非 <code>System.ArgumentList</code>）<br>
+            • <code>NetworkClient.Connect(string address)</code> 只接受地址字符串，端口在 Transport 上配置<br>
+            • <code>ClientScene</code> 已合并入 <code>NetworkClient</code>：<code>NetworkClient.localPlayer</code> 代替 <code>ClientScene.localPlayers</code><br>
+            • 认证通过 <code>NetworkServer.RegisterHandler&lt;T&gt;</code> + <code>NetworkConnectionToClient</code> 实现<br>
+            • 断开连接使用 <code>conn.Disconnect()</code>（非 <code>NetworkServer.RemoveConnection</code>）<br>
+            • <code>NetworkServer.connections</code> 为 <code>Dictionary&lt;int, NetworkConnectionToClient&gt;</code>
+        </div>
 
         <h2>9.1 三种运行模式</h2>
 
@@ -30,14 +40,19 @@
 
         <table>
             <thead>
-                <tr><th>模式</th><th>角色</th><th>适用场景</th><th>部署复杂度</th></tr>
+                <tr><th>模式</th><th>角色</th><th>适用场景</th><th>Mirror 96 启动方式</th></tr>
             </thead>
             <tbody>
-                <tr><td><strong>Client Only</strong></td><td>仅客户端</td><td>玩家正常进入游戏</td><td>低</td></tr>
-                <tr><td><strong>Host</strong></td><td>客户端 + 服务器</td><td>开发测试、P2P 主机游戏</td><td>中</td></tr>
-                <tr><td><strong>Dedicated Server</strong></td><td>仅服务器</td><td>生产环境、正式服</td><td>高</td></tr>
+                <tr><td><strong>Client Only</strong></td><td>仅客户端</td><td>玩家正常进入游戏</td><td><code>NetworkManager.StartClient()</code></td></tr>
+                <tr><td><strong>Host</strong></td><td>客户端 + 服务器</td><td>开发测试、P2P 主机游戏</td><td><code>NetworkManager.StartHost()</code></td></tr>
+                <tr><td><strong>Dedicated Server</strong></td><td>仅服务器</td><td>生产环境、正式服</td><td><code>NetworkManager.StartServer()</code></td></tr>
             </tbody>
         </table>
+
+        <div class="callout callout-tip">
+            <strong>Mirror 96 说明：</strong><code>StartServer()</code>、<code>StartClient()</code>、<code>StartHost()</code> 是 <code>NetworkManager</code> 上供外部调用的<strong>启动方法</strong>。
+            而 <code>OnStartServer()</code>、<code>OnStartClient()</code> 是供你重写的<strong>虚回调方法</strong>——分别在服务器/客户端启动完成后被调用。不要混淆两者。
+        </div>
 
         <h2>9.2 编译专用服务器</h2>
 
@@ -47,6 +62,8 @@
 
         <pre><code class="language-text">Build Settings 配置：
 • Build Target: Standalone Server (Windows/Linux/macOS)
+  注意：Unity 6+ 支持 Dedicated Server 构建目标
+  （File → Build Profiles → Dedicated Server）
 • Architecture: x86_64
 • Development Build: 关闭（发布时）/ 开启（调试时）
 • Compression Method: LZ4（减小体积）</code></pre>
@@ -54,13 +71,13 @@
         <h3>9.2.2 命令行启动参数</h3>
 
         <pre><code class="language-bash"># Windows
-YourGame.exe -batchmode -nographics -dedicated -port 7777
+YourGame.exe -batchmode -nographics -port 7777
 
 # Linux
-./YourGame.x86_64 -batchmode -nographics -dedicated -port 7777
+./YourGame.x86_64 -batchmode -nographics -port 7777
 
 # macOS
-./YourGame.app/Contents/MacOS/YourGame -batchmode -nographics -dedicated -port 7777</code></pre>
+./YourGame.app/Contents/MacOS/YourGame -batchmode -nographics -port 7777</code></pre>
 
         <p>参数说明：</p>
 
@@ -71,24 +88,46 @@ YourGame.exe -batchmode -nographics -dedicated -port 7777
             <tbody>
                 <tr><td><code>-batchmode</code></td><td>无 UI 模式，不等待用户输入</td><td>✅ 必须</td></tr>
                 <tr><td><code>-nographics</code></td><td>不初始化 Graphics 模块，节省内存和 CPU</td><td>✅ 必须</td></tr>
-                <tr><td><code>-dedicated</code></td><td>自定义参数，在你的代码中判断是否专用服务器模式</td><td>推荐</td></tr>
-                <tr><td><code>-port 7777</code></td><td>自定义端口</td><td>可选</td></tr>
+                <tr><td><code>-port 7777</code></td><td>自定义端口（在你的代码中读取并设置到 Transport）</td><td>推荐</td></tr>
                 <tr><td><code>-logFile /tmp/game.log</code></td><td>指定日志文件路径</td><td>可选</td></tr>
+                <tr><td><code>-screenWidth 0 -screenHeight 0</code></td><td>避免某些平台上 GPU 初始化</td><td>可选</td></tr>
             </tbody>
         </table>
 
         <h3>9.2.3 在代码中处理专用服务器模式</h3>
 
-        <pre><code class="language-csharp">public class GameBootstrapper : MonoBehaviour
+        <pre><code class="language-csharp">using Mirror;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class GameBootstrapper : MonoBehaviour
 {
+    [SerializeField] NetworkManager networkManager;
+    [SerializeField] Transport transport;
+
     void Start()
     {
-        // 检测是否以专用服务器模式启动
-        bool isDedicated = System.ArgumentList.Contains("-dedicated");
+        // Mirror 96: 使用 Environment.GetCommandLineArgs() 解析命令行参数
+        // System.ArgumentList 在 .NET/Unity 中不存在
+        string[] args = System.Environment.GetCommandLineArgs();
+
+        bool isDedicated = false;
+        int port = 7777;
+
+        for (int i = 0; i &lt; args.Length; i++)
+        {
+            if (args[i] == "-dedicated")
+                isDedicated = true;
+            else if (args[i] == "-port" && i + 1 &lt; args.Length)
+            {
+                if (int.TryParse(args[i + 1], out int parsed))
+                    port = parsed;
+            }
+        }
 
         if (isDedicated)
         {
-            StartDedicatedServer();
+            StartDedicatedServer(port);
         }
         else
         {
@@ -96,16 +135,19 @@ YourGame.exe -batchmode -nographics -dedicated -port 7777
         }
     }
 
-    void StartDedicatedServer()
+    void StartDedicatedServer(int port)
     {
-        // 获取端口
-        int port = 7777;
-        var portArg = System.ArgumentList.Get("-port");
-        if (int.TryParse(portArg, out int parsed))
-            port = parsed;
+        // Mirror 96: 端口配置在 Transport 上，不在 NetworkServer.Listen() 中
+        // KcpTransport 是默认 Transport，Port 属性设置端口
+        if (transport is KcpTransport kcp)
+        {
+            kcp.Port = (ushort)port;
+        }
+        // 其他 Transport 按各自方式设置端口...
 
-        // 启动服务器
-        NetworkServer.Listen(port);
+        // 通过 NetworkManager 启动服务器
+        // StartServer() 是外部调用方法（非虚回调 OnStartServer）
+        networkManager.StartServer();
 
         Debug.Log($"[Server] 专用服务器已启动，端口 {port}");
 
@@ -115,10 +157,25 @@ YourGame.exe -batchmode -nographics -dedicated -port 7777
 
     void StartClientOrHost()
     {
-        // 客户端/Host 模式的启动逻辑
-        NetworkClient.Connect("localhost");
+        // Mirror 96: NetworkClient.Connect(string address) 只接受地址字符串
+        // 端口已在 Transport 上配置（通过 Inspector 或代码设置）
+        // 例如：transport 组件上的 Port 设置为 7777
+        networkManager.networkAddress = "localhost";
+        networkManager.StartClient();
+
+        // 或者直接使用 NetworkClient：
+        // NetworkClient.Connect("localhost");
     }
 }</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>Mirror 96 变化：</strong>
+            <ul>
+                <li><code>NetworkClient.Connect(string address)</code> 只接受地址字符串（如 <code>"localhost"</code>、<code>"192.168.1.100"</code>），<strong>不接受端口参数</strong>。端口在 Transport 组件上配置。</li>
+                <li>命令行参数解析必须使用 <code>System.Environment.GetCommandLineArgs()</code>，这是 .NET/Unity 标准方法。</li>
+                <li>服务器端口设置在 Transport 上（如 <code>KcpTransport.Port</code>），然后调用 <code>NetworkManager.StartServer()</code> 启动。</li>
+            </ul>
+        </div>
 
         <div class="callout callout-info">
             <strong>内存优化：</strong>使用 <code>-nographics</code> 后，Unity 不会初始化 GPU 驱动，
@@ -130,15 +187,19 @@ YourGame.exe -batchmode -nographics -dedicated -port 7777
 
         <h3>9.3.1 Editor 内测试</h3>
 
-        <pre><code class="language-text">步骤 1: 打开 Unity Editor → 点击 "Host"（服务器 + 本地客户端）
-步骤 2: 再打开一个 Editor → 点击 "Client Only"（连接到 Host）
+        <pre><code class="language-text">步骤 1: 打开 Unity Editor → NetworkManager 组件点击 "Host"（服务器 + 本地客户端）
+        此时调用 NetworkManager.StartHost()
+步骤 2: 再打开一个 Editor → NetworkManager 点击 "Client Only"（连接到 Host）
+        此时调用 NetworkManager.StartClient()
 步骤 3: 验证 Player 对象生成、移动同步、RPC 调用</code></pre>
 
         <h3>9.3.2 独立客户端测试</h3>
 
-        <pre><code class="language-text">步骤 1: 构建服务器 → YourGame.exe -dedicated -port 7777
-步骤 2: 打开另一个 Unity Editor → Client Only → 连接 localhost:7777
-步骤 3: 或者构建独立客户端 → YourGameClient.exe → 连接 localhost:7777</code></pre>
+        <pre><code class="language-text">步骤 1: 构建服务器 → YourGame.exe -batchmode -nographics -port 7777
+步骤 2: 打开另一个 Unity Editor → Client Only → 连接 localhost
+步骤 3: 或者构建独立客户端 → YourGameClient.exe → 连接 localhost
+
+注意：Mirror 96 中端口在 Transport 上设置，连接时只需指定地址</code></pre>
 
         <h3>9.3.3 多客户端测试</h3>
 
@@ -153,33 +214,59 @@ YourGame.exe -batchmode -nographics -dedicated -port 7777
             最方便的方式是：一个构建的服务器 + 多个 Editor 客户端。
         </div>
 
-        <h2>9.4 使用 Unity Relay 进行 NAT 穿透</h2>
+        <h2>9.4 NAT 穿透与中继服务</h2>
 
         <p>当服务器和客户端不在同一局域网时，NAT（网络地址转换）会阻止直连。
-        Relay 服务作为中间代理转发数据。</p>
+        需要中继服务（Relay）作为中间代理转发数据。</p>
 
-        <pre><code class="language-csharp">// Unity Relay (之前叫 Netcode Relay)
-// 通过 Unity Gaming Services (UGS) 提供
+        <div class="callout callout-info">
+            <strong>Mirror 96 与 Relay 的关系：</strong>Mirror 本身不绑定特定 Relay 服务。
+            你可以通过以下方式实现 NAT 穿透：
+            <ul>
+                <li><strong>Edgegap</strong>：Mirror 官方推荐的合作平台，提供自动部署和匹配服务。</li>
+                <li><strong>Steamworks Relay</strong>：如果游戏发布在 Steam，可使用 Steam P2P Relay（需第三方插件如 <code>Mirror-Steam</code>）。</li>
+                <li><strong>自定义 Relay Transport</strong>：继承 <code>Transport</code> 抽象类实现自定义中继逻辑。</li>
+                <li><strong>端口转发</strong>：在路由器上手动映射端口（仅适合测试，不适合生产环境）。</li>
+            </ul>
+        </div>
 
-using Unity.Netcode.Relay;
+        <pre><code class="language-csharp">// 示例：使用自定义 Transport 实现 Steam P2P 中继
+// 需要安装 Mirror-Steam 或类似社区扩展
+using Mirror;
+using Steamworks;
 
-// 服务器端：创建 Relay 房间
-var relay = new Relay();
-var joinCode = await relay.CreateRoom(maxClients: 10);
-// joinCode 是一个字符串，类似 "ABC12345"
+public class SteamTransport : Transport
+{
+    public override void ServerStart(string address)
+    {
+        // 通过 Steam P2P 启动服务器
+        // Steamworks 自动处理 NAT 穿透
+    }
 
-// 客户端：用 JoinCode 加入
-await relay.JoinRoom(joinCode);
+    public override void ClientConnect(string address)
+    {
+        // 通过 Steam ID 连接（非 IP 地址）
+        // Steam Relay 自动转发数据
+    }
 
-// 获取 Relay 信息并配置 Transport
-var serverConnectionData = relay.GetServerConnectionData();
-var clientConnectionData = relay.GetClientConnectionData();</code></pre>
+    // ... 实现 Transport 抽象类的其他方法
+    public override bool ServerActive() { return true; }
+    public override void ServerSend(List&lt;int&gt; connectionIds, ArraySegment&lt;byte&gt; data, int channelId) { }
+    public override bool ServerDisconnect(int connectionId) { return true; }
+    public override string ServerGetClient(int connectionId) { return ""; }
+    public override void ClientSend(ArraySegment&lt;byte&gt; data, int channelId) { }
+    public override bool ClientConnected() { return true; }
+    public override void ClientDisconnect() { }
+    public override void Shutdown() { }
+    public override int GetMaxPacketSize(int channelId) { return 1200; }
+    public override bool Available() { return true; }
+}</code></pre>
 
         <h3>9.4.1 Relay vs 直连的权衡</h3>
 
         <table>
             <thead>
-                <tr><th>维度</th><th>直连（专用服务器）</th><th>Relay</th></tr>
+                <tr><th>维度</th><th>直连（专用服务器）</th><th>Relay 中继</th></tr>
             </thead>
             <tbody>
                 <tr><td>延迟</td><td>低（直连）</td><td>较高（多一跳转发）</td></tr>
@@ -187,7 +274,7 @@ var clientConnectionData = relay.GetClientConnectionData();</code></pre>
                 <tr><td>NAT 穿透</td><td>需要端口转发或公网 IP</td><td>自动处理</td></tr>
                 <tr><td>部署复杂度</td><td>需要 VPS / 云服务器</td><td>零服务器管理</td></tr>
                 <tr><td>适用规模</td><td>任意规模</td><td>中小规模（&lt;500 并发）</td></tr>
-                <tr><td>成本模型</td><td>固定（服务器费用）</td><td>按流量付费</td></tr>
+                <tr><td>成本模型</td><td>固定（服务器费用）</td><td>按流量/CCU 付费</td></tr>
             </tbody>
         </table>
 
@@ -209,7 +296,7 @@ unity -batchmode -quit -executeMethod BuildServer.Build \
     -buildTarget StandaloneLinux64
 
 # 2. 启动服务器
-./Builds/linux-server/MyGameServer -batchmode -nographics -dedicated -port 7777 &
+./Builds/linux-server/MyGameServer -batchmode -nographics -port 7777 &
 SERVER_PID=$!
 
 # 3. 等待服务器就绪
@@ -218,29 +305,38 @@ sleep 5
 # 4. 运行自动化测试（Headless 客户端）
 ./Builds/linux-client/MyGameClient \
     -batchmode -nographics \
-    -testServer localhost:7777
+    -testServer localhost
 
 # 5. 清理
 kill $SERVER_PID</code></pre>
 
-        <pre><code class="language-csharp">// 自动化测试脚本
-public class ServerTests : MonoBehaviour
+        <pre><code class="language-csharp">using Mirror;
+using UnityEngine;
+using UnityEngine.TestTools;
+using NUnit.Framework;
+using System.Collections;
+
+public class ServerTests
 {
     IEnumerator TestPlayerSpawn()
     {
-        NetworkClient.Connect("localhost", 7777);
+        // Mirror 96: Connect(string address) 只接受地址
+        // 端口在 Transport 上配置（需在测试设置中预先配置）
+        NetworkClient.Connect("localhost");
         yield return new WaitUntil(() => NetworkClient.isConnected);
 
-        // 等待 Player 对象生成
-        yield return new WaitUntil(() => ClientScene.localPlayers.Count > 0);
+        // Mirror 96: ClientScene 已合并入 NetworkClient
+        // 使用 NetworkClient.localPlayer 代替 ClientScene.localPlayers
+        yield return new WaitUntil(() => NetworkClient.localPlayer != null);
 
-        Assert.IsTrue(ClientScene.localPlayers.Count > 0, "Player should be spawned");
+        Assert.IsNotNull(NetworkClient.localPlayer, "Player should be spawned");
     }
 
     IEnumerator TestMovementSync()
     {
         // 发送移动命令
-        GetComponent&lt;PlayerController&gt;().Move(Vector3.forward);
+        var player = NetworkClient.localPlayer;
+        player.GetComponent&lt;PlayerController&gt;().Move(Vector3.forward);
 
         // 等待服务器广播
         yield return new WaitForSeconds(0.5f);
@@ -249,6 +345,14 @@ public class ServerTests : MonoBehaviour
         // ...
     }
 }</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>Mirror 96 变化：</strong>
+            <ul>
+                <li><code>ClientScene.localPlayers</code>（列表）→ <code>NetworkClient.localPlayer</code>（单个 NetworkIdentity），因为每个连接只有一个本地玩家。</li>
+                <li><code>NetworkClient.Connect("localhost", 7777)</code> → <code>NetworkClient.Connect("localhost")</code>，端口在 Transport 上设置。</li>
+            </ul>
+        </div>
 
         <h2>9.6 云服务器部署</h2>
 
@@ -259,11 +363,12 @@ public class ServerTests : MonoBehaviour
                 <tr><th>平台</th><th>特点</th><th>适合场景</th></tr>
             </thead>
             <tbody>
-                <tr><td>AWS EC2</td><td>功能最全，生态完善</td><td>大规模生产</td></tr>
+                <tr><td>AWS EC2</td><td>功能最全，生态完善，GameLift 专用游戏服务器</td><td>大规模生产</td></tr>
                 <tr><td>GCP Compute Engine</td><td>全球网络好，价格透明</td><td>国际服</td></tr>
                 <tr><td>阿里云 ECS</td><td>国内延迟低，合规方便</td><td>中国大陆</td></tr>
                 <tr><td>DigitalOcean</td><td>简单易用，按小时计费</td><td>中小项目</td></tr>
                 <tr><td>Google Cloud Run</td><td>容器化部署，自动扩缩</td><td>弹性需求</td></tr>
+                <tr><td>Edgegap</td><td>Mirror 官方推荐，自动部署 + 匹配</td><td>快速上线</td></tr>
             </tbody>
         </table>
 
@@ -275,9 +380,10 @@ FROM ubuntu:22.04
 # 安装 Unity 运行时依赖
 RUN apt-get update && apt-get install -y \
     libgl1-mesa-glx \
-    libssl1.1 \
+    libssl3 \
     libstdc++6 \
     zlib1g \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制服务器二进制
@@ -286,17 +392,25 @@ COPY GameData /game/Data/
 
 WORKDIR /game
 
-# 启动命令
-ENTRYPOINT ["./MyGameServer", "-batchmode", "-nographics", "-dedicated"]
-CMD ["--port", "7777"]</code></pre>
+# 暴露 KCP 默认端口
+EXPOSE 7777/udp
+
+# 启动命令（端口通过环境变量或参数传递）
+ENTRYPOINT ["./MyGameServer", "-batchmode", "-nographics"]
+CMD ["-port", "7777"]</code></pre>
 
         <pre><code class="language-bash"># 构建和运行
 docker build -t mygame-server .
-docker run -d -p 7777:7777 --name mygame-1 mygame-server
+docker run -d -p 7777:7777/udp --name mygame-1 mygame-server
 
-# 多实例部署
-docker run -d -p 7778:7777 mygame-server
-docker run -d -p 7779:7777 mygame-server</code></pre>
+# 多实例部署（注意 KCP 使用 UDP）
+docker run -d -p 7778:7777/udp mygame-server
+docker run -d -p 7779:7777/udp mygame-server</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>注意：</strong>Mirror 默认的 <code>KcpTransport</code> 使用 <strong>UDP</strong> 协议。
+            Docker 端口映射需要指定 <code>/udp</code> 后缀，否则默认为 TCP 映射，客户端将无法连接。
+        </div>
 
         <h3>9.6.3 服务器扩缩策略</h3>
 
@@ -316,16 +430,15 @@ docker run -d -p 7779:7777 mygame-server</code></pre>
 
         <h3>9.7.1 服务器健康检查</h3>
 
-        <pre><code class="language-csharp">public class ServerMonitor : MonoBehaviour
+        <pre><code class="language-csharp">using Mirror;
+using UnityEngine;
+
+public class ServerMonitor : NetworkBehaviour
 {
     void Update()
     {
-        // 监控关键指标
+        // Mirror 96: NetworkServer.connections 是 Dictionary&lt;int, NetworkConnectionToClient&gt;
         int connectedClients = NetworkServer.connections.Count;
-        float cpuUsage = GetCPUUsage();
-        float memoryUsage = GetMemoryUsage();
-        long bytesReceived = GetBytesReceived();
-        long bytesSent = GetBytesSent();
 
         // 异常检测
         if (connectedClients == 0 && Time.time > 300)
@@ -333,67 +446,150 @@ docker run -d -p 7779:7777 mygame-server</code></pre>
             Debug.LogWarning("服务器运行 5 分钟但无客户端连接");
         }
 
-        if (memoryUsage > 200 * 1024 * 1024)  // 200MB
-        {
-            Debug.LogError("内存占用过高！可能存在内存泄漏");
-        }
-
         // 定期输出性能报告
-        if (Time.frameCount % 300 == 0)  // 每 5 秒
+        if (Time.frameCount % 300 == 0)  // 每 5 秒（假设 60fps）
         {
-            Debug.Log($"[Perf] 客户端:{connectedClients} CPU:{cpuUsage:F1}% Mem:{memoryUsage / 1024 / 1024:F0}MB");
+            Debug.Log($"[Perf] 客户端:{connectedClients} " +
+                      $"帧:{Time.frameCount} " +
+                      $"时间:{Time.time:F0}s");
         }
     }
 }</code></pre>
 
         <h3>9.7.2 日志管理</h3>
 
-        <pre><code class="language-csharp">// 结构化日志输出（方便 ELK/Grafana 等工具采集）
-public class StructuredLogger
+        <pre><code class="language-csharp">using Mirror;
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+// 结构化日志输出（方便 ELK/Grafana 等工具采集）
+public static class StructuredLogger
 {
     public static void LogEvent(string eventType, Dictionary&lt;string, string&gt; data)
     {
         // JSON 格式输出，便于解析
-        string json = JsonConvert.SerializeObject(new
+        string json = $"{{\"timestamp\":\"{DateTime.UtcNow:O}\",\"type\":\"{eventType}\",\"data\":{{";
+        bool first = true;
+        foreach (var kv in data)
         {
-            timestamp = DateTime.UtcNow.ToString("O"),
-            type = eventType,
-            data = data
-        });
+            if (!first) json += ",";
+            json += $"\"{kv.Key}\":\"{kv.Value}\"";
+            first = false;
+        }
+        json += "}}";
 
         Debug.Log(json);
     }
 }
 
-// 使用
-StructuredLogger.LogEvent("player_connected", new Dictionary&lt;string, string&gt;
-{
-    { "userId", userId },
-    { "ip", ip },
-    { "rtt", rtt.ToString() }
-});</code></pre>
+// 使用示例
+// StructuredLogger.LogEvent("player_connected", new Dictionary&lt;string, string&gt;
+// {
+//     { "connectionId", conn.connectionId.ToString() },
+//     { "address", conn.address },
+//     { "rtt", conn.rtt.ToString() }
+// });</code></pre>
 
         <h2>9.8 安全与防护</h2>
 
         <h3>9.8.1 连接认证</h3>
 
-        <pre><code class="language-csharp">public class AuthManager : MonoBehaviour
-{
-    [ServerCallback]
-    public void OnServerAuthenticate(ServerAuthMessage msg)
-    {
-        // 验证用户令牌
-        bool isValid = ValidateToken(msg.token);
+        <p>Mirror 96 使用消息处理器实现认证流程。客户端在连接后发送认证消息，服务器验证后接受或拒绝。</p>
 
-        if (isValid)
+        <pre><code class="language-csharp">using Mirror;
+using UnityEngine;
+
+// Mirror 96: 自定义消息必须是 struct : INetworkMessage
+public struct AuthMessage : INetworkMessage
+{
+    public string token;  // JWT / Session Token
+
+    public void Serialize(NetworkWriter writer)
+    {
+        writer.WriteString(token);
+    }
+
+    public void Deserialize(NetworkReader reader)
+    {
+        token = reader.ReadString();
+    }
+}
+
+// Mirror 96: 认证响应消息
+public struct AuthResponseMessage : INetworkMessage
+{
+    public bool success;
+    public string errorMessage;
+
+    public void Serialize(NetworkWriter writer)
+    {
+        writer.WriteBool(success);
+        writer.WriteString(errorMessage);
+    }
+
+    public void Deserialize(NetworkReader reader)
+    {
+        success = reader.ReadBool();
+        errorMessage = reader.ReadString();
+    }
+}
+
+public class AuthManager : NetworkBehaviour
+{
+    public override void OnStartServer()
+    {
+        // Mirror 96: 服务器端注册认证消息处理器
+        // 签名：void Handler(NetworkConnectionToClient conn, T msg)
+        NetworkServer.RegisterHandler&lt;AuthMessage&gt;(OnServerAuthenticate);
+    }
+
+    public override void OnStartClient()
+    {
+        // Mirror 96: 客户端注册认证响应处理器
+        // 签名：void Handler(T msg) —— 无连接参数
+        NetworkClient.RegisterHandler&lt;AuthResponseMessage&gt;(OnClientAuthResponse);
+
+        // 连接后自动发送认证
+        // 注意：需要在 OnClientConnect 回调中发送
+    }
+
+    // 服务器端处理器：注意签名包含 NetworkConnectionToClient
+    void OnServerAuthenticate(NetworkConnectionToClient conn, AuthMessage msg)
+    {
+        if (ValidateToken(msg.token))
         {
             // 认证成功
-            NetworkServer.SetAuthenticated(msg.connection);
+            conn.isAuthenticated = true;
+
+            // 发送成功响应
+            conn.Send(new AuthResponseMessage { success = true, errorMessage = "" });
+
+            // 可以在这里创建 Player 对象
+            // NetworkServer.AddPlayerForConnection(conn, playerPrefab);
         }
         else
         {
-            // 认证失败，断开连接
-            NetworkServer.RemoveConnection(msg.connection);
+            // 认证失败，发送错误响应
+            conn.Send(new AuthResponseMessage { success = false, errorMessage = "Invalid token" });
+
+            // Mirror 96: 断开连接使用 conn.Disconnect()
+            // 不要使用 NetworkServer.RemoveConnection()（已废弃）
+            conn.Disconnect();
+        }
+    }
+
+    // 客户端处理器：无连接参数
+    void OnClientAuthResponse(AuthResponseMessage msg)
+    {
+        if (msg.success)
+        {
+            Debug.Log("认证成功！");
+        }
+        else
+        {
+            Debug.LogError($"认证失败：{msg.errorMessage}");
+            NetworkClient.Disconnect();
         }
     }
 
@@ -401,27 +597,66 @@ StructuredLogger.LogEvent("player_connected", new Dictionary&lt;string, string&g
     {
         // 验证 JWT / Session Token / 自定义加密签名
         // 这里应该调用你的后端 API
-        return true;
+        return !string.IsNullOrEmpty(token);
     }
 }</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>Mirror 96 变化（认证 API）：</strong>
+            <ul>
+                <li>不再使用 <code>[ServerCallback]</code> 处理认证消息。<code>[ServerCallback]</code> 用于 Unity 生命周期回调（如 <code>OnTriggerEnter</code>），不用于消息处理。</li>
+                <li>使用 <code>NetworkServer.RegisterHandler&lt;T&gt;(handler)</code> 注册服务器端消息处理器，签名为 <code>void Handler(NetworkConnectionToClient conn, T msg)</code>。</li>
+                <li>使用 <code>NetworkClient.RegisterHandler&lt;T&gt;(handler)</code> 注册客户端消息处理器，签名为 <code>void Handler(T msg)</code>（无连接参数）。</li>
+                <li>断开连接使用 <code>conn.Disconnect()</code>（非 <code>NetworkServer.RemoveConnection()</code>）。</li>
+                <li>连接 ID 通过 <code>conn.connectionId</code> 获取（非 <code>conn.userId</code>）。</li>
+                <li>发送消息使用 <code>conn.Send(new SomeMessage { ... })</code>。</li>
+            </ul>
+        </div>
 
         <h3>9.8.2 防 DDoS 基础措施</h3>
 
         <ul>
             <li><strong>速率限制</strong>：每个连接每秒最多 N 条消息</li>
             <li><strong>连接限制</strong>：单个 IP 最多 M 个并发连接</li>
-            <li><strong>消息大小限制</strong>：拒绝超过 MTU × 2 的消息</li>
+            <li><strong>消息大小限制</strong>：拒绝超过 MTU × 2 的消息（<code>Transport.GetMaxPacketSize()</code>）</li>
             <li><strong>Cloudflare / AWS Shield</strong>：在服务器前加 CDN 做 L3/L4 防护</li>
+            <li><strong>认证前置</strong>：未认证连接不接收游戏消息，超时自动断开</li>
         </ul>
 
         <h2>9.9 本章小结</h2>
 
-        <ul>
-            <li><strong>专用服务器</strong>是生产环境的标配——无头进程、命令行参数、Docker 容器化</li>
-            <li><strong>Unity Relay</strong>可以快速上线，但适合中小规模</li>
-            <li><strong>CI/CD 自动化测试</strong>确保每次代码变更都不会破坏联网功能</li>
-            <li><strong>监控和日志</strong>是运维的基础——不知道服务器出了什么问题，就无法修复</li>
-        </ul>
+        <table>
+            <thead>
+                <tr><th>主题</th><th>要点</th><th>Mirror 96 API</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>三种模式</td>
+                    <td>Client / Host / Dedicated Server</td>
+                    <td><code>StartClient()</code> / <code>StartHost()</code> / <code>StartServer()</code></td>
+                </tr>
+                <tr>
+                    <td>端口配置</td>
+                    <td>端口在 Transport 上，不在 Connect 中</td>
+                    <td><code>KcpTransport.Port</code>；<code>Connect(string address)</code></td>
+                </tr>
+                <tr>
+                    <td>认证</td>
+                    <td>消息处理器实现认证流程</td>
+                    <td><code>RegisterHandler&lt;T&gt;</code> + <code>INetworkMessage</code></td>
+                </tr>
+                <tr>
+                    <td>连接管理</td>
+                    <td>断开 / 获取连接信息</td>
+                    <td><code>conn.Disconnect()</code>；<code>conn.connectionId</code></td>
+                </tr>
+                <tr>
+                    <td>本地玩家</td>
+                    <td>获取本地玩家对象</td>
+                    <td><code>NetworkClient.localPlayer</code>（非 <code>ClientScene.localPlayers</code>）</td>
+                </tr>
+            </tbody>
+        </table>
 
         <p>最后一章，我们将对比 Mirror 与其他 Unity 网络方案，帮助你做出正确的技术选型。</p>
 
@@ -434,17 +669,21 @@ StructuredLogger.LogEvent("player_connected", new Dictionary&lt;string, string&g
                     <li><strong>实操题：</strong>如何在 Ubuntu Server 上部署一个 Mirror 专用服务器？列出具体步骤。</li>
                     <li><strong>设计题：</strong>你的游戏日活 100-500 人，峰值 1000 人。你会选择什么部署方案？为什么？</li>
                     <li><strong>安全题：</strong>如果服务器日志中出现大量 "Unknown connection from IP X.X.X.X"，可能是什么攻击？如何应对？</li>
+                    <li><strong>Mirror 96 变化题：</strong>在 Mirror 96 中，<code>NetworkClient.Connect()</code> 方法签名是什么？端口应该在哪里配置？</li>
+                    <li><strong>Mirror 96 变化题：</strong>如何在 Mirror 96 中实现连接认证？<code>[ServerCallback]</code> 能用于消息处理吗？为什么？</li>
                 </ol>
 
                 <div class="callout callout-tip">
-                    <strong>参考答案：</strong>
+                    <strong>参考答案：</strong><br>
                     1) ① 在 Unity 中构建 Standalone Linux 服务器 ② 上传到服务器 ③ 安装依赖 (libgl1-mesa-glx 等) ④
-                    运行 ./Game -batchmode -nographics -dedicated -port 7777 ⑤ 用 systemctl 创建服务实现开机自启
+                    运行 <code>./Game -batchmode -nographics -port 7777</code> ⑤ 用 systemctl 创建服务实现开机自启。<br><br>
                     2) 动态扩缩方案：2 个基础实例常驻 + 自动扩展。
                     日常 2 个实例足够（每个 50-100 并发），峰值时自动扩展到 5-10 个。
-                    成本低且能应对波动。
+                    成本低且能应对波动。<br><br>
                     3) 可能是 DDoS 或暴力连接攻击。
-                    应对：IP 速率限制、连接数上限、防火墙规则、Cloudflare 防护。
+                    应对：IP 速率限制、连接数上限、防火墙规则、Cloudflare 防护。<br><br>
+                    4) <code>NetworkClient.Connect(string address)</code> 只接受地址字符串（如 <code>"localhost"</code>），<strong>不接受端口参数</strong>。端口在 Transport 组件上配置（如 <code>KcpTransport.Port = 7777</code>）。<br><br>
+                    5) 使用 <code>NetworkServer.RegisterHandler&lt;AuthMessage&gt;(OnServerAuthenticate)</code> 注册消息处理器。<code>[ServerCallback]</code> <strong>不能</strong>用于消息处理——它用于 Unity 生命周期回调（如 <code>OnTriggerEnter</code>），与 <code>[Server]</code> 行为相同但不输出警告日志。认证消息处理器签名是 <code>void Handler(NetworkConnectionToClient conn, AuthMessage msg)</code>。
                 </div>
             </div>
         </details>

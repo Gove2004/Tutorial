@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PPO 算法深入 - PyTorch 强化学习教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-Actor-Critic与A2C.html">← 上一章</a>
+        <a href="08-探索与利用.html">第 8 章 →</a>
+    </nav>
+
+    <main>
+        <h1>第 7 章：PPO 算法深入</h1>
+
+        <h2>7.1 为什么需要 PPO</h2>
+
+        <p>A2C 使用单步更新，策略每次更新幅度较大。当策略改变过多时，旧策略采集的数据就变得不再适用（分布偏移），导致训练不稳定甚至崩溃。</p>
+
+        <p>PPO（Proximal Policy Optimization, Schulman et al., 2017）的核心思想是：<strong>限制每次策略更新的步长，让更新既够大又不会太激��</strong>。相比 A2C 的自由更新，PPO 通过裁剪机制实现更安全的大步更新。</p>
+
+        <div class="definition">
+            <h4>PPO 的目标函数</h4>
+            <p>PPO-Clip 的目标函数：</p>
+            <p><code>L^{CLIP}(θ) = E[ min(r_t(θ) · A_t, clip(r_t(θ), 1-ε, 1+ε) · A_t) ]</code></p>
+            <p>其中 <code>r_t(θ) = π_θ(a_t|s_t) / π_{θ_old}(a_t|s_t)</code> 是概率比率，<code>ε</code> 是裁剪参数（通常 0.2）。</p>
+        </div>
+
+        <h2>7.2 PPO-Clip 机制详解</h2>
+
+        <p>裁剪机制的直觉：<strong>如果新策略让某个动作的概率增加了很多，但优势是负的（这个动作其实不好），就限制这个增加</strong>。反之亦然。</p>
+
+        <pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+
+class PPOActorCritic(nn.Module):
+    """PPO 共享 Actor-Critic 网络"""
+    def __init__(self, state_dim, action_dim, hidden_dim=64):
+        super().__init__()
+        self.shared = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        )
+        self.actor = nn.Linear(hidden_dim, action_dim)
+        self.critic = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        features = self.shared(x)
+        return self.actor(features), self.critic(features)
+
+    def get_action_and_values(self, state):
+        logits, values = self(state)
+        probs = F.softmax(logits, dim=-1)
+        dist = torch.distributions.Categorical(probs)
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
+        return action, log_prob, values
+
+class PPOAgent:
+    def __init__(self, state_dim, action_dim, lr=0.0003, gamma=0.99,
+                 epsilon=0.2, epochs=4, K_epochs=4, entropy_coef=0.01,
+                 max_grad_norm=0.5):
+        """
+        Args:
+            epsilon: PPO 裁剪参数，通常 0.1-0.3
+            epochs: 每个 batch 的训练 epoch 数
+            K_epochs: 每个 epoch 中优化的轮数
+        """
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.epochs = epochs
+        self.K_epochs = K_epochs
+        self.entropy_coef = entropy_coef
+        self.max_grad_norm = max_grad_norm
+
+        self.policy = PPOActorCritic(state_dim, action_dim)
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr)
+
+    def select_action(self, state):
+        state_t = torch.FloatTensor(state).unsqueeze(0)
+        return self.policy.get_action_and_values(state_t)
+
+    def update(self, old_states, old_actions, old_log_probs, old_values, advantages, returns):
+        """
+        PPO 核心更新逻辑
+        """
+        states_t = torch.FloatTensor(np.array(old_states))
+        actions_t = torch.LongTensor(old_actions)
+        old_log_probs_t = torch.FloatTensor(np.array(old_log_probs))
+        old_values_t = torch.FloatTensor(np.array(old_values))
+        advantages_t = torch.FloatTensor(np.array(advantages))
+        returns_t = torch.FloatTensor(np.array(returns))
+
+        # 多个 epoch 的裁剪更新
+        for epoch in range(self.K_epochs):
+            logits, values = self.policy(states_t)
+            probs = F.softmax(logits, dim=-1)
+            new_log_probs = probs.log()
+            log_prob_ratios = new_log_probs.gather(1, actions_t.unsqueeze(1)) - old_log_probs_t.unsqueeze(1)
+            ratio = torch.exp(log_prob_ratios)
+
+            # 裁剪目标
+            surr1 = ratio * advantages_t.unsqueeze(1)
+            surr2 = torch.clamp(ratio, 1 - self.epsilon, 1 + self.epsilon) * advantages_t.unsqueeze(1)
+            policy_loss = -torch.min(surr1, surr2).mean()
+
+            # Critic 损失
+            critic_loss = F.mse_loss(values.squeeze(), returns_t)
+
+            # 熵
+            entropy = -(probs * probs.log().clamp(min=-10)).sum(dim=-1).mean()
+            entropy_loss = -self.entropy_coef * entropy
+
+            loss = policy_loss + 0.5 * critic_loss + entropy_loss
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            self.optimizer.step()
+
+        return {
+            'policy_loss': policy_loss.item(),
+            'critic_loss': critic_loss.item(),
+            'entropy': entropy.item()
+        }
+</code></pre>
+
+        <h2>7.3 完整 PPO 实现</h2>
+
+        <pre><code class="language-python">import gymnasium as gym
+import matplotlib.pyplot as plt
+from collections import deque
+
+class PPOTrainer:
+    def __init__(self, env_name="CartPole-v1", hidden_dim=64, seed=42):
+        self.env = gym.make(env_name)
+        self.state_dim = self.env.observation_space.shape[0]
+        self.action_dim = self.env.action_space.n
+        self.gamma = 0.99
+        self.lambda_gae = 0.95
+        self.clip_eps = 0.2
+        self.lr = 0.0003
+        self.batch_size = 128
+        self.update_epochs = 10
+        self.max_steps_per_episode = 100000  # 防止内存溢出
+
+        self.agent = PPOAgent(self.state_dim, self.action_dim)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+    def collect_rollout(self, max_steps=None):
+        """收集一条 rollout 轨迹"""
+        states, actions, log_probs, rewards, values = [], [], [], [], []
+        state, info = self.env.reset()
+        total_reward = 0
+        done = False
+        truncated = False
+
+        for _ in range(max_steps or self.max_steps_per_episode):
+            action, log_prob, value = self.agent.select_action(state)
+            next_state, reward, done, truncated, info = self.env.step(action)
+
+            states.append(state)
+            actions.append(action)
+            log_probs.append(log_prob)
+            rewards.append(reward)
+            values.append(value)
+
+            state = next_state
+            total_reward += reward
+
+            if done or truncated:
+                break
+
+        # 处理终止状态
+        with torch.no_grad():
+            if done or truncated:
+                next_value = 0
+            else:
+                next_value = self.agent.policy(
+                    torch.FloatTensor(state).unsqueeze(0)
+                )[1].item()
+        values.append(next_value)
+
+        return states, actions, log_probs, rewards, values, total_reward
+
+    def compute_gae(self, rewards, values):
+        """计算 GAE 优势估计"""
+        n = len(rewards)
+        advantages = np.zeros(n)
+        gae = 0
+        for t in reversed(range(n)):
+            if t == n - 1:
+                next_value = 0
+            else:
+                next_value = values[t + 1]
+            delta = rewards[t] + self.gamma * next_value - values[t]
+            gae = delta + self.gamma * self.lambda_gae * gae
+            advantages[t] = gae
+
+        returns = advantages + np.array(values[:-1])
+        return advantages, returns
+
+    def train(self, total_episodes=1000):
+        """主训练循环"""
+        reward_history = []
+        loss_history = []
+
+        for episode in range(total_episodes):
+            # 收集轨迹
+            states, actions, log_probs, rewards, values, total_reward = self.collect_rollout()
+            reward_history.append(total_reward)
+
+            # 计算优势
+            advantages, returns = self.compute_gae(rewards, values)
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+            # PPO 更新
+            for _ in range(self.update_epochs):
+                loss_info = self.agent.update(
+                    states, actions, log_probs, values[:-1],
+                    advantages, returns
+                )
+
+            if episode % 50 == 0:
+                avg = np.mean(reward_history[-50:])
+                print(f"Episode {episode}: 奖励 = {total_reward}, 近50平均 = {avg:.1f}")
+
+        return reward_history, loss_history
+
+    def evaluate(self, num_episodes=10):
+        """评估训练结果"""
+        rewards = []
+        for _ in range(num_episodes):
+            state, info = self.env.reset()
+            total_reward = 0
+            done = False
+            truncated = False
+            while not done and not truncated:
+                with torch.no_grad():
+                    action = torch.argmax(
+                        self.agent.policy.policy(
+                            torch.FloatTensor(state).unsqueeze(0)
+                        )[0]
+                    ).item()
+                state, reward, done, truncated, info = self.env.step(action)
+                total_reward += reward
+            rewards.append(total_reward)
+        return np.mean(rewards)
+
+# 训练
+trainer = PPOTrainer(env_name="CartPole-v1")
+reward_history, _ = trainer.train(total_episodes=500)
+
+# 评估
+final_avg = trainer.evaluate(20)
+print(f"\n最终评估（20 episode）: 平均奖励 = {final_avg:.1f}")
+
+# 可视化
+plt.figure(figsize=(10, 4))
+plt.plot(reward_history, alpha=0.3)
+plt.plot(np.convolve(reward_history, np.ones(50)/50, mode='valid'), 'r-', lw=2)
+plt.axhline(y=500, color='g', linestyle='--', label='满分')
+plt.xlabel('Episode')
+plt.ylabel('Total Reward')
+plt.title(f'PPO 训练曲线 (CartPole, 最终均值={final_avg:.1f})')
+plt.legend()
+plt.tight_layout()
+plt.savefig('ppo-training.png', dpi=150)
+plt.show()
+</code></pre>
+
+        <h2>7.4 PPO 超参数调优指南</h2>
+
+        <table>
+            <thead>
+                <tr><th>超参数</th><th>典型范围</th><th>影响</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>lr</code></td><td>1e-4 ~ 3e-4</td><td>过大→震荡，过小→收敛慢</td></tr>
+                <tr><td><code>gamma</code></td><td>0.99 ~ 0.999</td><td>越大越重视长期奖励</td></tr>
+                <tr><td><code>clip_eps (ε)</code></td><td>0.1 ~ 0.3</td><td>越大更新越激进，越小越保守</td></tr>
+                <tr><td><code>K_epochs</code></td><td>3 ~ 10</td><td>每次收集后用多少轮优化</td></tr>
+                <tr><td><code>lambda_gae</code></td><td>0.95</td><td>GAE 的偏差-方差权衡</td></tr>
+                <tr><td><code>entropy_coef</code></td><td>0.01 ~ 0.1</td><td>熵正则化强度，鼓励探索</td></tr>
+                <tr><td><code>batch_size</code></td><td>64 ~ 512</td><td>批量大小，影响梯度估计质量</td></tr>
+            </tbody>
+        </table>
+
+        <h2>7.5 PPO 实战技巧</h2>
+
+        <div class="callout callout-warning">
+            <strong>常见陷阱与解决</strong>：
+            <ul>
+                <li><strong>策略崩溃</strong>（熵接近 0）：增大 entropy_coef 或降低 lr</li>
+                <li><strong>奖励突然下跌</strong>：clip_eps 太小，放宽到 0.3</li>
+                <li><strong>训练停滞</strong>：lr 过大，尝试降低到 1e-4</li>
+                <li><strong>内存不足</strong>：减小 batch_size 或使用在线 PPO（每步都更新）</li>
+                <li><strong>连续动作空间</strong>：将 Categorical 改为 Normal 分布，输出均值和标准差</li>
+            </ul>
+        </div>
+
+        <h2>7.6 连续动作空间：PPO 适配</h2>
+
+        <p>对于 Pendulum-v1 等连续动作环境，需要修改策略网络输出高斯分布：</p>
+
+        <pre><code class="language-python">class ContinuousPPOActorCritic(nn.Module):
+    """适配连续动作空间的 PPO"""
+    def __init__(self, state_dim, action_dim, hidden_dim=64):
+        super().__init__()
+        self.shared = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        )
+        self.actor_mean = nn.Linear(hidden_dim, action_dim)
+        self.actor_log_std = nn.Parameter(torch.zeros(1, action_dim))  # 可学习
+        self.critic = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        features = self.shared(x)
+        return self.actor_mean(features), self.critic(features)
+
+    def get_action_and_values(self, state):
+        mean, values = self(state)
+        log_std = self.actor_log_std.expand_as(mean)
+        std = log_std.exp()
+        dist = torch.distributions.Normal(mean, std)
+        action = dist.sample()
+        action = torch.clamp(action, -2.0, 2.0)  # Pendulum 动作范围 [-2, 2]
+        log_prob = dist.log_prob(action).sum(dim=-1)
+        return action, log_prob, values
+</code></pre>
+
+        <h2>7.7 本章小结</h2>
+        <ul>
+            <li>PPO 通过裁剪机制限制每次策略更新的幅度，保证训练稳定性</li>
+            <li>概率比率 r_t(θ) 衡量新旧策略的差异，clip 操作防止差异过大</li>
+            <li>GAE 提供偏差-方差的灵活平衡</li>
+            <li>PPO 可以适配连续动作空间（使用高斯分布）</li>
+            <li>超参数调优是 PPO 成功的关键：lr、clip_eps、entropy_coef</li>
+        </ul>
+
+        <h2>练习</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>基础练习</h4>
+                    <p>在 CartPole-v1 上运行完整 PPO 代码，尝试将 clip_eps 从 0.2 改为 0.1 和 0.3，比较收敛速度和稳定性。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>进阶挑战</h4>
+                    <p>在 Pendulum-v1（连续动作）上实现并训练 PPO Agent，目标是在 500 个 episode 内达到平均奖励 -150 以上（满分 0）。</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="06-Actor-Critic与A2C.html">← 上一章：Actor-Critic</a>
+            <a href="08-探索与利用.html">第 8 章：探索与利用 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+    <script>
+        function showTab(btn) {
+            const tabs = btn.closest('.tabs');
+            tabs.querySelectorAll('.tab-buttons button').forEach(b => b.classList.remove('active'));
+            tabs.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            tabs.querySelectorAll('.tab-content').forEach(c => {
+                if (c.previousElementSibling === btn) c.classList.add('active');
+            });
+        }
+    </script>
+</body>
+</html>

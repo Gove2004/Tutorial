@@ -25,6 +25,15 @@
             服务器可能说"不行，你不可能这么快"。理解并实践"服务器权威"模型，是联网开发的分水岭。
         </p>
 
+        <div class="callout callout-info">
+            <strong>Mirror 96 API 更新</strong><br>
+            本章已全面适配 Mirror 96.x。主要变化包括：
+            <code>hasAuthority</code> → <code>isOwned</code>；
+            Authority API 使用 <code>AssignClientAuthority</code> / <code>RemoveClientAuthority</code>（非 <code>AssignAuthority</code> / <code>GrantAuthority</code> / <code>RevokeAuthority</code>）；
+            <code>FindObjectById</code> → <code>NetworkServer.spawned.TryGetValue(netId, out var identity)</code>；
+            断开连接使用 <code>conn.Disconnect()</code>（非 <code>NetworkServer.RemoveConnection</code>）。
+        </div>
+
         <h2>7.1 为什么需要权威服务器？</h2>
 
         <p>先想一个场景：你在开发一个平台跳跃游戏。玩家在单机模式下按空格跳跃，角色腾空而起。</p>
@@ -61,15 +70,20 @@ void Update()
 
         <pre><code class="language-csharp">public class PlayerController : NetworkBehaviour
 {
+    [SerializeField] float maxSpeed = 10f;
+
     void Update()
     {
-        // ❌ 绝对不要在客户端直接修改状态
+        // ❌ 绝对不要在客户端直接修改网络状态
         // transform.position += direction;  // 危险！
 
         // ✅ 正确：只收集输入，发送给服务器
-        if (isLocalPlayer && hasAuthority)
+        if (isLocalPlayer)  // isLocalPlayer 已隐含 isOwned
         {
-            Vector2 input = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
+            Vector2 input = new Vector2(
+                Input.GetAxis("Horizontal"),
+                Input.GetAxis("Vertical")
+            );
             CmdSendInput(input, Time.time);
         }
     }
@@ -89,24 +103,23 @@ void Update()
         // 验证 2：时间戳是否合理（不能是未来时间）
         if (timestamp > Time.time) return;
 
-        // 验证 3：速度是否超过最大移动速度
-        Vector3 move = new Vector3(input.x, input.y, 0) * maxSpeed * Time.deltaTime;
-        if (move.sqrMagnitude > (maxSpeed * Time.deltaTime) * (maxSpeed * Time.deltaTime))
-            move.Normalize() * maxSpeed * Time.deltaTime;
-
+        // 服务器端执行移动
+        Vector3 move = new Vector3(input.x, 0, input.y) * maxSpeed * Time.deltaTime;
         transform.position += move;
-    }
 
-    // 服务器广播新位置
-    [ClientRpc]
-    void RpcSyncPosition(Vector3 pos)
-    {
-        if (!isLocalPlayer)  // 本地玩家自己已经知道位置，不需要同步
-            transform.position = pos;
+        // 位置同步由 NetworkTransform 自动处理
+        // 或使用 SyncVar + hook 手动同步
     }
 }</code></pre>
 
-        <h3>7.2.2 部分权威（Partial Authority / Client Authority）</h3>
+        <div class="callout callout-tip">
+            <strong>简化方案：使用 NetworkTransform</strong><br>
+            在实际项目中，位置同步通常使用 <code>NetworkTransform</code> 组件。
+            客户端在本地移动（<code>isOwned</code> 为 true 时），NetworkTransform 自动将位置同步给服务器和其他客户端。
+            服务器可以通过 SyncVar 或 Command 验证来限制移动速度。
+        </div>
+
+        <h3>7.2.2 部分权威（Client Authority）</h3>
 
         <p>某些对象的所有权可以交给客户端。但"所有权"不等于"不受验证"：</p>
 
@@ -117,27 +130,30 @@ void Update()
 public class NPCTracker : NetworkBehaviour
 {
     public Transform target;
-    public float speed = 3f;
+    [SerializeField] float speed = 3f;
+    Vector3 serverPosition;
+    float lastReportTime;
 
+    [Server]
     void Start()
     {
         // 将 NPC 的 Authority 授予绑定它的客户端
-        if (isServer)
-        {
-            GetComponent&lt;NetworkIdentity&gt;().AssignAuthority(connectionToClient);
-        }
+        // Mirror 96 使用 AssignClientAuthority
+        NetworkIdentity identity = GetComponent&lt;NetworkIdentity&gt;();
+        identity.AssignClientAuthority(connectionToClient);
+        serverPosition = transform.position;
     }
 
-    // 拥有 Authority 的客户端可以驱动这个 NPC
+    // 拥有 isOwned 的客户端可以驱动这个 NPC
     void Update()
     {
-        if (hasAuthority && target != null)
+        if (isOwned && target != null)
         {
             transform.position = Vector3.MoveTowards(
                 transform.position, target.position, speed * Time.deltaTime
             );
 
-            // 即使有 Authority，也应该定期向服务器报告位置
+            // 即使有 isOwned，也应该定期向服务器报告位置
             if (Time.time - lastReportTime > 0.1f)
             {
                 CmdReportPosition(transform.position);
@@ -153,7 +169,7 @@ public class NPCTracker : NetworkBehaviour
         float distance = Vector3.Distance(serverPosition, pos);
         float maxAllowed = speed * 0.1f + 0.5f;  // 允许一些误差
 
-        if (distance &gt; maxAllowed)
+        if (distance > maxAllowed)
         {
             Debug.LogWarning($"[反作弊] NPC 速度异常: {distance / 0.1f:F1} m/s");
             transform.position = serverPosition;  // 回滚
@@ -161,7 +177,7 @@ public class NPCTracker : NetworkBehaviour
         }
 
         serverPosition = pos;
-        RpcSyncPosition(pos);
+        // 位置同步由 NetworkTransform 处理
     }
 }</code></pre>
 
@@ -174,17 +190,17 @@ public class NPCTracker : NetworkBehaviour
 
 public class Trap : NetworkBehaviour
 {
-    public int damage = 20;
+    [SerializeField] int damage = 20;
+    [SerializeField] GameObject trapEffect;
 
+    // [ServerCallback]：只在服务器执行，不打印警告
+    [ServerCallback]
     void OnTriggerEnter(Collider other)
     {
-        // ⚠️ 注意：触发器逻辑必须在服务器端执行！
-        // 客户端的 OnTriggerEnter 不应该影响游戏结果
-
-        if (isServer)
+        // 服务器端碰撞检测
+        if (other.TryGetComponent&lt;NetworkIdentity&gt;(out var targetIdentity))
         {
-            NetworkIdentity target = other.GetComponent&lt;NetworkIdentity&gt;();
-            if (target && target.TryGetComponent(out HealthSystem hs))
+            if (targetIdentity.TryGetComponent&lt;HealthSystem&gt;(out var hs))
             {
                 hs.TakeDamage(damage);
                 RpcTriggerEffect(transform.position);
@@ -211,8 +227,8 @@ public class Trap : NetworkBehaviour
                 <tr><th>场景</th><th>建议</th><th>原因</th></tr>
             </thead>
             <tbody>
-                <tr><td>Player 角色</td><td>✅ 给客户端</td><td>客户端最需要即时反馈</td></tr>
-                <tr><td>NPC 跟随 Player</td><td>✅ 给客户端</td><td>减少 RPC 频率</td></tr>
+                <tr><td>Player 角色</td><td>✅ 自动拥有</td><td>Player 对象 Spawn 时自动获得 Authority</td></tr>
+                <tr><td>NPC 跟随 Player</td><td>✅ 可分配</td><td>减少 RPC 频率，但需服务器验证</td></tr>
                 <tr><td>可拾取物品</td><td>❌ 不给</td><td>物品不应该被"控制"</td></tr>
                 <tr><td>载具/载具上的乘客</td><td>⚠️ 视情况</td><td>载具本身服务器权威，乘客同步位置</td></tr>
                 <tr><td>投射物（子弹）</td><td>⚠️ 视情况</td><td>高精度游戏服务器权威，低精度可客户端预测</td></tr>
@@ -225,37 +241,52 @@ public class Trap : NetworkBehaviour
 public class AuthorityManager : NetworkBehaviour
 {
     [Command]
-    public void CmdRequestAuthority()
+    public void CmdRequestAuthority(uint targetNetId)
     {
-        // 检查请求者是否有资格获得 Authority
-        if (GetComponent&lt;NetworkIdentity&gt;().connectionToClient == connectionToClient)
+        // 通过 netId 查找对象
+        if (NetworkServer.spawned.TryGetValue(targetNetId, out var identity))
         {
-            // 合法请求，授予 Authority
-            GetComponent&lt;NetworkIdentity&gt;().GrantAuthority(connectionToClient);
-        }
-        else
-        {
-            // 非法请求——有人试图夺取不属于他的对象控制权
-            Debug.LogWarning("非法 Authority 请求");
+            // 检查请求者是否有资格获得 Authority
+            if (identity.connectionToClient == null)  // 当前无人拥有
+            {
+                // Mirror 96 的 Authority API
+                identity.AssignClientAuthority(connectionToClient);
+                // 客户端上 isOwned 变为 true
+                // 触发 OnStartAuthority 回调
+            }
+            else
+            {
+                Debug.LogWarning("该对象已被其他客户端拥有");
+            }
         }
     }
 
-    // 释放 Authority
-    public void ReleaseAuthority()
+    // 释放 Authority（服务器端调用）
+    [Server]
+    public void ReleaseAuthority(uint targetNetId)
     {
-        if (isServer)
+        if (NetworkServer.spawned.TryGetValue(targetNetId, out var identity))
         {
-            GetComponent&lt;NetworkIdentity&gt;().RevokeAuthority(connectionToClient);
+            // Mirror 96 的移除 Authority API
+            identity.RemoveClientAuthority();
+            // 客户端上 isOwned 变为 false
+            // 触发 OnStopAuthority 回调
         }
     }
 }</code></pre>
 
-        <div class="sidebar-note">
-            <strong>Mirror 中的 Authority API 说明：</strong><br>
-            不同版本的 Mirror 对 Authority 的管理方式有所不同。
-            较新版本中，<code>NetworkIdentity.AssignAuthority()</code> 用于在 Spawn 前分配，
-            <code>NetworkServer.Spawn()</code> 时自动处理 Player 对象的 Authority。
-            具体 API 请以你使用的 Mirror 版本文档为准。
+        <div class="callout callout-warning">
+            <strong>Mirror 96 Authority API 变化</strong><br>
+            旧版 Mirror 使用 <code>AssignAuthority</code> / <code>GrantAuthority</code> / <code>RevokeAuthority</code> 等方法名。
+            <br><br>
+            Mirror 96 统一为：
+            <ul>
+                <li><code>NetworkIdentity.AssignClientAuthority(NetworkConnection conn)</code> — 分配控制权</li>
+                <li><code>NetworkIdentity.RemoveClientAuthority()</code> — 移除控制权</li>
+            </ul>
+            所有 Authority 方法都在 <code>NetworkIdentity</code> 上，且只能在服务器端调用。
+            客户端感知 Authority 变化通过 <code>isOwned</code> 属性（旧版 <code>hasAuthority</code>）和
+            <code>OnStartAuthority</code> / <code>OnStopAuthority</code> 回调。
         </div>
 
         <h2>7.4 常见作弊手段与防御策略</h2>
@@ -267,8 +298,7 @@ public class AuthorityManager : NetworkBehaviour
 
 public class MovementValidator : NetworkBehaviour
 {
-    public float maxSpeed = 10f;
-    public float maxAcceleration = 20f;
+    [SerializeField] float maxSpeed = 10f;
     Vector3 lastPosition;
     float lastUpdateTime;
 
@@ -276,17 +306,19 @@ public class MovementValidator : NetworkBehaviour
     void CmdUpdatePosition(Vector3 newPos, float timestamp)
     {
         float dt = timestamp - lastUpdateTime;
-        if (dt &lt;= 0) { Debug.LogWarning("时间戳异常"); return; }
+        if (dt &lt;= 0)
+        {
+            Debug.LogWarning("时间戳异常");
+            return;
+        }
 
         float distance = Vector3.Distance(transform.position, newPos);
         float actualSpeed = distance / dt;
 
-        if (actualSpeed &gt; maxSpeed * 1.5f)  // 允许 50% 的余量
+        if (actualSpeed > maxSpeed * 1.5f)  // 允许 50% 的余量
         {
             Debug.LogWarning($"[速度作弊检测] 玩家速度: {actualSpeed:F1} m/s (上限: {maxSpeed})");
-            // 选项 1: 踢出游戏
-            // NetworkServer.RemoveConnection(connectionToClient);
-            // 选项 2: 回滚位置
+            // 选项 1: 回滚位置
             transform.position = lastPosition;
             return;
         }
@@ -308,7 +340,7 @@ void CmdTeleport(Vector3 targetPos)
     float distance = Vector3.Distance(transform.position, targetPos);
     float maxTeleportDistance = 5f;  // 允许的最大传送距离
 
-    if (distance &gt; maxTeleportDistance)
+    if (distance > maxTeleportDistance)
     {
         Debug.LogWarning($"[传送作弊检测] 距离: {distance:F1}m");
         return;
@@ -323,22 +355,25 @@ void CmdTeleport(Vector3 targetPos)
 // 防御：服务器自己计算命中判定
 
 [Command]
-void CmdReportHit(Vector3 targetPos, uint targetNetId)
+void CmdReportHit(uint targetNetId, Vector3 hitPoint)
 {
     // ❌ 错误做法：相信客户端说的"我打中了 netId=X 的对象"
-    // HealthSystem target = FindObjectById(targetNetId).GetComponent&lt;HealthSystem&gt;();
-    // target.TakeDamage(damage);
+    // if (NetworkServer.spawned.TryGetValue(targetNetId, out var target))
+    // {
+    //     target.GetComponent&lt;HealthSystem&gt;().TakeDamage(damage);
+    // }
 
     // ✅ 正确做法：服务器自己做射线检测
-    RaycastHit hit;
-    if (Physics.Raycast(shootOrigin, shootDirection, out hit, weaponRange))
+    Vector3 shootOrigin = transform.position + Vector3.up * 1.5f;
+    Vector3 shootDirection = (hitPoint - shootOrigin).normalized;
+
+    if (Physics.Raycast(shootOrigin, shootDirection, out RaycastHit hit, weaponRange))
     {
-        if (hit.collider.gameObject.scene.name == currentSceneName)  // 确保在同一场景
+        if (hit.collider.TryGetComponent&lt;NetworkIdentity&gt;(out var targetIdentity))
         {
-            NetworkIdentity targetIdentity = hit.collider.GetComponent&lt;NetworkIdentity&gt;();
-            if (targetIdentity &amp;&amp; targetIdentity.TryGetComponent(out HealthSystem hs))
+            if (targetIdentity.TryGetComponent&lt;HealthSystem&gt;(out var hs))
             {
-                hs.TakeDamage(calculateDamage(hit));
+                hs.TakeDamage(CalculateDamage(hit));
             }
         }
     }
@@ -351,37 +386,37 @@ void CmdReportHit(Vector3 targetPos, uint targetNetId)
 
 public class AntiReplay : NetworkBehaviour
 {
-    Dictionary&lt;int, float&gt; processedCommands = new Dictionary&lt;int, float&gt;();
-    const int MaxHistory = 100;
-    int nextSeq = 1;
+    HashSet&lt;int&gt; processedCommands = new HashSet&lt;int&gt;();
+    int lastSequence = 0;
 
     [Command]
-    void CmdCommand(int seq, CommandData data)
+    void CmdUseItem(int sequence, int itemId)
     {
-        // 检查序列号
-        if (seq &lt;= nextSeq - MaxHistory)
+        // 检查序列号是否过时
+        if (sequence &lt;= lastSequence - 100)
         {
             Debug.LogWarning("过时命令，忽略");
             return;
         }
 
-        if (processedCommands.ContainsKey(seq))
+        // 检查是否已处理过
+        if (processedCommands.Contains(sequence))
         {
             Debug.LogWarning("重复命令，忽略");
             return;
         }
 
-        processedCommands[seq] = Time.time;
-        nextSeq = seq + 1;
+        processedCommands.Add(sequence);
+        lastSequence = sequence;
 
-        // 清理历史
-        if (processedCommands.Count &gt; MaxHistory * 2)
+        // 清理历史记录
+        if (processedCommands.Count > 200)
         {
-            var oldest = processedCommands.OrderBy(x => x.Value).First();
-            processedCommands.Remove(oldest.Key);
+            processedCommands.RemoveWhere(s => s &lt;= lastSequence - 100);
         }
 
-        ExecuteCommand(data);
+        // 执行命令
+        UseItem(itemId);
     }
 }</code></pre>
 
@@ -392,7 +427,7 @@ public class AntiReplay : NetworkBehaviour
 
 public class RateLimiter : NetworkBehaviour
 {
-    public int maxCommandsPerSecond = 30;
+    [SerializeField] int maxCommandsPerSecond = 30;
     Queue&lt;float&gt; commandTimes = new Queue&lt;float&gt;();
 
     [Command]
@@ -401,15 +436,17 @@ public class RateLimiter : NetworkBehaviour
         float now = Time.time;
 
         // 清理超过 1 秒的记录
-        while (commandTimes.Count &gt; 0 &amp;&amp; commandTimes.Peek() &lt; now - 1f)
+        while (commandTimes.Count > 0 && commandTimes.Peek() &lt; now - 1f)
         {
             commandTimes.Dequeue();
         }
 
         // 检查频率
-        if (commandTimes.Count &gt;= maxCommandsPerSecond)
+        if (commandTimes.Count >= maxCommandsPerSecond)
         {
-            Debug.LogWarning("输入频率过高");
+            Debug.LogWarning($"输入频率过高: {commandTimes.Count} 次/秒");
+            // 持续违规可踢出
+            // connectionToClient.Disconnect();
             return;
         }
 
@@ -418,39 +455,93 @@ public class RateLimiter : NetworkBehaviour
     }
 }</code></pre>
 
-        <h2>7.6 服务器验证的粒度</h2>
+        <h2>7.5 服务器验证的粒度</h2>
 
         <p>验证太松 → 容易被作弊。验证太紧 → 正常玩家也可能被误判。<br>
         找到平衡点需要理解网络的本质：<strong>延迟是不可避免的</strong>。</p>
 
-        <pre><code class="language-csharp">public class ValidationTuner : MonoBehaviour
+        <pre><code class="language-csharp">public class ValidationTuner : NetworkBehaviour
 {
-    // 验证阈值应该考虑当前网络状况
-    // 不要使用固定值
+    [SerializeField] float maxSpeed = 10f;
 
     float GetRTT()
     {
-        // Mirror 提供平均 RTT
-        return NetworkClient.connection?.rtt ?? 0f;
+        // Mirror 96 中，NetworkConnection 有 rtt 属性（如果 Transport 支持）
+        // rtt 是往返延迟时间（Round-Trip Time），单位毫秒
+        if (connectionToClient != null)
+            return connectionToClient.rtt;
+        return 0f;
     }
 
-    float CalculateAcceptableMoveDistance(float maxSpeed)
+    float CalculateAcceptableMoveDistance()
     {
-        float rtt = GetRTT();
-        // 允许的位移 = 最大速度 × (更新时间 + 半个往返延迟)
+        float rttSeconds = GetRTT() / 1000f;  // 转为秒
+        // 允许的位移 = 最大速度 × (更新时间 + 往返延迟)
         // 给网络延迟留余量
-        return maxSpeed * (0.1f + rtt / 2f);
+        return maxSpeed * (0.1f + rttSeconds);
+    }
+
+    [Command]
+    void CmdUpdatePosition(Vector3 newPos)
+    {
+        float maxDist = CalculateAcceptableMoveDistance();
+        float actualDist = Vector3.Distance(transform.position, newPos);
+
+        if (actualDist > maxDist)
+        {
+            // 根据当前网络状况，这个位移不可接受
+            Debug.LogWarning($"位移过大: {actualDist:F2}m (允许 {maxDist:F2}m)");
+            return;
+        }
+
+        transform.position = newPos;
     }
 }</code></pre>
 
-        <h2>7.7 本章小结</h2>
+        <div class="callout callout-info">
+            <strong>验证容差的黄金法则：</strong>
+            <ul>
+                <li>验证阈值应该<strong>动态调整</strong>——基于当前网络延迟</li>
+                <li>高延迟玩家需要更大的容差</li>
+                <li>使用<strong>累积违规</strong>而非单次违规来判定作弊</li>
+                <li>宁可放过一些边界作弊，也不要误判正常玩家</li>
+            </ul>
+        </div>
 
-        <ul>
-            <li><strong>服务器权威</strong>不是可选项，而是网络游戏的必需品</li>
-            <li><strong>Client Authority</strong>不是"放弃控制"，而是" delegation with verification"——委派但验证</li>
-            <li>每种作弊手段都有对应的防御策略，核心思路是<strong>服务器独立验证</strong></li>
-            <li>验证要有合理的容差——考虑网络延迟和抖动</li>
-        </ul>
+        <h2>7.6 本章小结</h2>
+
+        <table>
+            <thead>
+                <tr><th>概念</th><th>Mirror 96 API</th><th>要点</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>服务器权威</td>
+                    <td><code>[Command]</code> + <code>isServer</code></td>
+                    <td>所有游戏逻辑在服务器执行，客户端只发请求</td>
+                </tr>
+                <tr>
+                    <td>对象控制权</td>
+                    <td><code>isOwned</code>（旧 <code>hasAuthority</code>）</td>
+                    <td>表示本地客户端是否拥有此对象</td>
+                </tr>
+                <tr>
+                    <td>分配控制权</td>
+                    <td><code>identity.AssignClientAuthority(conn)</code></td>
+                    <td>服务器端调用，分配对象控制权给客户端</td>
+                </tr>
+                <tr>
+                    <td>移除控制权</td>
+                    <td><code>identity.RemoveClientAuthority()</code></td>
+                    <td>服务器端调用，回收对象控制权</td>
+                </tr>
+                <tr>
+                    <td>连接断开</td>
+                    <td><code>conn.Disconnect()</code></td>
+                    <td>踢出特定客户端</td>
+                </tr>
+            </tbody>
+        </table>
 
         <p>下一章，我们将进入高级主题：延迟补偿与客户端预测——这些技术让你即使在 200ms 延迟下也能获得流畅的体验。</p>
 
@@ -465,26 +556,30 @@ public class RateLimiter : NetworkBehaviour
                         <pre><code class="language-csharp">[Command]
 void CmdPickupItem(uint itemNetId)
 {
-    GameObject item = FindObjectById(itemNetId);
-    inventory.Add(item);
-    NetworkServer.Destroy(item);
+    if (NetworkServer.spawned.TryGetValue(itemNetId, out var identity))
+    {
+        inventory.Add(identity.gameObject);
+        NetworkServer.Destroy(identity.gameObject);
+    }
 }</code></pre>
                     </li>
-                    <li><strong>思考题：</strong>"完全信任服务器"是否意味着客户端可以完全不验证任何东西？
-                    客户端是否应该做任何验证？为什么？</li>
+                    <li><strong>Mirror 96 变化题：</strong>旧代码使用了
+                        <pre><code class="language-csharp">if (hasAuthority)
+    MovePlayer();
+identity.AssignAuthority(conn);</code></pre>
+                    在 Mirror 96 中应该怎么修改？</li>
                 </ol>
 
                 <div class="callout callout-tip">
-                    <strong>参考答案：</strong>
-                    1) 复活请求应该由队友发起（CmdRequestResurrect(targetId)），
+                    <strong>参考答案：</strong><br>
+                    1) 复活请求应该由队友发起 <code>CmdRequestResurrect(targetNetId)</code>，
                     服务器验证：① 请求者是否在复活范围内 ② 目标是否真的死亡 ③ 复活技能是否在冷却中
-                    ④ 目标是否在同一场景。全部通过才执行复活。
-                    2) 缺少距离验证——任何人都可以拾取远处的物品。
-                    应添加：if (Vector3.Distance(transform.position, item.transform.position) &gt; pickupRange) return;
-                    还缺少权限验证——应该检查调用者是否有资格拾取此物品。
-                    3) 客户端仍然需要做验证：输入范围校验（防止发送非法输入）、
-                    UI 状态管理（不显示不可用的按钮）、本地表现同步。
-                    客户端验证不是为了安全，而是为了体验和性能。
+                    ④ 目标是否在同一场景。全部通过才执行复活。<br><br>
+                    2) 缺少<strong>距离验证</strong>——任何人都可以拾取远处的物品。
+                    应添加：<code>if (Vector3.Distance(transform.position, identity.transform.position) > pickupRange) return;</code>
+                    还缺少<strong>频率限制</strong>——应该防止快速拾取攻击。<br><br>
+                    3) 两处修改：① <code>hasAuthority</code> → <code>isOwned</code>；
+                    ② <code>AssignAuthority(conn)</code> → <code>AssignClientAuthority(conn)</code>。
                 </div>
             </div>
         </details>

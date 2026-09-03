@@ -1,0 +1,25 @@
+:root {
+    --primary: #e53e3e;
+    --primary-dark: #c53030;
+    --accent: #dd6b20;
+    --bg-main: #ffffff;
+    --bg-aside: #f7fafc;
+    --text: #1a202c;
+}
+body { background: var(--bg-aside); color: var(--text); }
+main { background: var(--bg-main); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+h1 { color: var(--primary); border-bottom-color: var(--primary); }
+a { color: var(--primary); }
+.callout-info { background: #fff5f5; border-color: var(--primary); }
+.callout-tip { background: #f0fff4; border-color: #38a169; }
+.callout-warning { background: #fffaf0; border-color: var(--accent); }
+.callout-danger { background: #fff5f5; border-color: #e53e3e; }
+.definition { border-color: var(--primary); }
+.definition h4 { color: var(--primary); }
+.step-number { background: var(--primary); }
+.tab-buttons button.active { border-bottom-color: var(--primary); }
+.chapter-badge.basic { background: #e8f5e9; color: #2e7d32; }
+.chapter-badge.intermediate { background: #fff3e0; color: #e65100; }
+.chapter-badge.advanced { background: #fce4ec; color: #c2185b; }
+code { color: #e53e3e; background: #fff5f5; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+pre code { color: #f8f8f2; }

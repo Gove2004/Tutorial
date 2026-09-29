@@ -18,6 +18,12 @@
     "updated": "2026-07-03"
   },
   {
+    "dir": "discrete-math-tutorial",
+    "title": "离散数学教程（屈婉玲版）",
+    "chapters": 15,
+    "updated": "2026-09-12"
+  },
+  {
     "dir": "ecs-dot-tutorial",
     "title": "ECS 与 Unity DOTS 入门到精通",
     "chapters": 10,
@@ -28,6 +34,12 @@
     "title": "PyTorch 强化学习教程 - 目录",
     "chapters": 11,
     "updated": "2026-08-03"
+  },
+  {
+    "dir": "rl-tutorial",
+    "title": "动手做强化学习 · 从直觉到实战的系统教程",
+    "chapters": 11,
+    "updated": "2026-09-26"
   },
   {
     "dir": "software-engineering-tutorial",

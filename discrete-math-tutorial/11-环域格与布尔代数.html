@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>环、域、格与布尔代数 - 离散数学教程</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-math.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="10-群与子群.html">← 上一章</a>
+        <a href="12-图论基础.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>11 - 环、域、格与布尔代数</h1>
+
+        <div class="callout callout-info objectives">
+            <strong>本章目标</strong>：掌握环、整环、域的定义与递进关系；识别零因子；掌握格的定义、对偶原理与分配格/有补格的判定；理解布尔代数与逻辑、电路的同构关系。
+        </div>
+
+        <h2>11.1 环：装上四则运算的群</h2>
+
+        <div class="definition">
+            <h4>定义 11.1（环）</h4>
+            <p>&lt;R, +, ×&gt; 称为环，若：① &lt;R, +&gt; 是交换群（幺元记 0，逆元记 −a）；② &lt;R, ×&gt; 是半群（封闭、结合）；③ × 对 + 分配：a×(b+c) = a×b + a×c（及右侧分配）。</p>
+        </div>
+
+        <p>环 = 加法群 + 乘法半群 + 分配律粘合。ℤ 是环的标准样本：加法人人可逆（负数），但乘法只有 ±1 可逆——<strong>环允许乘法"不完整"</strong>，这正是它与域的分界线。</p>
+
+        <div class="example-box">
+            <h4>例 11.1 ℤ₆ 中的"怪事"：零因子</h4>
+            <p>在 ℤ₆ 里：2 × 3 = 6 ≡ 0 (mod 6)。两个<strong>非零</strong>元素相乘得零！这样的元素叫<strong>零因子</strong>。零因子的存在造成灾难性后果：2x ≡ 4 (mod 6) 有两个解 x = 2 和 x = 5——消去律失效，"解方程"这个概念开始崩坏。<br>
+            反观 ℤ₅：非零元 {1,2,3,4} 互相相乘永不等于 0（5 是素数），每行每列是完美拉丁方，任何方程 a*x = b (a≠0) 有唯一解。素数模世界干净得多。</p>
+        </div>
+
+        <div class="definition">
+            <h4>定义 11.2（整环与域）</h4>
+            <ul>
+                <li><strong>整环</strong>：交换环（× 交换、有幺元 1）+ 无零因子 + 有 1 ≠ 0。</li>
+                <li><strong>域</strong>：交换环 + 非零元全体对 × 构成交换群（即人人可除）。</li>
+            </ul>
+        </div>
+
+        <div class="theorem">
+            <h4>定理 11.1（递进关系）</h4>
+            <div class="formula">
+                域 ⇒ 整环 ⇒ 交换环 ⇒ 环<br>
+                ℤ 是整环但非域（2 没有乘法逆）；ℚ、ℝ、ℂ 都是域；ℤₚ（p 素数）是域，ℤₙ（n 合数）连整环都不是
+            </div>
+            <p><strong>ℤₙ 是域 ⇔ n 是素数</strong>——数论与代数在此握手。这也是 RSA 选大素数、编码理论在 GF(2⁸)（AES 的数学地基）上做运算的原因：素域和素域的扩张才是安全的运算场。</p>
+        </div>
+
+        <h2>11.2 格：两种运算共享的秩序</h2>
+
+        <div class="definition">
+            <h4>定义 11.3（格）</h4>
+            <p>偏序集 &lt;L, ≼&gt; 若任意两元素都有上确界与下确界，则称为格。记 a∨b = sup{a,b}（保交/结），a∧b = inf{a,b}（保序/交）。代数定义：&lt;L, ∨, ∧&gt; 满足交换律、结合律、吸收律（两个），且 a∨b 与 a∧b 互相确定偏序（a ≼ b ⇔ a∧b = a ⇔ a∨b = b）。</p>
+        </div>
+
+        <div class="example-box">
+            <h4>例 11.2 三个天然的格</h4>
+            <ul>
+                <li>&lt;P({a,b,c}), ⊆&gt;：a∨b 并集、a∧b 交集（第 7 章已算过：sup = ∪，inf = ∩）。哈斯图是标准立方体。</li>
+                <li>&lt;ℤ⁺, |&gt;（整除）：a∨b = LCM，a∧b = GCD（第 7 章例 7.5 的结论直接回收）。</li>
+                <li>&lt;ℕ, ≤&gt;：a∨b = max，a∧b = min。链必然是格（任何两元素都可比较）。</li>
+                <li>反例：五边形 N₅（哈斯图像英文字母 N 的偏序集）不是分配格——格可以存在，分配律却可能失败。</li>
+            </ul>
+        </div>
+
+        <div class="theorem">
+            <h4>定理 11.2（对偶原理）</h4>
+            <p>格的任何定理中，把 ≼ 反向、∨ 与 ∧ 互换，得到的仍是定理。因为 ∧ 与 ∨ 的公理完全对称（交换、结合、吸收都成对出现）。记忆法：格的世界里"上与下"人人平等。分配律 (a∨b)∧c = (a∧c)∨(b∧c) 在格中<strong>不自动成立</strong>——成立时叫分配格。</p>
+        </div>
+
+        <div class="definition">
+            <h4>定义 11.4（有界格与有补格）</h4>
+            <ul>
+                <li><strong>有界格</strong>：存在最大元 1 与最小元 0。</li>
+                <li><strong>有补格</strong>：有界格中每个 a 存在 b 使 a∨b = 1 且 a∧b = 0（b 称为 a 的补元）。补元可以不唯一！</li>
+            </ul>
+        </div>
+
+        <h2>11.3 布尔代数：逻辑的代数化身</h2>
+
+        <div class="definition">
+            <h4>定义 11.5（布尔代数）</h4>
+            <p><strong>分配 + 有补</strong>的有界格，即 &lt;B, ∨, ∧, ~, 0, 1&gt; 满足：格公理 + 分配律 + 补元公理（a∨~a = 1，a∧~a = 0）。</p>
+        </div>
+
+        <div class="example-box">
+            <h4>例 11.3 最小的布尔代数：B = {0, 1}</h4>
+            <table class="truth-table">
+                <tr><th>∨</th><th>0</th><th>1</th><th>∧</th><th>0</th><th>1</th></tr>
+                <tr><td>0</td><td>0</td><td>1</td><td>0</td><td>0</td><td>0</td></tr>
+                <tr><td>1</td><td>1</td><td>1</td><td>1</td><td>0</td><td>1</td></tr>
+            </table>
+            <p>把 ∨ 读作"或"、∧ 读作"且"、~ 读作"非"——这张表就是第 1 章的真值表！布尔代数 B = {0,1} 与命题逻辑（在等值意义下）<strong>同构</strong>。第 2 章背的 24 条等值式，一半来自格公理（交换/结合/吸收/幂等），另一半来自补元 + 分配（德摩根等）。</p>
+        </div>
+
+        <div class="theorem">
+            <h4>定理 11.3（布尔代数的德摩根律）</h4>
+            <div class="formula">
+                ~(a∨b) = ~a ∧ ~b；　~(a∧b) = ~a ∨ ~b
+            </div>
+            <p>在一般格中补元不唯一，但布尔代数（分配 + 有补）中<strong>补元唯一</strong>，所以 ~ 是一元运算且满足德摩根律——德摩根律本质上是"分配律 + 补元唯一"的结晶。</p>
+        </div>
+
+        <div class="theorem">
+            <h4>定理 11.4（表示定理）</h4>
+            <p>每个有限布尔代数 ≅ P(S) 对某集合 S（Stone 表示的有限版本）。所以有限布尔代数的基数必为 2ⁿ——不存在 6 元、10 元布尔代数。开关电路的世界只有 0/1，但"多变量电路"的全部行为由 2ⁿ 元布尔代数承载。</p>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>三条主线收束</strong>：命题逻辑（01–04 章）↔ 布尔代数 ↔ 数字电路，三者互为译本。第 2 章的主析取范式 ↔ 布尔函数的 SOP 表达式 ↔ 电路的与-或门网络；化简公式 = 减门数 = 省芯片。你在第 2 章做的每一道等值演算，都是一次电路综合。
+        </div>
+
+        <h2>11.4 代数结构全景图</h2>
+
+        <div class="formula">
+            集合 + 1 运算：半群 → 独异点 → 群（+交换 = 阿贝尔群）<br>
+            集合 + 2 运算：环 → 整环 → 域<br>
+            集合 + 偏序：格 → 分配格 → 有补分配格 = 布尔代数<br>
+            特殊样本：ℤₙ(⊕) 循环群；ℤₚ 域；P(S) 布尔代数
+        </div>
+
+        <h2>11.5 自测题</h2>
+
+        <ol>
+            <li>判断 &lt;ℤ₈, ⊕₈, ⊗₈&gt;（模 8 加、模 8 乘）是否为环？是否为整环？是否为域？找出零因子。</li>
+            <li>在 &lt;P({a,b,c}), ⊆&gt; 中求 {a} 的全部补元。</li>
+            <li>证明：域中没有零因子。</li>
+            <li>说明为什么 6 元素的"布尔代数"不存在。</li>
+            <li>用对偶原理：已知 a∧(a∨b) = a（吸收律），写出其对偶形式。</li>
+        </ol>
+
+        <details>
+            <summary>参考答案（先做再看）</summary>
+            <div class="details-content">
+                <ol>
+                    <li>环 ✓（⊕₈ 交换群、⊗₈ 半群、分配成立）。非整环：2⊗4 = 8 ≡ 0，2 与 4 是零因子（还有 2,4,6）。非域。</li>
+                    <li>P({a,b,c}) 是布尔代数，补元唯一。检验：{a}∪{b,c} = {a,b,c} = S 且 {a}∩{b,c} = ∅，故唯一补元是 <strong>{b,c}</strong>。（{b} 不行：{a}∪{b} = {a,b} ≠ S。）</li>
+                    <li>设 ab = 0 且 a ≠ 0。域中 a 有逆元 a⁻¹，左乘得 b = (a⁻¹a)b = a⁻¹(ab) = a⁻¹0 = 0。矛盾。<span class="qed">∎</span></li>
+                    <li>有限布尔代数同构于某 P(S)，基数为 2ⁿ ∈ {1, 2, 4, 8, …}，6 不是 2 的幂。</li>
+                    <li>a∨(a∧b) = a。</li>
+                </ol>
+            </div>
+        </details>
+
+        <div class="callout callout-tip">
+            <strong>本章小结</strong>：环 = 加法群 + 乘法半群 + 分配；零因子毁掉消去律，ℤₙ 是整环/域 ⇔ n 素数；格 = 任意两元有 sup/inf 的偏序集，对偶原理免费赠送镜像定理；分配 + 有补 = 布尔代数 = 逻辑 = 电路。代数结构部分完结，最后一大块：图论。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="10-群与子群.html">← 10 - 群与子群</a>
+            <a href="12-图论基础.html">12 - 图论基础 →</a>
+        </nav>
+    </footer>
+
+    <script src="assets/script.js"></script>
+</body>
+</html>

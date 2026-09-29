@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>二元关系 - 离散数学教程</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-math.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="05-集合论基础.html">← 上一章</a>
+        <a href="07-等价关系与偏序.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>06 - 二元关系</h1>
+
+        <div class="callout callout-info objectives">
+            <strong>本章目标</strong>：用集合、矩阵、关系图三种方式表示关系；掌握复合与逆运算；熟练判定五大性质（自反、反自反、对称、反对称、传递）；会求闭包，理解 Warshall 算法。
+        </div>
+
+        <h2>6.1 关系：笛卡尔积的子集</h2>
+
+        <div class="definition">
+            <h4>定义 6.1（二元关系）</h4>
+            <p>设 <span class="mt-var">A</span>、<span class="mt-var">B</span> 为集合，<span class="mt-var">A</span> × <span class="mt-var">B</span> 的任何子集称为从 <span class="mt-var">A</span> 到 <span class="mt-var">B</span> 的二元关系；当 <span class="mt-var">A</span> = <span class="mt-var">B</span> 时称为 <span class="mt-var">A</span> 上的关系。记 &lt;<span class="mt-var">x</span>, <span class="mt-var">y</span>&gt; ∈ <span class="mt-var">R</span> 为 <span class="mt-var">x</span><span class="mt-var">R</span><span class="mt-var">y</span>。</p>
+        </div>
+
+        <p>关系是离散数学的"万能连接件"：数据库的表（两列的序偶集合）、函数（特殊关系）、等价关系（分类）、偏序（排序）、图（边集就是关系）全是关系。|<span class="mt-var">A</span> × <span class="mt-var">A</span>| = <span class="mt-var">n</span>²，因此 <span class="mt-var">n</span> 元集合上共有 2<sup><span class="mt-var">n</span>²</sup> 个不同的关系——关系也是一种"布尔状态"，每个序偶要么在要么不在。</p>
+
+        <div class="example-box">
+            <h4>例 6.1 一个具体关系的三种表示</h4>
+            <p>设 <span class="mt-var">A</span> = {1, 2, 3, 4}，<span class="mt-var">R</span> = 整除关系（<span class="mt-var">x</span><span class="mt-var">R</span><span class="mt-var">y</span> ⇔ <span class="mt-var">x</span> | <span class="mt-var">y</span>）。展开：R = {&lt;1,1&gt;, &lt;1,2&gt;, &lt;1,3&gt;, &lt;1,4&gt;, &lt;2,2&gt;, &lt;2,4&gt;, &lt;3,3&gt;, &lt;4,4&gt;}。</p>
+            <p><strong>关系矩阵 M<sub>R</sub></strong>（行 = 左元，列 = 右元，1 表示相关）：</p>
+            <table class="truth-table">
+                <tr><th></th><th>1</th><th>2</th><th>3</th><th>4</th></tr>
+                <tr><th>1</th><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+                <tr><th>2</th><td>0</td><td>1</td><td>0</td><td>1</td></tr>
+                <tr><th>3</th><td>0</td><td>0</td><td>1</td><td>0</td></tr>
+                <tr><th>4</th><td>0</td><td>0</td><td>0</td><td>1</td></tr>
+            </table>
+            <p><strong>关系图</strong>：4 个顶点，每对 &lt;<span class="mt-var">x</span>,<span class="mt-var">y</span>&gt;∈<span class="mt-var">R</span> 画一条有向边（有向关系用箭头，对称关系可画无向边）。</p>
+        </div>
+
+        <h2>6.2 复合与逆</h2>
+
+        <div class="definition">
+            <h4>定义 6.2（复合与逆关系）</h4>
+            <ul>
+                <li><strong>复合</strong> <span class="mt-var">R</span>∘<span class="mt-var">S</span> = { &lt;<span class="mt-var">x</span>, <span class="mt-var">z</span>&gt; | ∃<span class="mt-var">y</span>(&lt;<span class="mt-var">x</span>,<span class="mt-var">y</span>&gt;∈<span class="mt-var">R</span> ∧ &lt;<span class="mt-var">y</span>,<span class="mt-var">z</span>&gt;∈<span class="mt-var">S</span>) }——先走 <span class="mt-var">R</span> 再走 <span class="mt-var">S</span>。</li>
+                <li><strong>逆关系</strong> <span class="mt-var">R</span><sup>−1</sup> = { &lt;<span class="mt-var">y</span>, <span class="mt-var">x</span>&gt; | &lt;<span class="mt-var">x</span>, <span class="mt-var">y</span>&gt; ∈ <span class="mt-var">R</span> }——矩阵转置、关系图反向。</li>
+            </ul>
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>注意记号顺序</strong>：不同教材记号不同，屈婉玲教材中 <span class="mt-var">R</span>∘<span class="mt-var">S</span> 表示"<strong>左</strong>关系先作用"。做题前先看清楚教材约定，方向搞反复合题必错。复合满足结合律：(R∘S)∘T = R∘(S∘T)，所以可以谈 R 的幂 R<sup><span class="mt-var">n</span></sup>。
+        </div>
+
+        <div class="theorem">
+            <h4>定理 6.1（矩阵视角的复合）</h4>
+            <p>M<sub>R∘S</sub> = M<sub>R</sub> · M<sub>S</sub>（布尔乘法：乘 = ∧，加 = ∨）。M<sub>R</sub><sup><span class="mt-var">n</span></sup> 的 (i, j) 元 = 1 ⇔ 从 i 到 j 存在长度恰为 <span class="mt-var">n</span> 的通路。这个事实把"关系幂"和"图上走 <span class="mt-var">n</span> 步"焊在了一起，第 12 章的邻接矩阵定理是它的重演。</p>
+        </div>
+
+        <h2>6.3 五大性质：判定方法汇总</h2>
+
+        <div class="definition">
+            <h4>定义 6.3（关系性质）</h4>
+            <table>
+                <tr><th>性质</th><th>定义（∀<span class="mt-var">x</span>,<span class="mt-var">y</span>,<span class="mt-var">z</span>∈<span class="mt-var">A</span>）</th><th>关系图特征</th><th>矩阵特征</th><th>实例</th></tr>
+                <tr><td>自反</td><td>&lt;<span class="mt-var">x</span>,<span class="mt-var">x</span>&gt;∈<span class="mt-var">R</span></td><td>每点都有自环</td><td>主对角线全 1</td><td>≤、⊆、整除</td></tr>
+                <tr><td>反自反</td><td>&lt;<span class="mt-var">x</span>,<span class="mt-var">x</span>&gt;∉<span class="mt-var">R</span></td><td>每点都无自环</td><td>主对角线全 0</td><td>&lt;、⊂</td></tr>
+                <tr><td>对称</td><td><span class="mt-var">x</span><span class="mt-var">R</span><span class="mt-var">y</span> ⇒ <span class="mt-var">y</span><span class="mt-var">R</span><span class="mt-var">x</span></td><td>边全双向（无向图式）</td><td>矩阵对称 M = M<sup>T</sup></td><td>=、同乡</td></tr>
+                <tr><td>反对称</td><td><span class="mt-var">x</span><span class="mt-var">R</span><span class="mt-var">y</span> ∧ <span class="mt-var">y</span><span class="mt-var">R</span><span class="mt-var">x</span> ⇒ <span class="mt-var">x</span>=<span class="mt-var">y</span></td><td>异点间无双向边对</td><td>M ∘ M<sup>T</sup> 非对角处全 0</td><td>≤、整除</td></tr>
+                <tr><td>传递</td><td><span class="mt-var">x</span><span class="mt-var">R</span><span class="mt-var">y</span> ∧ <span class="mt-var">y</span><span class="mt-var">R</span><span class="mt-var">z</span> ⇒ <span class="mt-var">x</span><span class="mt-var">R</span><span class="mt-var">z</span></td><td>有 x→y→z 必有 x→z（捷径必补）</td><td>M² ≤ M（逐位）</td><td>≤、⊆、整除</td></tr>
+            </table>
+        </div>
+
+        <div class="callout callout-danger">
+            <strong>性质判定的四个高频误区</strong>
+            <ul>
+                <li><strong>对称与反对称可以同时成立</strong>：相等关系（或只有自环的关系）既对称又反对称——它们不是对立面！对立的是"对称"与"严格不对称"。</li>
+                <li><strong>既非自反也非反自反</strong>：关系 {&lt;1,2&gt;} 在 {1,2} 上有的点有自环吗？没有——反自反成立；但 {&lt;1,1&gt;,&lt;1,2&gt;} 既非自反（缺 &lt;2,2&gt;）也非反自反（有 &lt;1,1&gt;）。判据是"全 1 / 全 0 / 其他"三种主对角线状态。</li>
+                <li><strong>传递的判定靠枚举反例</strong>：不存在 x→y→z 缺捷径才算传递。空关系、只有自环的关系都是传递的（前提不发生时蕴含式为真——又是第 1 章的善意推定！）。</li>
+                <li><strong>性质是"相对于论域"的</strong>：{&lt;1,1&gt;,&lt;2,2&gt;} 在论域 {1,2} 上自反，把论域改成 {1,2,3} 就不自反了。</li>
+            </ul>
+        </div>
+
+        <h2>6.4 闭包：把性质"补"出来</h2>
+
+        <div class="definition">
+            <h4>定义 6.4（闭包）</h4>
+            <p>含 <span class="mt-var">R</span> 的、具有性质 P 的最小关系称为 <span class="mt-var">R</span> 关于 P 的闭包。"最小"意味着每补一条边都非补不可。</p>
+        </div>
+
+        <div class="theorem">
+            <h4>定理 6.2（三种闭包的构造）</h4>
+            <div class="formula">
+                r(<span class="mt-var">R</span>) = <span class="mt-var">R</span> ∪ I<sub>A</sub>　　（补上所有自环）<br>
+                s(<span class="mt-var">R</span>) = <span class="mt-var">R</span> ∪ <span class="mt-var">R</span><sup>−1</sup>　　（补上反向边）<br>
+                t(<span class="mt-var">R</span>) = <span class="mt-var">R</span> ∪ <span class="mt-var">R</span><sup>2</sup> ∪ <span class="mt-var">R</span><sup>3</sup> ∪ …　　（补上所有长度的间接通路）
+            </div>
+        </div>
+
+        <div class="example-box">
+            <h4>例 6.2 求 {&lt;1,2&gt;, &lt;2,3&gt;, &lt;3,1&gt;} 在 {1,2,3} 上的传递闭包</h4>
+            <p>R² = {&lt;1,3&gt;, &lt;2,1&gt;, &lt;3,2&gt;}（每个二元环走两步），R³ = {&lt;1,1&gt;, &lt;2,2&gt;, &lt;3,3&gt;}，R⁴ = R（三步回到原地，开始循环）。<br>
+            t(R) = R ∪ R² ∪ R³ = <strong>{&lt;x,y&gt; | x,y ∈ {1,2,3} 全体}</strong>，即全域关系——三条单向边把三个点串成一个环，环上的任意两点都互相可达。</p>
+        </div>
+
+        <p>实际计算传递闭包不用真的算无穷个幂：<span class="mt-var">n</span> 个点的传递闭包 = R ∪ R² ∪ … ∪ R<sup><span class="mt-var">n</span></sup>（长通路必含环，可截短）。逐个算矩阵乘法是 O(<span class="mt-var">n</span>⁴)，而 <strong>Warshall 算法</strong>用动态规划把它压到 O(<span class="mt-var">n</span>³)：</p>
+
+        <pre class="pseudocode"><code># Warshall 算法：求传递闭包
+# M[i][j] = 1 表示 i 可达 j；k 为"允许中转的中间点"逐个放开
+for k in range(n):           # 允许经过 {0..k} 中转
+    for i in range(n):
+        for j in range(n):
+            M[i][j] = M[i][j] or (M[i][k] and M[k][j])
+# 结束后 M 即传递闭包的矩阵</code></pre>
+
+        <p>核心思想：第 <span class="mt-var">k</span> 轮回答"如果允许借道第 <span class="mt-var">k</span> 号点，哪些新通路出现了"。i→k 可达且 k→j 可达，则 i→j 可达。这个三重循环也是图算法课里 Floyd 最短路径算法的骨架（把"能否到达"换成"距离取 min"）。顺带一提，闭包的英文 closure 与第 10 章子群"封闭性"同源——都是"补到满足某条规则为止"。</p>
+
+        <div class="callout callout-tip">
+            <strong>性质的闭包保持性</strong>：自反、对称的闭包好办；<strong>传递闭包可能破坏反对称</strong>（例 6.2 里原来的反对称关系补成了全域关系）。所以不存在"反对称闭包"的一般构造——这一点常考判断题。
+        </div>
+
+        <h2>6.5 覆盖：关系的"原材料"</h2>
+
+        <p>若集合族 {<span class="mt-var">A</span><sub>1</sub>, …, <span class="mt-var">A</span><sub><span class="mt-var">m</span></sub>} 满足每个 <span class="mt-var">A</span><sub><span class="mt-var">i</span></sub> ⊆ <span class="mt-var">A</span> 且并集为 <span class="mt-var">A</span>，则称它为 <span class="mt-var">A</span> 的一个<strong>覆盖</strong>；若还要求两两不交且都非空，则称为<strong>划分</strong>。划分是"把集合切成不相交的块"。它与等价关系是同一枚硬币的两面——下一章的主角。</p>
+
+        <h2>6.6 自测题</h2>
+
+        <ol>
+            <li>{1,2,3} 上的关系 R = {&lt;1,1&gt;, &lt;1,2&gt;, &lt;2,1&gt;, &lt;2,2&gt;, &lt;3,3&gt;}，判定五条性质各是否成立。</li>
+            <li>证明：R 对称 ⇒ R² 对称？错在哪里还是正确？（提示：若 &lt;x,y&gt;∈R²，存在 z 使 xRz 且 zRy，由对称得 yRz 且 zRx，故 &lt;y,x&gt;∈R²。）</li>
+            <li>求 {&lt;1,2&gt;, &lt;2,3&gt;} 在 {1,2,3} 上的 r(R)、s(R)、t(R)。</li>
+            <li>实数集上的关系 &lt; 依次判断五大性质（自反？反自反？对称？反对称？传递？）。</li>
+            <li>用 Warshall 思想解释：为什么传递闭包最多只需算到 R 的 <span class="mt-var">n</span> 次幂？</li>
+        </ol>
+
+        <details>
+            <summary>参考答案（先做再看）</summary>
+            <div class="details-content">
+                <ol>
+                    <li>自反 ✓（三对自环齐）、反自反 ✗、对称 ✓（&lt;1,2&gt;&lt;2,1&gt; 成对）、反对称 ✗（&lt;1,2&gt; 与 &lt;2,1&gt; 同时在而 1≠2）、传递 ✓（唯一需要检验的链 1R2R1 要求 &lt;1,1&gt;∈R ✓；3 只与自己相关）。</li>
+                    <li>结论<strong>正确</strong>。如提示中的三行即为完整证明：xRz ⇒ zRx，zRy ⇒ yRz，于是存在通路 y→z→x，即 &lt;y,x&gt;∈R²。对称性经复合保持。</li>
+                    <li>r(R) = R ∪ {&lt;1,1&gt;,&lt;2,2&gt;,&lt;3,3&gt;}；s(R) = {&lt;1,2&gt;,&lt;2,1&gt;,&lt;2,3&gt;,&lt;3,2&gt;}；t(R) = {&lt;1,2&gt;,&lt;2,3&gt;,&lt;1,3&gt;}（三元素链，长度 ≤ 3 的通路全覆盖）。</li>
+                    <li>自反 ✗、反自反 ✓、对称 ✗（1&lt;2 但 ¬(2&lt;1)）、反对称 ✓、传递 ✓。</li>
+                    <li>长为 <span class="mt-var">n</span>+1 的通路有 <span class="mt-var">n</span>+1 个顶点，由鸽笼原理必有重复顶点，去掉回路段得到更短的同类通路——任何"可补的间接关系"都已被 ≤ <span class="mt-var">n</span> 次幂覆盖。</li>
+                </ol>
+            </div>
+        </details>
+
+        <div class="callout callout-tip">
+            <strong>本章小结</strong>：关系 = 序偶集合，三种表示可互相翻译；五大性质各有"图特征 + 矩阵特征"速判法；对称与反对称不互斥；闭包三件套 r/s/t，传递闭包可用 Warshall 在 O(n³) 求出。什么样的关系最值得研究？自反 + 对称 + 传递的——等价关系；自反 + 反对称 + 传递的——偏序。下一章分解。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="05-集合论基础.html">← 05 - 集合论基础</a>
+            <a href="07-等价关系与偏序.html">07 - 等价关系与偏序 →</a>
+        </nav>
+    </footer>
+
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>推理理论 - 离散数学教程</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-math.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-等值演算与范式.html">← 上一章</a>
+        <a href="04-一阶谓词逻辑.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>03 - 推理理论</h1>
+
+        <div class="callout callout-info objectives">
+            <strong>本章目标</strong>：理解"有效推理"与"结论为真"的区别；熟记 9 条推理定律；掌握直接证明、附加前提证明法（CP 规则）与归谬法三种证明套路，能独立构造推理证明。
+        </div>
+
+        <h2>3.1 什么是有效推理</h2>
+
+        <div class="definition">
+            <h4>定义 3.1（推理的有效性）</h4>
+            <p>设 <span class="mt-var">A</span><sub>1</sub>, …, <span class="mt-var">A</span><sub><span class="mt-var">k</span></sub> 为前提，<span class="mt-var">B</span>为结论。若 (<span class="mt-var">A</span><sub>1</sub> ∧ … ∧ <span class="mt-var">A</span><sub><span class="mt-var">k</span></sub>) → <span class="mt-var">B</span> 是<strong>重言式</strong>，则称推理<strong>有效</strong>，记作 <span class="mt-var">A</span><sub>1</sub>, …, <span class="mt-var">A</span><sub><span class="mt-var">k</span></sub> ⇒ <span class="mt-var">B</span>。</p>
+        </div>
+
+        <div class="callout callout-danger">
+            <strong>必须想清楚的一点</strong>：有效性关心的是<strong>形式</strong>，不是事实。前提"所有人都会飞"（假）+ "苏格拉底是人"，有效推出"苏格拉底会飞"。前提全假但推理有效，完全合法。有效 = 只要前提真，结论就必真；前提本身真假不在逻辑管辖范围内。
+        </div>
+
+        <h2>3.2 九条推理定律</h2>
+
+        <div class="theorem">
+            <h4>基本推理定律（P 规则的素材）</h4>
+            <table>
+                <tr><th>名称</th><th>形式</th><th>备注</th></tr>
+                <tr><td>附加</td><td><span class="mt-var">A</span> ⇒ <span class="mt-var">A</span> ∨ <span class="mt-var">B</span></td><td>"已知 <span class="mt-var">A</span> 真，则 <span class="mt-var">A</span> 或随便什么都真"</td></tr>
+                <tr><td>化简</td><td><span class="mt-var">A</span> ∧ <span class="mt-var">B</span> ⇒ <span class="mt-var">A</span></td><td>用掉一半前提</td></tr>
+                <tr><td>假言推理（MP）</td><td><span class="mt-var">A</span> → <span class="mt-var">B</span>, <span class="mt-var">A</span> ⇒ <span class="mt-var">B</span></td><td><strong>最常用</strong>，肯前式</td></tr>
+                <tr><td>拒取式（MT）</td><td><span class="mt-var">A</span> → <span class="mt-var">B</span>, ¬<span class="mt-var">B</span> ⇒ ¬<span class="mt-var">A</span></td><td>否后式，第二常用</td></tr>
+                <tr><td>析取三段论</td><td><span class="mt-var">A</span> ∨ <span class="mt-var">B</span>, ¬<span class="mt-var">A</span> ⇒ <span class="mt-var">B</span></td><td>排除一个，剩另一个</td></tr>
+                <tr><td>假言三段论</td><td><span class="mt-var">A</span> → <span class="mt-var">B</span>, <span class="mt-var">B</span> → <span class="mt-var">C</span> ⇒ <span class="mt-var">A</span> → <span class="mt-var">C</span></td><td>推理链传递</td></tr>
+                <tr><td>等价三段论</td><td><span class="mt-var">A</span> ↔ <span class="mt-var">B</span>, <span class="mt-var">B</span> ↔ <span class="mt-var">C</span> ⇒ <span class="mt-var">A</span> ↔ <span class="mt-var">C</span></td><td></td></tr>
+                <tr><td>构造性二难</td><td>(<span class="mt-var">A</span> → <span class="mt-var">B</span>) ∧ (<span class="mt-var">C</span> → <span class="mt-var">D</span>), <span class="mt-var">A</span> ∨ <span class="mt-var">C</span> ⇒ <span class="mt-var">B</span> ∨ <span class="mt-var">D</span></td><td></td></tr>
+                <tr><td>破坏性二难</td><td>(<span class="mt-var">A</span> → <span class="mt-var">B</span>) ∧ (<span class="mt-var">C</span> → <span class="mt-var">D</span>), ¬<span class="mt-var">B</span> ∨ ¬<span class="mt-var">D</span> ⇒ ¬<span class="mt-var">A</span> ∨ ¬<span class="mt-var">C</span></td><td></td></tr>
+            </table>
+        </div>
+
+        <div class="callout callout-danger">
+            <strong>两大经典谬误（考试陷阱 + 日常吵架高发）</strong>
+            <ul>
+                <li><strong>肯定后件谬误</strong>：<span class="mt-var">A</span> → <span class="mt-var">B</span>, <span class="mt-var">B</span> ⇒ <span class="mt-var">A</span>。<span class="mt-var">A</span> → <span class="mt-var">B</span> 为真、<span class="mt-var">B</span> 为真时，<span class="mt-var">A</span> 可以是 0（后件为真的原因不止一个）。"下雨则地湿；地湿了；⇒ 下过雨？"未必——可能有人洒水。</li>
+                <li><strong>否定前件谬误</strong>：<span class="mt-var">A</span> → <span class="mt-var">B</span>, ¬<span class="mt-var">A</span> ⇒ ¬<span class="mt-var">B</span>。前件为假时蕴含式恒真，结论没有任何保障。"不下雨 ⇒ 地不湿？"显然错。</li>
+            </ul>
+            记住：只有 MP（肯前）和 MT（否后）是合法的，其余两种组合都是谬误。
+        </div>
+
+        <h2>3.3 构造证明：P 规则与 T 规则</h2>
+
+        <p>形式化证明的书写格式：</p>
+        <ul>
+            <li><strong>P 规则</strong>（Premise）：前提可以随时引入。</li>
+            <li><strong>T 规则</strong>（Theorem）：由前面已有的公式，经等值演算（⇔）或推理定律（⇒）得到新公式。</li>
+        </ul>
+
+        <div class="example-box">
+            <h4>例 3.1 证明：¬<span class="mt-var">p</span> ∨ <span class="mt-var">q</span>, ¬<span class="mt-var">q</span> ∨ <span class="mt-var">r</span>, ¬<span class="mt-var">r</span> ⇒ ¬<span class="mt-var">p</span></h4>
+            <pre class="pseudocode"><code>(1)  ¬q ∨ r           P（前提）
+(2)  ¬r               P
+(3)  ¬q               T (1)(2)，析取三段论
+(4)  ¬p ∨ q           P
+(5)  ¬p               T (3)(4)，析取三段论</code></pre>
+            <p>每行末尾注明用了哪些行、哪条规则，这是考试的标准格式。整个证明就是一条链：从前提出发，每一步只走一小格，走到结论为止。</p>
+        </div>
+
+        <div class="example-box">
+            <h4>例 3.2 符号化并证明：如果小王努力，那么他能通过考试；如果他不努力，那么他会后悔。所以小王或者通过考试，或者后悔。</h4>
+            <p>设 <span class="mt-var">p</span>：小王努力，<span class="mt-var">q</span>：通过考试，<span class="mt-var">r</span>：后悔。前提：(<span class="mt-var">p</span> → <span class="mt-var">q</span>) ∧ (¬<span class="mt-var">p</span> → <span class="mt-var">r</span>)，<span class="mt-var">p</span> ∨ ¬<span class="mt-var">p</span>；结论：<span class="mt-var">q</span> ∨ <span class="mt-var">r</span>。</p>
+            <pre class="pseudocode"><code>(1)  (p → q) ∧ (¬p → r)    P
+(2)  p ∨ ¬p                P（排中律）
+(3)  q ∨ r                 T (1)(2)，构造性二难</code></pre>
+            <p>这道题展示了"看起来没用的前提"（排中律）如何在关键时刻当桥用。构造性二难的本质就是：把 <span class="mt-var">p</span> ∨ ¬<span class="mt-var">p</span> 拆成两种情况，每种情况各推出一个分结论，再合起来。</p>
+        </div>
+
+        <h2>3.4 附加前提证明法（CP 规则）</h2>
+
+        <p>当结论形如 <span class="mt-var">A</span> → <span class="mt-var">B</span> 时，把 <span class="mt-var">A</span> 当作额外前提（附加前提）加入，改为证明 <span class="mt-var">B</span>。合法性来自等值式：</p>
+        <div class="formula">(<span class="mt-var">A</span><sub>1</sub> ∧ … ∧ <span class="mt-var">A</span><sub><span class="mt-var">k</span></sub>) → (<span class="mt-var">A</span> → <span class="mt-var">B</span>) ⇔ (<span class="mt-var">A</span><sub>1</sub> ∧ … ∧ <span class="mt-var">A</span><sub><span class="mt-var">k</span></sub> ∧ <span class="mt-var">A</span>) → <span class="mt-var">B</span></div>
+
+        <div class="example-box">
+            <h4>例 3.3 蕴含式结论的两种证法对比：证明 <span class="mt-var">p</span> → (<span class="mt-var">p</span> → <span class="mt-var">q</span>), <span class="mt-var">p</span> ⇒ <span class="mt-var">q</span></h4>
+            <p><strong>证法一：直接证明</strong></p>
+            <pre class="pseudocode"><code>(1)  p                 P
+(2)  p → (p → q)       P
+(3)  p → q             T (1)(2)，MP
+(4)  q                 T (1)(3)，MP</code></pre>
+            <p><strong>证法二：CP 规则</strong>。结论 <span class="mt-var">q</span> 不是蕴含式，不能直接用 CP——但若把原题改成结论为 <span class="mt-var">p</span> → <span class="mt-var">q</span> 的版本："证明 <span class="mt-var">p</span> → (<span class="mt-var">p</span> → <span class="mt-var">q</span>) ⇒ <span class="mt-var">p</span> → <span class="mt-var">q</span>"，CP 就登场了：</p>
+            <pre class="pseudocode"><code>(1)  p → (p → q)       P
+(2)  p                 CP（附加前提）
+(3)  p → q             T (1)(2)，MP
+(4)  q                 T (2)(3)，MP
+(5)  p → q             CP（收回附加前提）</code></pre>
+            <p><strong>教训</strong>：CP 规则只对"结论是蕴含式"的情形使用；使用前先确认推理本身有效（可回真值表或等值演算核查），否则会为无效推理"证明"出一个假结论。</p>
+        </div>
+
+        <div class="example-box">
+            <h4>例 3.4 CP 规则的标准示范：证明 <span class="mt-var">p</span> → (<span class="mt-var">q</span> → <span class="mt-var">s</span>), ¬<span class="mt-var">r</span> ∨ <span class="mt-var">p</span>, <span class="mt-var">q</span> ⇒ <span class="mt-var">r</span> → <span class="mt-var">s</span></h4>
+            <pre class="pseudocode"><code>(1)  ¬r ∨ p            P
+(2)  r                 CP（附加前提）
+(3)  p                 T (1)(2)，析取三段论
+(4)  p → (q → s)       P
+(5)  q → s             T (3)(4)，MP
+(6)  q                 P
+(7)  s                 T (5)(6)，MP
+(8)  r → s             CP（收回附加前提，得证）</code></pre>
+        </div>
+
+        <h2>3.5 归谬法（反证法）</h2>
+
+        <div class="theorem">
+            <h4>原理</h4>
+            <p>要证 <span class="mt-var">A</span><sub>1</sub>, …, <span class="mt-var">A</span><sub><span class="mt-var">k</span></sub> ⇒ <span class="mt-var">B</span>，等价于证 <span class="mt-var">A</span><sub>1</sub>, …, <span class="mt-var">A</span><sub><span class="mt-var">k</span></sub>, ¬<span class="mt-var">B</span> ⇒ 0（推出矛盾式）。依据：<br>
+            (<span class="mt-var">A</span><sub>1</sub> ∧ … ∧ <span class="mt-var">A</span><sub><span class="mt-var">k</span></sub>) → <span class="mt-var">B</span> ⇔ ¬((<span class="mt-var">A</span><sub>1</sub> ∧ … ∧ <span class="mt-var">A</span><sub><span class="mt-var">k</span></sub>) ∧ ¬<span class="mt-var">B</span>)，即"前提 ∧ 结论的否定"必为矛盾式。</p>
+        </div>
+
+        <div class="example-box">
+            <h4>例 3.5 用归谬法证明：<span class="mt-var">p</span> → <span class="mt-var">q</span>, ¬<span class="mt-var">r</span> → ¬<span class="mt-var">q</span>, <span class="mt-var">r</span> ⇒ <span class="mt-var">p</span></h4>
+            <p>追加 ¬<span class="mt-var">p</span> 作为假设：</p>
+            <pre class="pseudocode"><code>(1)  ¬p               归谬假设
+(2)  p → q            P
+(3)  ¬q               T (1)(2)，MT
+(4)  ¬r → ¬q          P
+(5)  r                T (3)(4)，MT
+(6)  r ∧ ¬r           T (5) 与前提 r 合取，矛盾！
+(7)  p                归谬法结论成立</code></pre>
+            <p>有趣的是，第 (5) 步已经直接从前提推出了 <span class="mt-var">r</span>，与假设 ¬<span class="mt-var">p</span> 无关——当直接证明很顺时，归谬法照样能用，矛盾来自"前提自我冲突"或"与假设冲突"均可。</p>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>三种方法怎么选</strong>
+            <ul>
+                <li>结论是原子命题 → 先试直接证明（MP / MT 链）。</li>
+                <li>结论是 <span class="mt-var">A</span> → <span class="mt-var">B</span> → <strong>CP 规则</strong>几乎是首选。</li>
+                <li>直接证明卡住、前提里有一堆否定式 → 试<strong>归谬法</strong>。</li>
+            </ul>
+        </div>
+
+        <h2>3.6 推理在真实世界中的样子</h2>
+
+        <p>程序里的每个 <code>if</code> / <code>assert</code> / 类型检查器都在做形式推理；数据库的约束求解、硬件验证工具（如模型检测）把"程序在一切输入下不崩溃"表达成重言式来机械验证。人工智能早期的"专家系统"（如 MYCIN）就是活着的推理引擎：知识库 = 一堆 <span class="mt-var">A</span> → <span class="mt-var">B</span>，推理机 = MP 循环。本章手工做的证明，正是这些系统每秒做百万次的事情。</p>
+
+        <h2>3.7 自测题</h2>
+
+        <ol>
+            <li>判断推理是否有效并说明：<span class="mt-var">p</span> → <span class="mt-var">q</span>, ¬<span class="mt-var">p</span> ⇒ ¬<span class="mt-var">q</span>。</li>
+            <li>证明：<span class="mt-var">p</span> ∨ <span class="mt-var">q</span>, <span class="mt-var">p</span> → <span class="mt-var">r</span>, <span class="mt-var">q</span> → <span class="mt-var">s</span> ⇒ <span class="mt-var">r</span> ∨ <span class="mt-var">s</span>。</li>
+            <li>用 CP 规则证明：¬<span class="mt-var">p</span> ∨ <span class="mt-var">q</span>, ¬<span class="mt-var">q</span> ∨ <span class="mt-var">r</span> ⇒ <span class="mt-var">p</span> → <span class="mt-var">r</span>。</li>
+            <li>符号化并证明：如果 6 是偶数，则 7 被 2 整除；或者 7 不被 2 整除，或者 5 是素数。但 7 不被 2 整除。所以 6 不是偶数，或者 5 是素数。</li>
+        </ol>
+
+        <details>
+            <summary>参考答案（先做再看）</summary>
+            <div class="details-content">
+                <ol>
+                    <li><strong>无效</strong>。这是否定前件谬误：取 <span class="mt-var">p</span>=0, <span class="mt-var">q</span>=1，则 <span class="mt-var">p</span>→<span class="mt-var">q</span>=1, ¬<span class="mt-var">p</span>=1，但 ¬<span class="mt-var">q</span>=0。</li>
+                    <li>直接用构造性二难：(1)(2)(3) P；(4) <span class="mt-var">r</span> ∨ <span class="mt-var">s</span>，T (1)(2)(3) 构造性二难。</li>
+                    <li>(1) ¬<span class="mt-var">p</span> ∨ <span class="mt-var">q</span> P；(2) ¬<span class="mt-var">q</span> ∨ <span class="mt-var">r</span> P；(3) <span class="mt-var">p</span> CP；(4) <span class="mt-var">q</span> T (1)(3) 析取三段论；(5) <span class="mt-var">r</span> T (2)(4) 析取三段论；(6) <span class="mt-var">p</span> → <span class="mt-var">r</span> CP。</li>
+                    <li>设 <span class="mt-var">p</span>：6 是偶数，<span class="mt-var">q</span>：7 被 2 整除，<span class="mt-var">r</span>：5 是素数。前提：<span class="mt-var">p</span> → <span class="mt-var">q</span>，¬<span class="mt-var">q</span> ∨ <span class="mt-var">r</span>，¬<span class="mt-var">q</span>；结论：¬<span class="mt-var">p</span> ∨ <span class="mt-var">r</span>。证明：(4) <span class="mt-var">r</span> T (2)(3) 析取三段论；(5) ¬<span class="mt-var">p</span> T (1)(3) MT；(6) ¬<span class="mt-var">p</span> ∨ <span class="mt-var">r</span> T (4)(5) 附加+构造性二难（或直接两次附加）。</li>
+                </ol>
+            </div>
+        </details>
+
+        <div class="callout callout-tip">
+            <strong>本章小结</strong>：有效推理 = 蕴含式是重言式；只许 MP 与 MT，禁用"肯后""否前"；证明三件套——直接证、CP（结论是蕴含式时）、归谬（卡住时）；书写格式 = 每行标来源与依据。命题逻辑到此闭环，但"所有人都会死，苏格拉底是人"这类推理还写不出来——需要谓词逻辑，见下一章。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="02-等值演算与范式.html">← 02 - 等值演算与范式</a>
+            <a href="04-一阶谓词逻辑.html">04 - 一阶谓词逻辑 →</a>
+        </nav>
+    </footer>
+
+    <script src="assets/script.js"></script>
+</body>
+</html>

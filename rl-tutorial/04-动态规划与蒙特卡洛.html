@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第4章 动态规划与蒙特卡洛 - 动手做强化学习</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-价值函数与贝尔曼方程.html">← 上一章：价值函数与贝尔曼方程</a>
+        <a href="05-时序差分与Q-learning.html">下一章：时序差分与 Q-learning →</a>
+    </nav>
+    <main>
+        <h1>第 4 章 · 动态规划与蒙特卡洛</h1>
+        <p>本章走两条对照的路：当环境的转移模型 P 完全已知时，用<strong>动态规划</strong>可以"在纸面上"精确算出最优解；当模型未知时，<strong>蒙特卡洛</strong>方法让我们靠完整回合的真实经验来估计价值。理解两者各自的优缺点，下一章的时序差分就是把它们的优点结合起来。</p>
+
+        <h2>4.1 动态规划：模型已知时的精确求解</h2>
+        <p>动态规划（Dynamic Programming，DP）假设我们<strong>知道完整的 P 和 R</strong>。它由两个反复出现的操作构成：</p>
+        <ul>
+            <li><strong>策略评估（policy evaluation）</strong>：固定策略 π，反复套用贝尔曼<strong>期望</strong>方程，算出 V^π（第 3 章代码已演示）。</li>
+            <li><strong>策略改进（policy improvement）</strong>：根据当前价值，对每个状态算各动作的 Q，贪心地选 Q 最大的动作，得到更好的新策略。</li>
+        </ul>
+
+        <h3>策略迭代与价值迭代</h3>
+        <p>把"评估→改进"交替进行直到策略不再变化，称为<strong>策略迭代（policy iteration）</strong>，它能收敛到最优策略，但每轮都要把 V 算到收敛，较慢。</p>
+        <p><strong>价值迭代（value iteration）</strong>更紧凑：不等策略评估完全收敛，直接反复套用贝尔曼<strong>最优</strong>方程（每步对动作取 max）：</p>
+        <div class="formula">V(s) ← maxₐ Σ_{s′} P(s′|s,a)[ R + γ·V(s′) ]</div>
+
+<pre><code class="language-python">class GridModel:
+    """4x4 确定性网格，模型已知。目标(3,3)。"""
+    def __init__(self, size=4):
+        self.size = size
+        self.goal = (size - 1, size - 1)
+        self.states = [(x, y) for x in range(size) for y in range(size)]
+
+    def transitions(self, s, a):
+        if s == self.goal:
+            return s, 0.0
+        x, y = s
+        if   a == 0: x = max(0, x - 1)
+        elif a == 1: x = min(self.size - 1, x + 1)
+        elif a == 2: y = max(0, y - 1)
+        else:        y = min(self.size - 1, y + 1)
+        s2 = (x, y)
+        return s2, (1.0 if s2 == self.goal else -0.01)
+
+env = GridModel()
+gamma = 0.9
+V = {s: 0.0 for s in env.states}
+
+# 价值迭代：反复做贝尔曼最优备份
+for _ in range(200):
+    newV = {}
+    for s in env.states:
+        best = max(
+            (r + gamma * V[env.transitions(s, a)[0]]) for a in range(4)
+        )
+        newV[s] = best
+    if max(abs(newV[s] - V[s]) for s in env.states) < 1e-7:
+        break
+    V = newV
+
+# 由 V 反推贪婪策略（箭头）
+arrows = ["↑", "↓", "←", "→"]
+for x in range(4):
+    line = ""
+    for y in range(4):
+        s = (x, y)
+        if s == env.goal:
+            line += "  G "
+        else:
+            a = max(range(4), key=lambda a: env.transitions(s, a)[1]
+                    + gamma * V[env.transitions(s, a)[0]])
+            line += f"  {arrows[a]} "
+    print(line)
+</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>结果</strong>：每个格子都指向通往终点的方向——这就是一张"最优策略图"。DP 告诉我们<strong>最优解长什么样</strong>，是衡量其他方法的"标准答案"。
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>DP 的局限（为什么需要后面的方法）</strong>
+            <ul>
+                <li>必须知道<strong>完整的转移模型 P</strong>，而现实中往往不知道（机器人、游戏对手、市场）。</li>
+                <li>每轮要<strong>遍历所有状态</strong>，状态空间巨大时不可行（这正是要用神经网络的原因之一）。</li>
+                <li>它是"在模型里推演"，不是真正去环境里试。</li>
+            </ul>
+        </div>
+
+        <h2>4.2 蒙特卡洛：模型未知，靠完整回合学习</h2>
+        <p>蒙特卡洛（Monte Carlo，MC）方法<strong>不需要 P</strong>：直接按某个策略去环境里跑完整回合，用<strong>实际拿到的回报</strong>来估计价值。核心思想极其朴素——<strong>一件事重复很多次，取平均，就逼近它的期望。</strong></p>
+        <ul>
+            <li><strong>MC 预测</strong>：估计 V^π(s)，每次在回合中访问到 s，就用从该次访问开始的真实回报 G 作为样本，多次取平均（首次访问/每次访问两种口径）。</li>
+            <li><strong>MC 控制</strong>：估计 Q^π(s,a)，并用 ε-greedy 做策略改进，交替进行，逐步逼近 Q*。</li>
+        </ul>
+
+<pre><code class="language-python">import random
+
+class EpisodicGrid:
+    """4x4 网格(无模型，智能体只能 step 采样)。目标(3,3)。"""
+    def __init__(self, size=4):
+        self.size = size
+        self.goal = (size - 1, size - 1)
+
+    def reset(self):
+        self.pos = (0, 0)
+        return self.pos
+
+    def step(self, a):
+        x, y = self.pos
+        if   a == 0: x = max(0, x - 1)
+        elif a == 1: x = min(self.size - 1, x + 1)
+        elif a == 2: y = max(0, y - 1)
+        else:        y = min(self.size - 1, y + 1)
+        self.pos = (x, y)
+        done = self.pos == self.goal
+        return self.pos, (1.0 if done else -0.01), done
+
+env = EpisodicGrid()
+gamma, alpha, epsilon = 0.9, 0.1, 0.1
+Q = {}
+def q(s, a): return Q.get((s, a), 0.0)
+
+def choose(s):
+    if random.random() < epsilon:
+        return random.randrange(4)
+    return max(range(4), key=lambda a: q(s, a))
+
+for episode in range(3000):
+    s = env.reset()
+    trajectory = []
+    done = False
+    while not done:                          # 1) 用 ε-greedy 跑完整个回合
+        a = choose(s)
+        s2, r, done = env.step(a)
+        trajectory.append((s, a, r))
+        s = s2
+    G = 0.0
+    for s, a, r in reversed(trajectory):     # 2) 从后往前算回报并更新 Q
+        G = r + gamma * G
+        Q[(s, a)] = q(s, a) + alpha * (G - q(s, a))
+
+# 打印学到的策略
+arrows = ["↑", "↓", "←", "→"]
+for x in range(4):
+    print("".join(
+        "  G " if (x, y) == env.goal else f"  {arrows[max(range(4), key=lambda a: q((x,y), a))]} "
+        for y in range(4)))
+</code></pre>
+
+        <h3>MC 的特点：无偏但高方差、必须等回合结束</h3>
+        <table>
+            <thead><tr><th></th><th>动态规划 DP</th><th>蒙特卡洛 MC</th></tr></thead>
+            <tbody>
+                <tr><td>需要模型 P</td><td>是</td><td><strong>否</strong></td></tr>
+                <tr><td>价值来源</td><td>贝尔曼方程（引导）</td><td>完整回合的真实回报</td></tr>
+                <tr><td>偏差/方差</td><td>—</td><td><strong>无偏，但方差大</strong>（路径随机）</td></tr>
+                <tr><td>何时能更新</td><td>随时（扫表）</td><td><strong>必须等回合结束</strong></td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>下一章的动机</strong>：MC 不用模型、用真实经验（好），但方差大、还得等整局结束（不好）；DP 用引导、一步就能更新（好），却依赖模型（不好）。<strong>能不能用"采样得到的真实单步转移"，但只向前看一步、用下一步价值的估计来更新（引导）？</strong>这就是时序差分，它直接催生了 Q-learning。
+        </div>
+
+        <h2>练习与思考</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><p>把 MC 的回合数降到 200、再升到 10000，比较策略质量；解释为什么 MC 需要较多回合。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><p>把网格加上第 2 章的"打滑"，分别用价值迭代（需在模型里显式写出打滑概率）和 MC 求解，体会 MC 无需知道打滑概率的便利。</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><p>思考题：为什么用真实完整回报 G 更新是"无偏"的？为什么它的方差会大？</p></div></div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>DP 在模型已知时用策略评估 + 策略改进求最优；价值迭代直接反复套用贝尔曼最优方程。</li>
+            <li>MC 不需要模型，靠完整回合的真实回报平均估计价值与 Q，无偏但高方差、须等回合结束。</li>
+            <li>两者的缺口——"用采样的单步经验 + 引导"——由下一章时序差分补上。</li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="03-价值函数与贝尔曼方程.html">← 上一章：价值函数与贝尔曼方程</a>
+            <a href="05-时序差分与Q-learning.html">下一章：时序差分与 Q-learning →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

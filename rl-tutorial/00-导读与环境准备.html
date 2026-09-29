@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第0章 导读与环境准备 - 动手做强化学习</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-智能体与环境.html">下一章：智能体与环境 →</a>
+    </nav>
+    <main>
+        <h1>第 0 章 · 导读与环境准备</h1>
+        <p>在写任何算法之前，我们先弄清楚一件最重要的事：<strong>强化学习到底在解决什么样的问题，它和你可能听过的"机器学习"有什么本质不同。</strong>这决定了你后面看一切代码的视角。</p>
+
+        <h2>0.1 用一个生活场景理解强化学习</h2>
+        <p>想象你在训练一只小狗：你不会（也无法）给它准备一份"在每种情境下标准答案是什么"的教科书。你能做的是——让它自由行动，做对了给零食（奖励），做错了不给、甚至轻微惩罚。小狗并不知道"为什么"，但它会逐渐发现：<em>"坐下"这个动作之后常常跟着零食</em>，于是它越来越倾向于坐下。</p>
+        <p>强化学习（Reinforcement Learning，RL）就是把这个过程形式化和自动化。一个<strong>智能体（agent）</strong>通过不断与<strong>环境（environment）</strong>交互、试错，根据获得的<strong>奖励（reward）</strong>调整自己的行为，最终学会一套能拿到最多长期奖励的<strong>策略（policy）</strong>。</p>
+        <p>同一个框架出现在非常多地方：游戏 AI（AlphaGo、电竞 AI）、机器人学走路与抓取、自动驾驶决策、推荐系统与广告竞价、大模型的人类偏好对齐（RLHF）等。它们的共性是——<strong>没有人事先告诉你每一步的正确答案，你只能在行动之后得到一个"结果好不好"的分数。</strong></p>
+
+        <h2>0.2 强化学习与其他机器学习的根本区别</h2>
+        <table>
+            <thead><tr><th></th><th>监督学习</th><th>强化学习</th></tr></thead>
+            <tbody>
+                <tr><td><strong>学习信号</strong></td><td>每个样本都有"正确答案"标签（输入→标准答案）</td><td>只有一个标量奖励，且常常<strong>延迟</strong>（赢了才知道这盘打得好）</td></tr>
+                <tr><td><strong>数据来源</strong></td><td>通常是事先收集好的、静态的数据集</td><td>数据是智能体自己"玩"出来的，<strong>行为决定了它能看到什么数据</strong></td></tr>
+                <tr><td><strong>样本关系</strong></td><td>默认样本之间相互独立</td><td>前后状态高度相关，当前动作改变未来</td></tr>
+                <tr><td><strong>核心矛盾</strong></td><td>拟合与泛化</td><td><strong>探索（尝试新动作）与利用（重复已知好动作）</strong></td></tr>
+                <tr><td><strong>目标</strong></td><td>对新输入做出正确预测</td><td>最大化<strong>长期累计奖励</strong>，而非即时奖励</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>三个必须记住的独特困难</strong>
+            <ul>
+                <li><strong>信用分配（credit assignment）</strong>：一局棋赢了，是第 30 步的妙手还是第 5 步的布局起了决定作用？奖励只在终点出现，要把功劳"回传"给前面的动作。</li>
+                <li><strong>探索与利用</strong>：一直重复现在最好的动作可能错过更优解；盲目探索又可能一直输。</li>
+                <li><strong>数据是自己造的</strong>：学得不好→行为差→看到的经验差→更难学好，容易形成恶性循环（也可能正反馈地变好）。</li>
+            </ul>
+        </div>
+
+        <h2>0.3 强化学习的最小循环：先有个感性认识</h2>
+        <p>无论多复杂的 RL 系统，核心都是同一个循环。我们先用<strong>纯 Python 标准库</strong>写一个最小版本：一个一维"走格子"世界，位置 0~4，目标是走到 4；智能体现在还很笨——只会随机选"左/右"。重点是让你看清 <code>reset → 循环(step) → 结束</code> 的骨架。</p>
+
+<pre><code class="language-python">import random
+
+class OneDWorld:
+    """一维走格子：位置 0~4，目标位置 4。"""
+    def __init__(self):
+        self.target = 4
+
+    def reset(self):
+        """开局：把智能体放回起点，返回初始观测。"""
+        self.pos = 0
+        return self.pos
+
+    def step(self, action):
+        """执行动作：0=向左，1=向右；返回 (新观测, 奖励, 是否结束)。"""
+        self.pos += 1 if action == 1 else -1
+        self.pos = min(max(self.pos, 0), 4)          # 不能走出边界
+        done = (self.pos == self.target)
+        reward = 5 if done else -1                   # 到达 +5，每走一步 -1
+        return self.pos, reward, done
+
+env = OneDWorld()
+for episode in range(3):
+    obs = env.reset()
+    total_reward, done, steps = 0, False, 0
+    while not done:
+        action = random.randint(0, 1)                # 暂时：随机动作
+        obs, reward, done = env.step(action)
+        total_reward += reward
+        steps += 1
+    print(f"第{episode+1}局：用了{steps}步，总奖励{total_reward}")
+</code></pre>
+
+        <p>运行后你会看到随机智能体时好时坏，总奖励波动很大。<strong>这套教程的全部内容，本质上就是把"随机选动作"逐步替换成"根据经验聪明地选动作"。</strong>请先记住三个接口：<code>reset()</code> 开始新一局、<code>step(action)</code> 执行动作并返回新状态与奖励、用 <code>done</code> 判断一局结束。</p>
+
+        <h2>0.4 环境准备（前半程零安装）</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><h4>安装 Python 3</h4><p>第 0–5 章只需要 Python 标准库。在终端运行 <code>python --version</code> 能看到版本号即可（本教程编写环境为 Python 3）。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><h4>准备一个编辑器</h4><p>VS Code、PyCharm 或任意文本编辑器均可，把代码保存为 <code>.py</code> 文件。</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><h4>运行方式</h4><p>终端中进入文件所在目录，执行 <code>python 文件名.py</code>；也可在编辑器里直接运行。</p></div></div>
+        </div>
+        <div class="callout callout-info">
+            <strong>关于深度学习部分</strong>：第 6 章起会用到 NumPy 与 PyTorch。<strong>现在不必安装</strong>，到那一章时按附录指引操作即可；如果你的 Python 版本很新，附录还说明了为什么建议另建一个稍旧版本的环境，并提供了浏览器里免安装运行（Colab / Kaggle）的方案。
+        </div>
+
+        <h2>0.5 这套教程的路线图</h2>
+        <p>章节是按"<strong>思想如何一步步被需要、被发明</strong>"来组织的，而不是算法罗列：</p>
+        <ol>
+            <li>先建立 <strong>智能体—环境</strong>交互与探索利用的直觉（第 1 章）</li>
+            <li>把问题<strong>形式化为 MDP</strong>，定义回报（第 2 章）</li>
+            <li>引入<strong>价值函数与贝尔曼方程</strong>，得到"未来值多少分"的递归表达（第 3 章）</li>
+            <li>环境已知用<strong>动态规划</strong>，环境未知先用<strong>蒙特卡洛</strong>（第 4 章）</li>
+            <li>结合两者优点得到<strong>时序差分与 Q-learning</strong>，做出第一个完整案例（第 5 章）</li>
+            <li>状态太多装不下表格时，用神经网络做<strong>函数逼近 → DQN</strong>（第 6 章）</li>
+            <li>换一条主线：直接优化策略，<strong>策略梯度 → Actor-Critic → GAE</strong>（第 7 章）</li>
+            <li>得到工业界最常用的 <strong>PPO</strong>，并了解连续动作控制（第 8 章）</li>
+            <li>补齐让训练真正可用的<strong>工程实践</strong>（第 9 章）</li>
+            <li><strong>毕业项目</strong>：端到端独立做出一个案例（第 10 章）</li>
+        </ol>
+
+        <h2>练习与思考</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><p>运行 0.3 的代码 10 次，观察总奖励的波动；尝试把每步惩罚从 -1 改成 -0.1，思考这会如何改变"理想行为"。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><p>用自己的话回答：为什么"到达终点 +5"是延迟奖励？随机智能体为什么无法稳定地拿到高分？</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><p>思考题：如果把目标改成"每走一步都给 +1"，智能体会学到什么？这说明<strong>奖励定义实际上是在向智能体表达"什么叫做好"</strong>。</p></div></div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>强化学习研究的是：智能体通过与环境交互、依据延迟的标量奖励，学会最大化长期累计奖励的策略。</li>
+            <li>它与监督学习最大的不同：没有标准答案、数据靠自己探索、要平衡探索与利用。</li>
+            <li>最小骨架是 <code>reset()</code> 与 <code>step(action)→(观测,奖励,done)</code> 的循环。</li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 目录</a>
+            <a href="01-智能体与环境.html">下一章：智能体与环境 →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

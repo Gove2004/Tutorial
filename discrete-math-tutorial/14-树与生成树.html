@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>树与生成树 - 离散数学教程</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-math.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="13-欧拉图哈密顿图与平面图.html">← 上一章</a>
+        <a href="15-组合计数初步.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>14 - 树与生成树</h1>
+
+        <div class="callout callout-info objectives">
+            <strong>本章目标</strong>：掌握树的等价刻画（"多面手"定义）；理解生成树与基本割集思想；熟练执行 Kruskal 与 Prim 算法；掌握根树、m 叉树的计数性质；会用哈夫曼算法构造最优树与前缀码。
+        </div>
+
+        <h2>14.1 树：最经济的连通图</h2>
+
+        <div class="definition">
+            <h4>定义 14.1（树与森林）</h4>
+            <p>连通无回路的（简单）无向图称为<strong>树</strong>，记作 T。不连通的无回路图是<strong>森林</strong>（每个分支是一棵树）。度为 1 的顶点称<strong>树叶</strong>，度 &gt; 1 的称<strong>分支点（内点）</strong>。</p>
+        </div>
+
+        <div class="theorem">
+            <h4>定理 14.1（树的等价刻画——必须背熟的六连）</h4>
+            <p>设 T 是 n 个顶点 m 条边的无向图，以下六条等价：</p>
+            <ol>
+                <li>T 连通且无回路；</li>
+                <li>T 连通且 m = n − 1；</li>
+                <li>T 无回路且 m = n − 1；</li>
+                <li>T 连通且删去任何一条边即不连通（每条边都是桥）；</li>
+                <li>T 无回路但添加任何一条新边恰产生一个回路；</li>
+                <li>任意两点间存在<strong>唯一</strong>的初级通路。</li>
+            </ol>
+            <p>"最经济"是树的灵魂：用最少的边（n − 1 条）保住连通性，每条边都不可删，每条边都不冗余。</p>
+        </div>
+
+        <div class="example-box">
+            <h4>例 14.1 树的必算结论</h4>
+            <p><strong>n ≥ 2 的树至少有 2 片树叶</strong>。证明：树叶数 n₁ 与内点数 n₂ 满足 Σdeg = 2m = 2(n−1) = 2n₁ + 2n₂ − 2，即 Σ<sub>内点</sub>(deg − 2) = n₁ − 2。若树只有 1 片叶（或 0 片），全部内点 deg ≥ 2 使左和 ≥ 0，得 n₁ ≥ 2，与假设矛盾；且 n₁ = 2 恰好对应链形树。<span class="qed">∎</span>这个"度数记账法"是树论证明的通用起手式。</p>
+        </div>
+
+        <h2>14.2 生成树：图的最小连通骨架</h2>
+
+        <div class="definition">
+            <h4>定义 14.2（生成树）</h4>
+            <p>连通图的<strong>生成子图</strong>中是树者，称为 G 的生成树。边权取小后得到<strong>最小生成树（MST）</strong>。</p>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>基本回路与基本割集（概念层了解）</strong>：往生成树加一条弦（不在树中的边），产生唯一回路（基本回路系统，共 m − n + 1 个）；删一条树枝把树劈成两半，跨线边集构成唯一割集（基本割集系统，共 n − 1 个）。"回路看弦、割集看枝"。MST 算法的正确性（割性质：任一割的最小跨边必在某 MST 中）就建立在这套语言上。
+        </div>
+
+        <h2>14.3 最小生成树：两大算法</h2>
+
+        <div class="steps">
+            <div class="step"><div class="step-number">1</div><div class="step-content"><strong>Kruskal（全局贪心）</strong>：所有边按权升序排序；逐条考察，不与已选边构成回路就选入；选满 n − 1 条为止。</div></div>
+            <div class="step"><div class="step-number">2</div><div class="step-content"><strong>Prim（局部生长）</strong>：任选起点放入集合 U；反复选"一端在 U、一端在外"的最小权边并把新点并入 U；直到 U = V。</div></div>
+        </div>
+
+        <div class="example-box">
+            <h4>例 14.2 五点加权图手算 MST</h4>
+            <pre class="pseudocode"><code>边（权）：AB=1, BC=2, AC=3, CD=4, DE=5, BD=6
+n = 5，需要选 4 条边。
+
+Kruskal：排序后依次考察
+  AB(1)  ✓ 选
+  BC(2)  ✓ 选
+  AC(3)  ✗ A,B,C 已连通，成环，弃
+  CD(4)  ✓ 选
+  DE(5)  ✓ 选 → 4 条，完成
+MST = {AB, BC, CD, DE}，总权 12
+
+Prim（从 A 出发）：
+  U={A}：跨边 AB(1) 最小 → 并 B
+  U={A,B}：BC(2) 最小 → 并 C
+  U={A,B,C}：CD(4) 最小（AC=3 在 U 内部不算）→ 并 D
+  U={A,B,C,D}：DE(5) → 并 E，完成</code></pre>
+            <p>两法殊途同归（本例 MST 唯一）。<strong>选择建议</strong>：稀疏图（边少）用 Kruskal（排序 + 并查集）；稠密图用 Prim（二叉堆 O(m log n)）。<strong>易错点</strong>：Kruskal 检查回路时不能只看两个端点是否都"出现过"，必须查是否在<strong>同一连通块</strong>（并查集 find 相同则弃）。</p>
+        </div>
+
+        <h2>14.4 根树与 m 叉树</h2>
+
+        <div class="definition">
+            <h4>定义 14.3（根树）</h4>
+            <p>指定一个顶点为根、边方向"离根而下"的有向树。根到任一点唯一；深度 = 层数。<strong>m 叉树</strong>：每个内点至多 m 个儿子；每个内点恰 m 个儿子则是满 m 叉树。</p>
+        </div>
+
+        <div class="theorem">
+            <h4>定理 14.2（m 叉树的叶子计数）</h4>
+            <div class="formula">
+                设 T 为 m 叉树，叶数 t，内点数 i，则 t = (m − 1)i + 1
+            </div>
+            <div class="proof">
+                边数 = 总点数 − 1 = (t + i) − 1；又每条边由某个内点"发出"，满 m 叉时边数 = mi。所以 mi = t + i − 1，解出 t = (m−1)i + 1。≤ 版本对一般 m 叉树成立。<span class="qed">∎</span>
+            </div>
+            <p>应用：决策树、表达式树、锦标赛赛程。"至少需要多少叶子"与"给定叶数最少内点数"互算，全靠这条公式。</p>
+        </div>
+
+        <h2>14.5 最优二叉树与前缀码：哈夫曼的胜利</h2>
+
+        <div class="definition">
+            <h4>定义 14.4（二叉树的权）</h4>
+            <p>带权二叉树的权 W(T) = Σ w<sub>i</sub>·l<sub>i</sub>（w 叶权，l 根到叶路径长）。<strong>最优二叉树</strong>：给定叶权下 W(T) 最小的二叉树。</p>
+        </div>
+
+        <div class="steps">
+            <div class="step"><div class="step-number">1</div><div class="step-content"><strong>哈夫曼算法</strong>：把全部叶权放入集合；取出最小的两个权，合并成一个子树（权 = 二者之和）放回集合；重复直到只剩一棵树。</div></div>
+        </div>
+
+        <div class="example-box">
+            <h4>例 14.3 权 {1, 3, 4, 5} 构造最优二叉树</h4>
+            <pre class="pseudocode"><code>集合 {1,3,4,5}
+第一步：取 1,3 合并 → 新权 4
+集合 {4,4,5}
+第二步：取 4(原4),4(新) 合并 → 新权 8
+集合 {5,8}
+第三步：合并 → 树完成
+
+树形：
+        (13)
+       /    \
+      5     (8)
+           /   \
+         (4)    4
+        /  \
+       1    3
+
+W(T) = 5×1 + 4×2 + 1×3 + 3×3 = 5+8+3+9 = 25
+（另一棵"看似合理"的平衡树 W = 5×2+4×2+1×2+3×2 = 26 > 25）</code></pre>
+            <p>贪心直觉：<strong>权越小的叶子被推得越深</strong>（反正它不值得占好的位置），权大的叶子靠近根部。每次合并的两个权必然成为兄弟——"最小两兄弟配对"。</p>
+        </div>
+
+        <div class="definition">
+            <h4>定义 14.5（前缀码）</h4>
+            <p>字符编码集合中任何码字都不是另一码字的前缀。解码时无需分隔符、无歧义。二叉树生成前缀码：左 0 右 1，字符只放<strong>叶子</strong>（放内点就会成为别人的前缀）。</p>
+        </div>
+
+        <div class="example-box">
+            <h4>例 14.4 通信编码综合题</h4>
+            <p>字符 a, b, c, d, e 频率 {8, 5, 3, 2, 1}（千次）。哈夫曼树（合并 1+2=3, 3+3=6, 5+6=11, 8+11=19）：</p>
+            <pre class="pseudocode"><code>          (19)
+          /    \
+        a(8)   (11)
+              /    \
+            b(5)   (6)
+                  /   \
+                c(3)  (3)
+                     /   \
+                   d(2)  e(1)
+
+编码：a=0, b=10, c=110, d=1110, e=1111
+平均码长 = (8×1 + 5×2 + 3×3 + 2×4 + 1×4)/19 ≈ 2.16 bit/字符</code></pre>
+            <p>对照定长 3 bit 编码（5 字符需 3 bit）节省约 28%。这就是 ZIP、JPEG、MP3 内部（Huffman / 变体）至今还在工作的原理：高频符号短码、低频符号长码，前缀性质保证接收端能唯一切分比特流。</p>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>哈夫曼的两个易错点</strong>：① 新权放回后可能与旧权相等，取哪个都行（最优树不唯一，但 W(T) 唯一最小）；② 权相同时优先合并"深度已较大"的树可减小总深（等权时的次序策略），考试通常不做此优化要求。
+        </div>
+
+        <h2>14.6 自测题</h2>
+
+        <ol>
+            <li>n = 10 的树有多少条边？至少几片叶？</li>
+            <li>证明：非平凡树中至少有两个顶点度数 ≥ 2 或至少两片叶——更精确地说，n ≥ 2 的树恰好"至少两片叶"。用度数记账法复述例 14.1 的证明。</li>
+            <li>边 {AB=2, AC=2, BC=3, BD=1, CD=1}，求 MST 及其总权（Kruskal 手算）。</li>
+            <li>满 3 叉树有 20 个内点，叶子多少个？</li>
+            <li>对权 {2, 2, 3, 3, 3} 构造哈夫曼树并求 W(T)。</li>
+        </ol>
+
+        <details>
+            <summary>参考答案（先做再看）</summary>
+            <div class="details-content">
+                <ol>
+                    <li>边 = n − 1 = 9；至少 2 片叶。</li>
+                    <li>设 t 片叶、内点和为 Σ(deg)。Σdeg = 2(n−1)，即 t + Σ<sub>内点</sub>deg = 2t + 2i − 2，故 Σ<sub>内点</sub>(deg−2) = t − 2。内点每个 deg ≥ 2 ⇒ 左和 ≥ 0 ⇒ t ≥ 2。<span class="qed">∎</span></li>
+                    <li>排序 BD(1), CD(1), AB(2), AC(2), BC(3)。选 BD(1)、CD(1)、AB(2)；AC(2)：A、C 已连通（A-B-D-C），弃；BC(3)：B、C 连通，弃。MST = {BD, CD, AB}，总权 4。</li>
+                    <li>t = (m−1)i + 1 = 2×20 + 1 = 41 片叶。</li>
+                    <li>合并 2+2=4 → {3,3,3,4}；合并 3+3=6 → {3,4,6}；合并 3+4=7 → {6,7}；合并得根 13。W = 2×3 + 2×3 + 3×2 + 3×2 + 3×2 = 6+6+6+6+6 = 30。（W 也可由每次合并权累加：4+6+7+13 = 30 ✓——"合并权之和 = W(T)"是验算神器。）</li>
+                </ol>
+            </div>
+        </details>
+
+        <div class="callout callout-tip">
+            <strong>本章小结</strong>：树 = 连通无回路 = n−1 条边 = 唯一路径，六条等价刻画随取随用；生成树是骨架，Kruskal 全局贪心 / Prim 局部生长；m 叉树 t = (m−1)i + 1；哈夫曼"最小两兄弟合并"给出最优树与前缀码，是压缩技术的数学核心。图论主线完结，最后一章回到数数——组合计数。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="13-欧拉图哈密顿图与平面图.html">← 13 - 欧拉图、哈密顿图与平面图</a>
+            <a href="15-组合计数初步.html">15 - 组合计数初步 →</a>
+        </nav>
+    </footer>
+
+    <script src="assets/script.js"></script>
+</body>
+</html>

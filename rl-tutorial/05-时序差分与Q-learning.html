@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第5章 时序差分与Q-learning - 动手做强化学习</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-动态规划与蒙特卡洛.html">← 上一章：动态规划与蒙特卡洛</a>
+        <a href="06-深度Q网络DQN.html">下一章：深度 Q 网络 DQN →</a>
+    </nav>
+    <main>
+        <h1>第 5 章 · 时序差分与 Q-learning</h1>
+        <p>本章是前半程的高潮。我们把蒙特卡洛的"采样真实经验"和动态规划的"引导"结合，得到<strong>时序差分（TD）</strong>；再用一个巧妙的改动得到强化学习最经典的算法之一 <strong>Q-learning</strong>。最后你会<strong>完整做出一个零依赖案例</strong>：亲眼看着智能体从乱走到稳定找到终点。</p>
+
+        <h2>5.1 TD(0)：走一步就能更新</h2>
+        <p>MC 必须等整局结束拿到 G 才更新；TD 只走一步，用<strong>下一步价值的估计</strong>代替未走完的未来：</p>
+        <div class="formula">V(s) ← V(s) + α·[ r + γ·V(s′) − V(s) ]</div>
+        <p>方括号 <code>δ = r + γV(s′) − V(s)</code> 叫 <strong>TD 误差</strong>：<code>r + γV(s′)</code> 是"走了一步后的新估计"，减去"旧估计 V(s)"，得到这次经验带来的修正。它和第 1 章老虎机的 <code>R−Q</code> 形式完全一致，只是把"单步奖励"升级成了"奖励 + 下一步的未来价值"。</p>
+        <table>
+            <thead><tr><th></th><th>MC</th><th>TD</th></tr></thead>
+            <tbody>
+                <tr><td>更新目标</td><td>真实完整回报 G（无偏）</td><td>r+γV(s′)（有引导，低方差，轻微偏差）</td></tr>
+                <tr><td>何时更新</td><td>回合结束后</td><td><strong>每走一步即可</strong></td></tr>
+                <tr><td>方差</td><td>高</td><td><strong>低</strong>（只采样一步）</td></tr>
+            </tbody>
+        </table>
+
+        <h2>5.2 SARSA：on-policy 的 TD 控制</h2>
+        <p>把 TD(0) 用到动作价值 Q 上。SARSA 这个名字来自它依赖的五元组 <strong>S,A,R,S′,A′</strong>：在 s 做 a 得到 r、进入 s′，再<strong>按当前策略实际选出</strong>下一个动作 a′，用它的 Q 来更新：</p>
+        <div class="formula">Q(s,a) ← Q(s,a) + α·[ r + γ·Q(s′, a′) − Q(s,a) ]</div>
+        <p>因为更新所用的 a′ 就是智能体<strong>真正会执行</strong>的动作（包括 ε-greedy 可能乱走），SARSA 学的是"我实际在遵循的这套带探索的策略"的价值，称为 <strong>on-policy（同策略）</strong>。</p>
+
+        <h2>5.3 Q-learning：off-policy 的经典</h2>
+        <p>Q-learning 做了一个看似很小、实则关键的改动：<strong>不关心下一步实际会选哪个 a′，直接假设下一步能选到最好的动作（取 max）</strong>：</p>
+        <div class="formula">Q(s,a) ← Q(s,a) + α·[ r + γ·max_{a′} Q(s′, a′) − Q(s,a) ]</div>
+        <p>于是<strong>生成动作的策略（ε-greedy，负责探索）和被学习的目标（最优 Q*，直接朝 max 靠拢）被分离开来</strong>，这称为 <strong>off-policy（异策略）</strong>。好处是：既能用 ε-greedy 大胆探索，又能让学到的 Q 直接逼近"不带探索的最优策略"，收敛通常更快、更直接。</p>
+
+        <div class="definition">
+            <h4>on-policy 与 off-policy 一句话分清</h4>
+            <p><strong>on-policy</strong>：边用某策略探索、边评估/改进<strong>同一个</strong>策略（SARSA）。<br>
+            <strong>off-policy</strong>：用一个"行为策略"负责采样（可大胆探索、甚至用别人/旧策略的数据），却去学习另一个"目标最优策略"（Q-learning）。<strong>off-policy 因此能复用历史数据，这也是经验回放（第 6 章）的基础。</strong></p>
+        </div>
+
+        <div class="sidebar-note">
+            <strong>SARSA 与 Q-learning 的行为差异</strong>：在靠近悬崖/危险的场景，SARSA 因为把"自己可能探索性地摔下去"也算进价值，会学得更保守、离悬崖远一点；Q-learning 直接假设下一步总能选最优，会走更激进的最短路线。两者没有绝对优劣，体现了"评估真实策略"与"逼近最优策略"的区别。
+        </div>
+
+        <h2>5.4 完整案例：Q-learning 训练网格寻路（零依赖）</h2>
+        <p>下面是一个<strong>完整、可直接运行</strong>的案例：带打滑的 6×6 网格，智能体用 ε-greedy 采样、用 Q-learning 更新。脚本会记录每回合步数，打印学习曲线，并在训练后用 ε=0 测试成功率。<strong>请亲手运行，并尝试改超参观察变化。</strong></p>
+
+<pre><code class="language-python">import random
+
+class SlipperyGrid:
+    """6x6 网格，目标(5,5)。动作 0上1下2左3右；
+    0.8 按意图移动，0.2 打滑到随机方向；撞墙原地不动。"""
+    def __init__(self, size=6, seed=0):
+        self.size = size
+        self.goal = (size - 1, size - 1)
+        self.rng = random.Random(seed)
+
+    def reset(self):
+        self.pos = (0, 0)
+        return self.pos
+
+    def step(self, action):
+        if self.rng.random() < 0.2:
+            action = self.rng.randrange(4)
+        x, y = self.pos
+        if   action == 0: x = max(0, x - 1)
+        elif action == 1: x = min(self.size - 1, x + 1)
+        elif action == 2: y = max(0, y - 1)
+        else:             y = min(self.size - 1, y + 1)
+        self.pos = (x, y)
+        done = self.pos == self.goal
+        return self.pos, (1.0 if done else -0.01), done
+
+class QLearningAgent:
+    def __init__(self, n_actions=4, gamma=0.95, alpha=0.1, epsilon=0.2):
+        self.g, self.a, self.eps = gamma, alpha, epsilon
+        self.n_actions = n_actions
+        self.Q = {}
+    def q(self, s, a):
+        return self.Q.get((s, a), 0.0)
+    def act(self, s, explore=True):
+        if explore and random.random() < self.eps:
+            return random.randrange(self.n_actions)
+        return max(range(self.n_actions), key=lambda a: self.q(s, a))
+    def learn(self, s, a, r, s2, done):
+        target = r if done else r + self.g * max(
+            self.q(s2, a2) for a2 in range(self.n_actions))
+        self.Q[(s, a)] = self.q(s, a) + self.a * (target - self.q(s, a))
+
+env = SlipperyGrid()
+agent = QLearningAgent()
+history = []
+
+for ep in range(2000):
+    s, done, steps = env.reset(), False, 0
+    while not done and steps < 200:
+        a = agent.act(s)
+        s2, r, done = env.step(a)
+        agent.learn(s, a, r, s2, done)
+        s, steps = s2, steps + 1
+    history.append(steps)
+
+# 学习曲线：把 2000 回合分成 10 段，看平均步数如何下降
+print("每 200 回合的平均步数：")
+for i in range(10):
+    avg = sum(history[i*200:(i+1)*200]) / 200
+    bar = "#" * int(avg / 2)
+    print(f"{i*200:4d}-{(i+1)*200:4d}  {avg:6.1f}  {bar}")
+
+# 测试：ε=0 只利用，跑 100 局统计成功率
+wins = 0
+for _ in range(100):
+    s, done, steps = env.reset(), False, 0
+    while not done and steps < 200:
+        s, _, done = env.step(agent.act(s, explore=False))
+        steps += 1
+    if done:
+        wins += 1
+print(f"测试成功率：{wins}%")
+
+# 打印学到的策略箭头
+arrows = ["↑", "↓", "←", "→"]
+for x in range(6):
+    print("".join(" G " if (x, y) == env.goal
+        else f" {arrows[agent.act((x,y), explore=False)]} " for y in range(6)))
+</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>你应当观察到</strong>：学习曲线里平均步数<strong>随训练明显下降</strong>，测试成功率较高，策略箭头大致指向终点。<strong>这条"曲线下降、成功率上升"的规律，是判断一切 RL 训练是否有效的通用信号</strong>，第 6 章的深度版本依然如此。
+        </div>
+
+        <h2>5.5 超参如何影响结果（调试清单）</h2>
+        <table>
+            <thead><tr><th>超参</th><th>过大</th><th>过小</th><th>常用起点</th></tr></thead>
+            <tbody>
+                <tr><td>α 学习率</td><td>震荡、不稳定</td><td>学得极慢</td><td>0.1（表格）</td></tr>
+                <tr><td>γ 折扣</td><td>难收敛、看得太远</td><td>短视、不愿绕路</td><td>0.9~0.99</td></tr>
+                <tr><td>ε 探索</td><td>始终乱走、回报低</td><td>易困在次优解</td><td>0.1~0.2，可随训练衰减</td></tr>
+            </tbody>
+        </table>
+        <div class="callout callout-danger">
+            <strong>常见故障排查</strong>
+            <ul>
+                <li><strong>曲线不下降</strong>：先确认学习率不为 0、Q 在被更新；降低 γ；检查奖励符号是否写反。</li>
+                <li><strong>训练好、测试差</strong>：测试时是否仍在探索（应 ε=0）；环境随机性是否过强。</li>
+                <li><strong>回报一直为负</strong>：每步惩罚相对终点奖励是否过重，导致"怎么走都不划算"。</li>
+            </ul>
+        </div>
+
+        <h2>练习与实战</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><p>把 Q-learning 改成 SARSA（提示：更新前先用 ε-greedy 选出实际的 a′，用 Q(s′,a′) 代替 max），比较两者在打滑环境下的策略与成功率。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><p>让 ε 随训练从 0.3 线性衰减到 0.02，比较学习速度与最终表现，并解释为什么"前期多探索、后期多利用"合理。</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><p>改变地图：加入一面墙（某些格子不可通过，进入即回到原位），重新训练，观察智能体如何绕行。</p></div></div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>TD 结合采样与引导，每步用 TD 误差 δ=r+γV(s′)−V(s) 更新，低方差且无需等回合结束。</li>
+            <li>SARSA 是 on-policy（用实际选出的 a′）；Q-learning 是 off-policy（直接 max，分离行为与目标策略）。</li>
+            <li>你已完整做出第一个 RL 案例：训练曲线下降、测试成功率上升即说明学到了东西。</li>
+            <li>掌握 α/γ/ε 的作用与基本调试，是后续深度方法的地基。</li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-动态规划与蒙特卡洛.html">← 上一章：动态规划与蒙特卡洛</a>
+            <a href="06-深度Q网络DQN.html">下一章：深度 Q 网络 DQN →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

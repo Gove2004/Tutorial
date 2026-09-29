@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第1章 智能体与环境 - 动手做强化学习</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="00-导读与环境准备.html">← 上一章：导读与环境准备</a>
+        <a href="02-马尔可夫决策过程.html">下一章：马尔可夫决策过程 →</a>
+    </nav>
+    <main>
+        <h1>第 1 章 · 智能体与环境：强化学习的第一性原理</h1>
+        <p>本章先把问题简化到最纯粹的形式——<strong>多臂老虎机</strong>，它只包含"探索与利用"这一个核心矛盾，没有复杂的未来。理解它之后，我们再把"未来"加回来，得到完整的智能体—环境接口。</p>
+
+        <h2>1.1 多臂老虎机：探索与利用的最纯粹形式</h2>
+        <p>赌场里有一排老虎机（俗称"单臂老虎机"，多台就是"多臂"）。每台机器被拉动时会按它<strong>内在的、未知的概率分布</strong>吐出奖金。你不知道哪台最慷慨，只能拉若干次，目标是让总奖金最大。</p>
+        <p>这里没有"状态"、动作也不会改变环境，唯一的问题是：<strong>我是该继续拉目前看来最好的那台（利用），还是去试试别的、万一有更慷慨的呢（探索）？</strong></p>
+
+        <h3>动作价值：先估计"每个动作平均给多少奖励"</h3>
+        <p>要做决定，先得估计每台机器的价值。最自然的方法是<strong>样本平均</strong>：某台机器被拉了 n 次、得到奖励 r₁…rₙ，就估计它的价值为</p>
+        <div class="formula">Q(a) = (r₁ + r₂ + … + rₙ) / n</div>
+        <p>不必保存所有历史奖励，可以用一条<strong>增量更新</strong>公式。设第 n 次拉动动作 a 后得到新奖励 R：</p>
+        <div class="formula">Qₙ₊₁ = Qₙ + (1/n)·(R − Qₙ)</div>
+        <p>这条公式极其重要，后面会反复出现。<code>(R − Q)</code> 叫<strong>误差/新息</strong>：结果比预期好（正）就把估计往上调，比预期差（负）就往下调；<code>1/n</code> 是学习幅度（拉得越多，单次新证据的权重越小，估计越稳定）。更一般地，我们把 <code>1/n</code> 换成一个常数 <code>α</code>（步长/学习率）。</p>
+
+        <h3>ε-贪婪：用一个小概率保证探索</h3>
+        <p>有了估计，怎么选？最简单有效的策略叫 <strong>ε-greedy（ε-贪婪）</strong>：以大概率 1−ε 选当前估计价值最高的动作（利用），以小概率 ε <strong>随机</strong>选一个动作（探索）。ε 常设为 0.1 左右。</p>
+
+<pre><code class="language-python">import random
+
+class Bandit:
+    """k 台老虎机，每台有固定的真实平均收益(对智能体保密)。"""
+    def __init__(self, k=5, seed=0):
+        rng = random.Random(seed)
+        self.true_values = [rng.uniform(-1, 1) for _ in range(k)]
+
+    def pull(self, arm):
+        # 真实收益 = 平均值 + 随机噪声
+        return self.true_values[arm] + random.gauss(0, 0.2)
+
+k = 5
+env = Bandit(k)
+q = [0.0] * k          # 对每台机器价值的估计
+counts = [0] * k       # 每台被拉的次数
+epsilon = 0.1
+
+for step in range(2000):
+    if random.random() < epsilon:
+        arm = random.randrange(k)          # 探索：随机选
+    else:
+        arm = max(range(k), key=lambda a: q[a])   # 利用：选估计最高的
+    reward = env.pull(arm)
+    counts[arm] += 1
+    q[arm] += (reward - q[arm]) / counts[arm]     # 增量更新
+
+for a in range(k):
+    print(f"机器{a}: 真实{env.true_values[a]:+.3f} 估计{q[a]:+.3f} 拉了{counts[a]}次")
+</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>运行后你会发现</strong>：最慷慨的机器被拉的次数远超其他（智能体学会了"利用"它），而其他机器也被尝试过若干次（这是 ε 带来的"探索"）。把 ε 设成 0，智能体可能<strong>一开始误判某台为最好，就再也不探索、永远错下去</strong>——这就是纯利用的风险。
+        </div>
+
+        <h2>1.2 从单步到序列：动作会改变未来</h2>
+        <p>老虎机里，拉哪台都不改变环境。但绝大多数真实问题是<strong>序列决策</strong>：你现在的动作会改变你接下来所处的状态，从而改变未来能拿到的奖励。下棋时一步走错，后面满盘皆输；导航时朝哪走，决定了你离终点更近还是更远。</p>
+        <p>于是"价值"不再是"这个动作本身给多少奖励"，而是"<strong>在当前状态下做这个动作，长远来看（包括它带来的后续）总共能拿多少奖励</strong>"。这一升级是第 2、3 章的主题。现在我们先把承载序列决策的<strong>接口</strong>写出来。</p>
+
+        <h2>1.3 智能体—环境接口：三件套与时间步</h2>
+        <p>把交互过程按时间步 t 展开，每一时刻：</p>
+        <ol>
+            <li>智能体收到环境的<strong>观测（observation）</strong> oₜ；</li>
+            <li>智能体据此选择一个<strong>动作（action）</strong> aₜ；</li>
+            <li>环境执行动作，返回新的观测 oₜ₊₁ 和一个标量<strong>奖励（reward）</strong> rₜ₊₁。</li>
+        </ol>
+        <p>如此反复，直到环境给出<strong>终止信号</strong>（到达终点 / 失败 / 超时），称为一个<strong>回合（episode）</strong>。下面用一个 3×3 网格把这个接口写成标准形式——注意 <code>reset</code> 和 <code>step</code> 的返回结构，这是几乎所有 RL 环境（包括后文的深度学习环境）通用的约定。</p>
+
+<pre><code class="language-python">class GridEnv:
+    """3x3 网格：从左上角(0,0)走到右下角(2,2)。
+    动作：0上 1下 2左 3右。撞墙原地不动。"""
+    def __init__(self, size=3):
+        self.size = size
+        self.goal = (size - 1, size - 1)
+
+    def reset(self):
+        self.pos = (0, 0)
+        return self.pos                       # 初始观测
+
+    def step(self, action):
+        x, y = self.pos
+        if action == 0:   x = max(0, x - 1)  # 上
+        elif action == 1: x = min(self.size - 1, x + 1)  # 下
+        elif action == 2: y = max(0, y - 1)  # 左
+        elif action == 3: y = min(self.size - 1, y + 1)  # 右
+        self.pos = (x, y)
+        terminated = (self.pos == self.goal)
+        reward = 1 if terminated else 0
+        # 标准返回：新观测、奖励、是否终止
+        return self.pos, reward, terminated
+
+env = GridEnv()
+obs = env.reset()
+print("初始位置:", obs)
+done, total = False, 0
+while not done:
+    act = random.randrange(4)                # 暂时随机
+    obs, reward, done = env.step(act)
+    total += reward
+print("结束位置:", obs, "回合奖励:", total)
+</code></pre>
+
+        <div class="callout callout-info">
+            <strong>边界划清：什么是"环境"、什么是"智能体"？</strong>
+            <p>一个实用的判断标准：<strong>智能体可以任意改变、必须能靠它学习的部分（选动作的规则、它维护的估计）属于智能体；智能体无法直接控制、只能通过动作去影响的一切都属于环境。</strong>物理规则、对手、随机扰动，甚至机器人自身的关节动力学，对决策者来说都是"环境"。这条边界决定了哪些东西能学、哪些只能适应。</p>
+        </div>
+
+        <h2>1.4 奖励假设：目标就是最大化累计奖励</h2>
+        <div class="definition">
+            <h4>奖励假设（Reward Hypothesis）</h4>
+            <p>强化学习默认：<strong>任何"目标"都可以被等价地描述为"最大化接收到的标量奖励信号的（累计）期望值"。</strong></p>
+        </div>
+        <p>这意味着<strong>设计奖励，就是在向智能体精确地表达"你到底想要什么"</strong>。奖励设计得好，智能体自然涌现出聪明行为；设计得有漏洞，智能体会"钻空子"拿到高分却没完成你真正想要的事（第 9 章会专门讲"奖励黑客"）。因此想清楚奖励，是动手做 RL 案例时最关键的一步。</p>
+
+        <h2>练习与思考</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><p>把老虎机的 ε 分别设为 0、0.1、0.5，各跑几次并比较总收益与各机器被拉次数，解释为什么 ε 过大也不好。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><p>把增量更新里的 <code>1/counts</code> 换成固定步长 <code>0.1</code>，思考：当某台机器的真实收益会<strong>随时间缓慢变化</strong>时，哪种更新更合理？（提示：固定步长会更快"忘记"过时的旧经验。）</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><p>在 3×3 网格里，仅靠"到达终点才给 1、其余为 0"，随机智能体平均要走很多步。请思考：为什么这种<strong>稀疏奖励</strong>会让学习困难？（后面我们用"价值回传"和"奖励塑形"来解决。）</p></div></div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>多臂老虎机只含探索与利用：用样本平均（增量式 Q←Q+α(R−Q)）估计动作价值，用 ε-greedy 平衡探索与利用。</li>
+            <li>序列决策中，动作会改变未来状态，价值要衡量"长远的累计结果"。</li>
+            <li>通用接口：<code>reset()→观测</code>，<code>step(a)→(新观测, 奖励, 终止)</code>；智能体可控的归智能体，其余归环境。</li>
+            <li>奖励假设：目标 = 最大化累计奖励，设计奖励就是表达需求。</li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="00-导读与环境准备.html">← 上一章：导读与环境准备</a>
+            <a href="02-马尔可夫决策过程.html">下一章：马尔可夫决策过程 →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

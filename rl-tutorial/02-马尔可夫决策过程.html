@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第2章 马尔可夫决策过程 - 动手做强化学习</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-智能体与环境.html">← 上一章：智能体与环境</a>
+        <a href="03-价值函数与贝尔曼方程.html">下一章：价值函数与贝尔曼方程 →</a>
+    </nav>
+    <main>
+        <h1>第 2 章 · 马尔可夫决策过程（MDP）</h1>
+        <p>第 1 章我们有了交互的直觉和接口。本章把它<strong>用数学严格地描述出来</strong>——这就是马尔可夫决策过程（Markov Decision Process，MDP）。几乎所有强化学习问题都可以写成 MDP，它是后续一切算法的共同"坐标系"。</p>
+
+        <h2>2.1 MDP 的五个要素</h2>
+        <div class="definition">
+            <h4>马尔可夫决策过程是一个五元组 ⟨ S, A, P, R, γ ⟩</h4>
+            <ul>
+                <li><strong>S</strong>：所有可能<strong>状态（state）</strong>的集合；</li>
+                <li><strong>A</strong>：所有可能<strong>动作（action）</strong>的集合；</li>
+                <li><strong>P</strong>：<strong>状态转移概率</strong>，P(s′ | s, a) 表示"在状态 s 做动作 a，转移到状态 s′"的概率；</li>
+                <li><strong>R</strong>：<strong>奖励函数</strong>，R(s, a, s′)（或简写 R(s,a)）表示这次转移给多少奖励；</li>
+                <li><strong>γ</strong>：<strong>折扣因子（discount factor）</strong>，0 ≤ γ ≤ 1，决定未来奖励在今天"折算"成多少。</li>
+            </ul>
+        </div>
+
+        <h3>"马尔可夫性"是什么意思</h3>
+        <p>所谓马尔可夫性，是说<strong>当前状态已经包含了预测未来所需的全部历史信息</strong>：给定现在，未来与过去条件独立。形式化地，</p>
+        <div class="formula">P(sₜ₊₁ | sₜ, aₜ, sₜ₋₁, aₜ₋₁, …) = P(sₜ₊₁ | sₜ, aₜ)</div>
+        <p>这不是要求状态"真的记得所有事"，而是提醒我们：<strong>设计状态/观测时，要把做决策所需的信息都放进去</strong>。如果只看当前一帧无法判断（比如不知道自己在往哪移动），就应把历史几帧、速度等也纳入状态——第 9 章讲"部分可观"时会再用到这一点。</p>
+
+        <h3>确定性环境与随机性环境</h3>
+        <p>第 1 章的网格是<strong>确定性</strong>的：朝右走就一定到右边，P 只在一个 s′ 上取 1。真实世界常是<strong>随机性</strong>的：地面湿滑，你朝右走，可能只有 0.8 概率到右边，0.2 概率"打滑"到别的格子。这时 P 在多个 s′ 上分布。随机性正是为什么我们要谈"<strong>期望</strong>奖励、<strong>概率</strong>策略"。</p>
+
+        <h2>2.2 轨迹、回合与回报</h2>
+        <p>把一局交互记录下来，就是一条<strong>轨迹（trajectory）</strong>：s₀, a₀, r₁, s₁, a₁, r₂, s₂, …。有自然终点的任务叫<strong>回合制（episodic）</strong>任务（一局棋、一次导航）；没有明确终点、无限进行的叫<strong>连续式（continuing）</strong>任务（如持续运行的库存管理）。</p>
+        <p>智能体要最大化的不是某一步的奖励，而是<strong>累计奖励</strong>。从时刻 t 开始的<strong>回报（return）</strong>定义为</p>
+        <div class="formula">Gₜ = rₜ₊₁ + γ·rₜ₊₂ + γ²·rₜ₊₃ + … = Σₖ γᵏ·rₜ₊ₖ₊₁</div>
+
+        <h3>为什么需要折扣因子 γ</h3>
+        <ul>
+            <li><strong>表达"未来不如现在确定/值钱"</strong>：远期的奖励更难保证，应当打折。</li>
+            <li><strong>数学上保证无限回合的回报收敛</strong>：若 γ=1 且奖励持续为正，无限任务的总奖励会发散，无法比较。</li>
+            <li><strong>调节短视与长远</strong>：γ→0 时智能体只在乎眼前（可能为一时之利牺牲未来）；γ→1 时更看重长远。实际任务中 γ 常设为 0.9~0.999。</li>
+        </ul>
+
+        <div class="sidebar-note">
+            <strong>一个直观的折算例子</strong>：γ=0.9 时，10 步之后的 1 分奖励，在今天只值 0.9¹⁰≈0.35 分；γ=0.99 时则值约 0.90 分。γ 越大，智能体越"有耐心"为远期目标（如到达终点）做规划。
+        </div>
+
+        <h2>2.3 把网格寻路写成一个随机 MDP（代码）</h2>
+        <p>下面给网格加入"打滑"，让它成为真正含转移概率的 MDP，并打印一条轨迹和按不同 γ 计算的回报，帮助你把 P、R、γ 与代码对应起来。</p>
+
+<pre><code class="language-python">import random
+
+class SlipperyGrid:
+    """带打滑的网格 MDP。size x size，目标在右下角。
+    动作 0上1下2左3右：以 0.8 概率按意图移动，0.2 概率随机滑向一个方向。"""
+    def __init__(self, size=4, seed=1):
+        self.size = size
+        self.goal = (size - 1, size - 1)
+        random.seed(seed)
+
+    def reset(self):
+        self.pos = (0, 0)
+        return self.pos
+
+    def step(self, action):
+        if random.random() < 0.2:                      # 打滑：随机方向
+            action = random.randrange(4)
+        x, y = self.pos
+        if   action == 0: x = max(0, x - 1)
+        elif action == 1: x = min(self.size - 1, x + 1)
+        elif action == 2: y = max(0, y - 1)
+        else:             y = min(self.size - 1, y + 1)
+        self.pos = (x, y)
+        done = self.pos == self.goal
+        reward = 1 if done else -0.01                  # 到达 +1，每步小惩罚
+        return self.pos, reward, done
+
+def discounted_return(rewards, gamma):
+    """按 G = r0 + γ r1 + γ² r2 ... 计算回报。"""
+    g = 0.0
+    for r in reversed(rewards):
+        g = r + gamma * g
+    return g
+
+env = SlipperyGrid()
+env.reset()
+rewards, done, steps = [], False, 0
+while not done and steps < 100:
+    _, r, done = env.step(random.randrange(4))         # 随机策略采样一条轨迹
+    rewards.append(r)
+    steps += 1
+print(f"轨迹长度 {steps}")
+for gamma in (0.9, 0.99):
+    print(f"γ={gamma} 时回报 G = {discounted_return(rewards, gamma):.3f}")
+</code></pre>
+
+        <div class="callout callout-info">
+            <strong>请把代码与五元组一一对应</strong>：状态 S = 所有格子坐标；动作 A = {上,下,左,右}；转移 P 由"0.8 按意图、0.2 打滑"隐式定义；奖励 R = 到达 +1、每步 −0.01；γ 是计算回报时传入的参数。<strong>当你能把一个现实问题这样拆成五元组，就已经完成了强化学习建模最关键的一步。</strong>
+        </div>
+
+        <h2>2.4 一个完整的建模清单（做案例时照此填写）</h2>
+        <table>
+            <thead><tr><th>要素</th><th>你要回答的问题</th><th>网格寻路示例</th></tr></thead>
+            <tbody>
+                <tr><td>状态 S</td><td>做决策需要知道哪些信息？</td><td>智能体所在格子坐标</td></tr>
+                <tr><td>动作 A</td><td>智能体能执行哪些操作？</td><td>上/下/左/右</td></tr>
+                <tr><td>转移 P</td><td>动作如何、以多大概率改变状态？</td><td>0.8 成功 + 0.2 打滑，撞墙不动</td></tr>
+                <tr><td>奖励 R</td><td>什么算好、什么算坏？</td><td>到达 +1，每步 −0.01</td></tr>
+                <tr><td>γ</td><td>多看重未来？</td><td>0.95</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习与思考</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><p>把每步惩罚 −0.01 去掉（只在到达时 +1），思考这对智能体"是否愿意尽快到达"有什么影响；如果改成每步 +0.01 又会发生什么？</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><p>手算：设 γ=0.9，某轨迹未来三步奖励依次为 1、1、1，求当前回报 Gₜ。再用 γ=0.99 算一次，比较差异。</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><p>思考题：在自动驾驶中，仅靠当前车速与位置，是否满足马尔可夫性？还应把哪些信息纳入状态？</p></div></div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>MDP 五元组 ⟨S, A, P, R, γ⟩ 是强化学习问题的统一描述。</li>
+            <li>马尔可夫性要求状态包含预测未来所需的全部信息；环境可以是确定性或随机性的。</li>
+            <li>回报 Gₜ 是折扣后的累计奖励，γ 表达对未来的重视程度并保证收敛。</li>
+            <li>动手建模时，先逐一定清状态、动作、转移、奖励与折扣。</li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="01-智能体与环境.html">← 上一章：智能体与环境</a>
+            <a href="03-价值函数与贝尔曼方程.html">下一章：价值函数与贝尔曼方程 →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

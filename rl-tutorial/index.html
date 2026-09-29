@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动手做强化学习 · 从直觉到实战的系统教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+    <main>
+        <div class="hero">
+            <h1>动手做强化学习</h1>
+            <p>从「智能体为什么会学习」的直觉出发，一步步推到你能亲手做出一个能跑、能调、能讲清楚的强化学习案例。</p>
+            <div class="pills">
+                <span>思想优先</span>
+                <span>从零推导</span>
+                <span>完整可运行代码</span>
+                <span>真实工程经验</span>
+                <span>毕业项目实战</span>
+            </div>
+        </div>
+
+        <p class="intro">这套教程不追求让你"听说过"很多算法，而是让你真正<strong>建立强化学习的思维方式</strong>：懂得如何把一个现实问题描述成"智能体与环境的交互"，懂得奖励、价值、策略之间如何相互推导，并能在代码里把这套循环跑通、调好。学完之后，你应当能独立完成一个强化学习案例。</p>
+
+        <div class="callout callout-info">
+            <strong>这套教程适合谁</strong>
+            <ul>
+                <li>会 Python 基础语法（函数、类、循环、列表/字典），不要求你懂人工智能</li>
+                <li>希望<strong>系统掌握</strong>而非零散了解，愿意动手敲代码、做练习</li>
+                <li>前半部分（第 0–5 章）<strong>只依赖 Python 标准库，零安装即可运行</strong>；后半部分进入深度学习时再安装 NumPy / PyTorch（附录有详细指引，也提供浏览器免安装方案）</li>
+            </ul>
+        </div>
+
+        <h2>你将学到的三条主线</h2>
+        <table>
+            <thead><tr><th>主线</th><th>核心问题</th><th>代表方法</th></tr></thead>
+            <tbody>
+                <tr><td><strong>价值函数</strong></td><td>"某个状态/动作未来到底值多少分？" 学出价值，再间接触发最优动作</td><td>Q-learning、DQN 家族</td></tr>
+                <tr><td><strong>策略梯度</strong></td><td>"好动作的概率直接调高、坏动作调低"</td><td>REINFORCE、Actor-Critic、PPO</td></tr>
+                <tr><td><strong>工程与实战</strong></td><td>如何设计观测、动作、奖励，如何让训练稳定并评估它</td><td>奖励塑形、动作掩码、经验回放、分布式采样</td></tr>
+            </tbody>
+        </table>
+
+        <h2>课程目录</h2>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="00-导读与环境准备.html">第 0 章 · 导读与环境准备</a></h3>
+                <p>强化学习在解决什么问题、与监督学习的根本区别、学习路线图，以及零安装跑通第一段交互代码。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-智能体与环境.html">第 1 章 · 智能体与环境：强化学习的第一性原理</a></h3>
+                <p>探索与利用的直觉（多臂老虎机）、奖励与序列决策、亲手写出 env↔agent 接口和第一个极简环境。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-马尔可夫决策过程.html">第 2 章 · 马尔可夫决策过程（MDP）</a></h3>
+                <p>状态、动作、转移、奖励、折扣因子，回合与回报，把一个网格寻路问题严格地形式化。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-价值函数与贝尔曼方程.html">第 3 章 · 价值函数与贝尔曼方程</a></h3>
+                <p>状态价值 V 与动作价值 Q、贝尔曼期望方程与最优方程，用网格世界手算价值迭代。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-动态规划与蒙特卡洛.html">第 4 章 · 动态规划与蒙特卡洛</a></h3>
+                <p>环境已知时的策略评估/迭代与价值迭代；环境未知时，如何从完整回合的经验中估计价值。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶 · 核心案例</span>
+                <h3><a href="05-时序差分与Q-learning.html">第 5 章 · 时序差分与 Q-learning</a></h3>
+                <p>引导（bootstrapping）思想、SARSA 与 Q-learning、on-policy 与 off-policy，<strong>完整做出第一个零依赖案例：训练智能体在网格世界找到终点</strong>。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-深度Q网络DQN.html">第 6 章 · 当表格装不下：深度 Q 网络（DQN）</a></h3>
+                <p>函数逼近、PyTorch 最小入门、经验回放与目标网络两大稳定器、完整 DQN 案例，以及 Double/Dueling/Rainbow 的思想。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="07-策略梯度与Actor-Critic.html">第 7 章 · 策略梯度与 Actor-Critic</a></h3>
+                <p>为什么直接学策略、策略梯度定理直觉、REINFORCE 与方差问题、用价值函数当基线的 Actor-Critic 与 GAE。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="08-PPO与连续动作控制.html">第 8 章 · PPO 与连续动作控制</a></h3>
+                <p>重要性采样、PPO 的裁剪为什么有效、完整 PPO 要点，以及连续动作下的 DDPG / TD3 / SAC 思想。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="09-强化学习工程实践.html">第 9 章 · 强化学习工程实践</a></h3>
+                <p>观测与特征设计、部分可观、奖励塑形与奖励黑客、动作掩码、探索策略、采样-训练解耦的分布式架构、监控与评估。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级 · 毕业项目</span>
+                <h3><a href="10-毕业项目实战.html">第 10 章 · 毕业项目：端到端做一个强化学习案例</a></h3>
+                <p>从选题到定义 MDP、设计观测/动作/奖励、先用表格验证再上深度网络、迭代调试清单与验收标准，附多个可做方向。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">参考</span>
+                <h3><a href="附录-数学基础与环境指南.html">附录 · 数学基础、PyTorch 入门与环境指南</a></h3>
+                <p>概率/线代/梯度速查、PyTorch 最小入门、环境安装（含 Python 版本注意事项与云端免安装方案）、术语表与深入学习资源、常见报错排查。</p>
+            </div>
+        </div>
+
+        <h2>怎样使用这套教程效果最好</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><h4>动手，而不是只看</h4><p>每段代码都自己敲一遍并运行；强化学习的理解几乎全部来自"改一个参数、看到现象变化"。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><h4>讲给自己听</h4><p>每学完一个算法，用一页纸向"完全不懂的人"复述；卡住的地方就是你的知识漏洞。</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><h4>写训练日志</h4><p>记录每次实验的超参、奖励曲线、现象与假设。这是强化学习工程师最核心的习惯。</p></div></div>
+        </div>
+
+        <p style="margin-top:2em;">准备好了就从 <a href="00-导读与环境准备.html"><strong>第 0 章 · 导读与环境准备</strong></a> 开始。</p>
+    </main>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

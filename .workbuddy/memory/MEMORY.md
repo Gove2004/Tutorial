@@ -2,8 +2,14 @@
 
 ## 项目概述
 - 项目路径：`C:\Users\Gove2\Desktop\Tutorial\`
-- 教程合集，包含 7 个教程系列
+- 教程合集，包含 8 个教程系列
 - Mirror 教程位于 `unity-mirror-networking/` 目录，共 10 章
+
+## 离散数学教程（2026-09-12）
+- 新建 `discrete-math-tutorial/`，蓝本屈婉玲/耿素云/张立昂《离散数学》，共 15 章
+- 结构：数理逻辑(01-04)、集合论(05-08)、代数结构(09-11)、图论(12-14)、组合计数(15)
+- 风格 theme-math（纸质感衬线体，棕 #8b4513）；数学符号用 Unicode+HTML，无 MathJax 依赖，离线可开
+- 每章含定义/定理框、例题、易错点 callout、自测题（details 折叠答案）、上下章导航
 
 ## Mirror 96 重写工作
 - 全部 10 章（含 index.html）已于 2026-07-31 按 Mirror 96.x（v96.11.1+）完成重写

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第9章 强化学习工程实践 - 动手做强化学习</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-PPO与连续动作控制.html">← 上一章：PPO 与连续动作控制</a>
+        <a href="10-毕业项目实战.html">下一章：毕业项目实战 →</a>
+    </nav>
+    <main>
+        <h1>第 9 章 · 强化学习工程实践</h1>
+        <p>能在小环境跑通算法，和能<strong>稳定地解决一个真实问题</strong>之间，隔着大量工程细节。本章把这些"教科书着墨不多、却决定成败"的实践经验系统整理：如何设计观测、动作、奖励，如何组织采样与训练，以及如何监控和评估。</p>
+
+        <h2>9.1 观测与特征设计</h2>
+        <ul>
+            <li><strong>只放决策需要的信息，但要放全</strong>：冗余噪声增加学习难度；缺失关键信息则问题不可解（违背马尔可夫性）。</li>
+            <li><strong>归一化 / 缩放</strong>：把坐标、距离、速度等缩放到相近量级（如 [0,1] 或标准化），神经网络对输入尺度敏感。</li>
+            <li><strong>相对量与绝对量结合</strong>：相对目标的方向/距离通常比绝对坐标更易泛化；二者可同时提供。</li>
+        </ul>
+
+        <h3>部分可观测：当一帧信息不够</h3>
+        <p>若仅看当前观测无法判断（如不知道自己速度、看不到墙后的目标），这是部分可观测 MDP（POMDP）。常见对策：</p>
+        <ul>
+            <li><strong>帧堆叠 / 加入历史</strong>：把最近若干步观测或最近位置一起送入；</li>
+            <li><strong>把可推断的状态量显式算出</strong>：如用相邻两帧位置差得到速度；</li>
+            <li><strong>使用带记忆的网络（RNN/LSTM）</strong>维护隐状态；</li>
+            <li>在代码里维护一个随回合 reset 的"记忆"对象。</li>
+        </ul>
+
+        <h2>9.2 动作设计与动作掩码</h2>
+        <p>动作要和智能体<strong>真实可控的操作</strong>对应。当某些动作在当前状态不合法（撞墙方向、技能冷却中），最干净的做法是<strong>动作掩码</strong>：把非法动作的 logits 压到极小、概率清零，等价于硬性禁止。</p>
+<pre><code class="language-python">import torch
+
+def masked_logits(raw_logits, legal_mask):
+    """legal_mask: 1 合法 / 0 非法。非法动作 logits 置为极小值。"""
+    neg_inf = torch.finfo(raw_logits.dtype).min
+    return raw_logits.masked_fill(legal_mask == 0, neg_inf)
+
+logits = torch.tensor([2.0, 1.0, 0.5, -1.0])
+legal  = torch.tensor([1.0, 0.0, 1.0, 1.0])   # 动作 1 当前非法
+probs = torch.softmax(masked_logits(logits, legal), dim=0)
+print(probs)   # 动作 1 概率近似为 0
+</code></pre>
+        <div class="callout callout-warning">
+            <strong>注意</strong>：掩码规则要可靠，误把所有动作都屏蔽会导致无解；实现时应保证至少一个合法动作，并对"上一步是否真的没移动"做判断（例如移动后坐标没变才判定该方向被墙阻挡）。
+        </div>
+
+        <h2>9.3 奖励工程：最关键也最容易出错</h2>
+        <table>
+            <thead><tr><th>议题</th><th>经验</th></tr></thead>
+            <tbody>
+                <tr><td>稀疏 vs 稠密</td><td>只有终点奖励最"干净"但极难学；加入过程奖励（朝目标前进、完成子目标）能加速，但要避免改变真实目标。</td></tr>
+                <tr><td>奖励塑形</td><td><strong>势函数塑形</strong> F(s)=γΦ(s′)−Φ(s) 有理论保证：不会改变最优策略，是较安全的塑形方式（Φ 可取"到目标距离"）。</td></tr>
+                <tr><td>奖励规模</td><td>各类奖励量级要平衡；可做奖励归一化，但<strong>裁剪奖励会丢失大小差异、扭曲梯度</strong>，谨慎使用。</td></tr>
+                <tr><td>终止奖励</td><td>成功给显著正奖励、失败给负奖励，能快速建立"成败"概念；数值要相对过程奖励足够突出。</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-danger">
+            <strong>奖励黑客（Reward Hacking）</strong>：若奖励有漏洞，智能体会钻空子拿高分却没完成你真正想要的事——例如奖励"移动距离"，它可能在原地反复来回刷分；奖励"捡物品次数"，它可能反复丢下又捡起。<strong>每设计一项奖励，都要问"能否用我不想要的方式拿到它？"</strong>
+        </div>
+
+        <h2>9.4 探索策略</h2>
+        <ul>
+            <li><strong>ε-greedy</strong>：简单通用，适合离散动作；可让 ε 随训练衰减。</li>
+            <li><strong>熵正则 / 随机策略</strong>：策略梯度中鼓励保持动作分布不过早确定。</li>
+            <li><strong>Boltzmann（按 Q 值 softmax 采样）</strong>：比纯随机更倾向高价值动作。</li>
+            <li><strong>乐观初始化、参数空间噪声、内在动机/好奇心</strong>：稀疏奖励、探索困难时的进阶手段。</li>
+        </ul>
+
+        <h2>9.5 采样—训练解耦的分布式架构</h2>
+        <p>当单个进程"边采样边训练"吞吐不足时，工业系统把两者拆开并行：</p>
+        <div class="formula">多个采样进程(各自运行环境) → 经验队列(回放服务/ZMQ) → 训练进程(learner)；训练产出的模型经模型池回流给采样进程</div>
+        <table>
+            <thead><tr><th>角色</th><th>职责</th><th>关键考量</th></tr></thead>
+            <tbody>
+                <tr><td>采样进程 / 多环境</td><td>并行跑环境、产生经验、本地推理</td><td>连接环境数、预测批大小</td></tr>
+                <tr><td>经验队列</td><td>暂存与分发样本（回放缓冲区 / 消息队列）</td><td>容量、采样与移除策略（FIFO/均匀/优先）</td></tr>
+                <tr><td>训练进程</td><td>取批样本更新网络、周期落盘</td><td><strong>样本生产/消耗比</strong>、训练批大小</td></tr>
+                <tr><td>模型池</td><td>保存最新模型、供采样端回载</td><td>同步/加载频率、保留版本数</td></tr>
+            </tbody>
+        </table>
+        <div class="sidebar-note">
+            <strong>为什么这样更快</strong>：训练 GPU 不必等待环境一步步出样本，采样端也不必等待训练完成；多环境并行还能一次性产生多样化、去相关的经验。CPU 线程数、样本传输方式（不同硬件架构）都是实际调优项。
+        </div>
+
+        <h2>9.6 评估、监控与训练日志</h2>
+        <ul>
+            <li><strong>独立评估</strong>：用 ε=0 / 确定性策略、固定随机种子，在固定测试配置上跑，统计回报、成功率、平均步数，<strong>不要只看训练分数</strong>。</li>
+            <li><strong>多次运行看分布</strong>：RL 结果有随机性，单次好坏不足为据，关注均值与波动。</li>
+            <li><strong>必监控量</strong>：回合回报、价值/Q 均值、损失、TD 误差、梯度范数、（PPO 的）KL 与裁剪比例、解释方差。</li>
+            <li><strong>训练日志</strong>：记录超参、改动、现象、假设、结论，便于复现与归因。</li>
+        </ul>
+
+        <h2>9.7 常见失败模式速查</h2>
+        <table>
+            <thead><tr><th>现象</th><th>优先排查</th></tr></thead>
+            <tbody>
+                <tr><td>回报完全不涨</td><td>奖励/梯度是否为零；能否在极小场景过拟合；学习率与 γ</td></tr>
+                <tr><td>回报涨后又崩</td><td>更新过猛（学习率/PPO ε/KL）；目标网络同步；奖励尺度</td></tr>
+                <tr><td>方差极大、剧烈震荡</td><td>增大 batch；GAE 调 λ；加基线/熵；多环境采样</td></tr>
+                <tr><td>训练好、评估差</td><td>评估是否仍在探索；是否过拟合特定环境配置；泛化问题</td></tr>
+                <tr><td>高分但行为异常</td><td>奖励黑客：重新审视每一项奖励能否被钻空子</td></tr>
+            </tbody>
+        </table>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>观测要全且归一化，部分可观时用历史/记忆补足；动作用掩码屏蔽非法项。</li>
+            <li>奖励是重中之重：用安全的势函数塑形、平衡量级、警惕奖励黑客。</li>
+            <li>吞吐不足时把采样与训练解耦为分布式架构，并通过模型池回流。</li>
+            <li>坚持独立评估、全面监控与训练日志。</li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="08-PPO与连续动作控制.html">← 上一章：PPO 与连续动作控制</a>
+            <a href="10-毕业项目实战.html">下一章：毕业项目实战 →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

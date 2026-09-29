@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第3章 价值函数与贝尔曼方程 - 动手做强化学习</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-马尔可夫决策过程.html">← 上一章：马尔可夫决策过程</a>
+        <a href="04-动态规划与蒙特卡洛.html">下一章：动态规划与蒙特卡洛 →</a>
+    </nav>
+    <main>
+        <h1>第 3 章 · 价值函数与贝尔曼方程</h1>
+        <p>有了 MDP 和回报，我们引入强化学习最核心的概念之一——<strong>价值函数（value function）</strong>。它回答"某个状态（或状态里的某个动作）<strong>未来平均能拿多少分</strong>"，而贝尔曼方程则给出价值之间<strong>递归、可计算</strong>的关系。后面所有算法，本质上都是在<strong>估计</strong>或<strong>优化</strong>这里定义的价值。</p>
+
+        <h2>3.1 策略：在每个状态如何选择动作</h2>
+        <p><strong>策略（policy）</strong> π 是智能体的"行为规则"，它可以是确定性的 a=π(s)，也可以是随机性的 π(a|s)——在状态 s 选择各动作的概率。强化学习的最终产物，往往就是一个好策略。</p>
+
+        <h2>3.2 状态价值 V 与动作价值 Q</h2>
+        <div class="definition">
+            <h4>两类价值函数（都是"未来回报的期望"）</h4>
+            <p><strong>状态价值函数</strong>：从状态 s 出发、之后按策略 π 行动，能拿到的回报期望</p>
+            <div class="formula">V^π(s) = Eπ[ Gₜ | sₜ = s ]</div>
+            <p><strong>动作价值函数</strong>：从 s 出发先做动作 a、之后再按 π 行动的回报期望</p>
+            <div class="formula">Q^π(s, a) = Eπ[ Gₜ | sₜ = s, aₜ = a ]</div>
+        </div>
+        <p>两者的差别很关键：V 衡量"身处这个状态好不好"（已经默认之后按 π 选动作）；Q 衡量"在这个状态里<strong>具体做某个动作</strong>好不好"。<strong>做决策时 Q 更直接：比较同一状态下各动作的 Q，选最大的即可。</strong></p>
+
+        <h2>3.3 贝尔曼期望方程：价值的递归表达</h2>
+        <p>把 Gₜ = rₜ₊₁ + γ·Gₜ₊₁ 代入价值定义，就得到<strong>贝尔曼期望方程</strong>。它用"下一步"的价值表达"这一步"的价值：</p>
+        <div class="formula">V^π(s) = Σₐ π(a|s) Σ_{s′} P(s′|s,a) [ R(s,a,s′) + γ·V^π(s′) ]</div>
+        <div class="formula">Q^π(s,a) = Σ_{s′} P(s′|s,a) [ R(s′) + γ Σ_{a′} π(a′|s′) Q^π(s′, a′) ]</div>
+        <p>方括号里的 <code>R + γV(s′)</code> 称为一次<strong>贝尔曼备份（Bellman backup）</strong>：把"下一状态的价值"连同"即时奖励"回传一格给当前状态。这正是<strong>信用分配</strong>的数学实现——终点的高价值能一步步回传到通往终点的每个状态。</p>
+
+        <h3>手算一次备份（建立直觉）</h3>
+        <p>设某状态 s 下只有一个动作，做完一定进入 s′，即时奖励 R=0，γ=0.9，且已知 V^π(s′)=10。则</p>
+        <div class="formula">V^π(s) = 0 + 0.9 × 10 = 9</div>
+        <p>注意这里没有真正"走"，仅靠<strong>下一步价值的估计</strong>就更新了当前价值——这种"用估计去更新估计"的做法叫<strong>引导（bootstrapping）</strong>，是时序差分方法的灵魂（第 5 章）。</p>
+
+        <h2>3.4 最优价值与贝尔曼最优方程</h2>
+        <p>在所有可能策略中，能让每个状态价值都最大的那个策略叫<strong>最优策略 π*</strong>，对应的价值叫<strong>最优价值函数</strong> V* 与 Q*：</p>
+        <div class="formula">V*(s) = max_π V^π(s)，　Q*(s,a) = max_π Q^π(s,a)</div>
+        <p>最优策略下，我们不再对动作求<strong>加权平均</strong>（那是"将就当前策略"），而是假设可以<strong>直接选最好的动作</strong>，于是得到<strong>贝尔曼最优方程</strong>：</p>
+        <div class="formula">V*(s) = maxₐ Σ_{s′} P(s′|s,a)[ R + γ·V*(s′) ]</div>
+        <div class="formula">Q*(s,a) = Σ_{s′} P(s′|s,a)[ R + γ·max_{a′} Q*(s′, a′) ]</div>
+
+        <div class="callout callout-tip">
+            <strong>为什么 Q* 如此重要</strong>：一旦学到 Q*，<strong>最优策略根本不需要再做复杂规划</strong>——在任意状态，选 Q* 最大的那个动作即可：
+            <div class="formula">π*(s) = argmaxₐ Q*(s,a)</div>
+            这正是 Q-learning 和 DQN 拼命逼近 Q* 的原因。
+        </div>
+
+        <h2>3.5 代码：固定策略下用贝尔曼方程求 V^π</h2>
+        <p>下面在一个<strong>模型已知</strong>的小网格上，反复套用贝尔曼期望方程（这个过程叫<strong>策略评估</strong>，第 4 章会系统讲），观察终点价值如何"扩散"到整张地图。</p>
+
+<pre><code class="language-python">class TinyGrid:
+    """4x4 确定性网格，目标(3,3)。模型完全已知：
+    给定 (状态,动作) 可直接知道下一状态与奖励。"""
+    def __init__(self, size=4):
+        self.size = size
+        self.goal = (size - 1, size - 1)
+        self.states = [(x, y) for x in range(size) for y in range(size)]
+
+    def model(self, s, a):
+        if s == self.goal:
+            return s, 0.0                       # 终点自循环，奖励 0
+        x, y = s
+        if   a == 0: x = max(0, x - 1)
+        elif a == 1: x = min(self.size - 1, x + 1)
+        elif a == 2: y = max(0, y - 1)
+        else:        y = min(self.size - 1, y + 1)
+        s2 = (x, y)
+        r = 1.0 if s2 == self.goal else -0.01
+        return s2, r
+
+env = TinyGrid()
+gamma = 0.9
+V = {s: 0.0 for s in env.states}               # 初始价值全为 0
+
+for iteration in range(100):
+    newV = {}
+    for s in env.states:
+        # 随机均匀策略：每个动作概率 1/4
+        total = 0.0
+        for a in range(4):
+            s2, r = env.model(s, a)
+            total += 0.25 * (r + gamma * V[s2])
+        newV[s] = total
+    delta = max(abs(newV[s] - V[s]) for s in env.states)
+    V = newV
+    if delta < 1e-6:
+        print(f"第{iteration+1}轮收敛")
+        break
+
+for x in range(4):
+    print(" ".join(f"{V[(x,y)]:6.2f}" for y in range(4)))
+</code></pre>
+
+        <div class="callout callout-info">
+            <strong>如何读这张价值表</strong>：终点附近的格子价值最高（离奖励最近），越远越低（被 γ 和每步惩罚层层折扣）。这就是"未来值多少分"的具象化。<strong>注意：现在用的是随机策略，所以智能体即便在好位置也可能乱走；第 4 章我们让它"贪心地"朝高价值方向走，价值会进一步提高。</strong>
+        </div>
+
+        <h2>练习与思考</h2>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><p>手算：γ=0.9，某动作后以 0.5 概率进入 s₁（V=10）、0.5 概率进入 s₂（V=0），即时奖励 0，求该动作的 Q 值。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><p>把代码 γ 改为 0.5 和 0.99，比较价值表：γ 如何改变"离终点远近"的价值落差？</p></div></div>
+            <div class="step"><span class="step-number">3</span><div class="step-content"><p>用自己的话说清：贝尔曼<strong>期望</strong>方程里的"对动作求和(加权平均)"与贝尔曼<strong>最优</strong>方程里的"max"分别代表什么含义？</p></div></div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>策略 π 是行为规则；V^π(s) 与 Q^π(s,a) 是未来回报的期望，Q 更便于直接决策。</li>
+            <li>贝尔曼期望方程用"下一步价值 + 即时奖励"递归表达当前价值，一次计算即一次贝尔曼备份。</li>
+            <li>最优价值 V*/Q* 满足带 max 的贝尔曼最优方程；学到 Q* 后，argmax 即得最优策略。</li>
+            <li>"用估计更新估计"称为引导，是后续时序差分方法的核心。</li>
+        </ul>
+    </main>
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="02-马尔可夫决策过程.html">← 上一章：马尔可夫决策过程</a>
+            <a href="04-动态规划与蒙特卡洛.html">下一章：动态规划与蒙特卡洛 →</a>
+        </nav>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

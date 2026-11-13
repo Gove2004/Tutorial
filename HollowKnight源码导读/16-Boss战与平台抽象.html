@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 16 章 Boss 战与平台抽象 - 空洞骑士源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="15-UI与地图系统.html">← 上一章：UI 与地图系统</a>
+    <a href="17-逆向方法论与Mod开发.html">下一章：逆向方法论与 Mod 开发 →</a>
+</nav>
+<main>
+    <h1>第 16 章　Boss 战与平台抽象</h1>
+    <p>本章分两部分：神居（Godmaster）的 Boss 场景与 Boss Rush 序列如何编排，以及 Platform 抽象层如何让同一份游戏逻辑跑在 PC、主机等不同平台。</p>
+
+    <h2>16.1 神居系统概述</h2>
+    <p>Godmaster 内容（MapZone.GODS_GLORY）引入了一套可复用的 Boss 挑战框架：Boss 雕像（BossStatue）、Boss 场景（BossSceneController）、Boss 序列（BossSequenceController，即诸神堂连战）。它把原本散落在各场景的 Boss 战斗抽象成可重复挑战、带统计和束缚的标准化系统。</p>
+
+    <h2>16.2 BossSceneController：单场景管理</h2>
+    <p>每个 Boss 场景挂一个 BossSceneController，核心是 Boss 死亡计数：</p>
+<pre><code class="language-csharp">private void Setup()
+{
+    for (int i = 0; i < bosses.Length; i++)
+    {
+        if (bosses[i])
+        {
+            bossesLeft++;
+            bosses[i].OnDeath += delegate
+            {
+                bossesLeft--;
+                CheckBossesDead();   // 订阅每个 Boss 的死亡事件
+            };
+        }
+    }
+    // 追踪玩家是否受伤（无伤判定）
+    if (!BossSequenceController.KnightDamaged)
+        HeroController.instance.OnTakenDamage += SetKnightDamaged;
+}
+
+private void CheckBossesDead()
+{
+    if (bossesLeft <= 0) EndBossScene();
+}</code></pre>
+    <ul>
+        <li><strong>bossesLeft</strong>：支持多 Boss 场景（如双 Boss），全部死亡才结束</li>
+        <li><strong>KnightDamaged</strong>：订阅主角 OnTakenDamage，一旦受伤标记，用于无伤评价</li>
+        <li><strong>Timer</strong>：Update 里累加战斗计时</li>
+    </ul>
+
+    <h3>结束与转场</h3>
+<pre><code class="language-csharp">public void EndBossScene()
+{
+    if (!endedScene)
+    {
+        endedScene = true;
+        OnBossesDead?.Invoke();
+        StartCoroutine(EndSceneDelayed());
+    }
+}
+// 延迟后按是否在序列中发不同转场事件：
+//   最后一个 → "GG TRANSITION FINAL"
+//   普通 → "GG TRANSITION OUT"
+//   雕像单独挑战 → "GG TRANSITION OUT STATUE"</code></pre>
+    <p>EndSceneDelayed 会等待转场完成、主角不在危险重生/地震等状态，再做收尾，避免在特殊动作中切场景。</p>
+
+    <h3>ReportHealth：Boss 血量登记</h3>
+<pre><code class="language-csharp">public static void ReportHealth(HealthManager hm, int baseHP, int adjustedHP)
+{
+    if (!Instance) return;
+    if (Instance.bosses.Contains(hm))
+        Instance.BossHealthLookup[hm] = new BossHealthDetails
+        {
+            baseHP = baseHP, adjustedHP = adjustedHP
+        };
+}</code></pre>
+    <p>记录每个 Boss 的基础血量和调整后血量（束缚/难度会调整），供统计和 UI 使用。</p>
+
+    <h2>16.3 BossSequenceController：连战序列</h2>
+    <p>诸神堂连战由一个静态 BossSequenceController 编排，它不挂在场景里，而是跨场景驱动整条序列：</p>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+flowchart LR
+    A["SetupNewSequence<br/>BossSequence + 束缚"] --> B["bossIndex=0<br/>SetupBossScene"]
+    B --> C["场景完成<br/>FinishBossScene"]
+    C --> D["IncrementBossIndex<br/>跳过不可加载项"]
+    D --> E{"还有下一个?"}
+    E -->|"是"| F["设置梦门目标场景<br/>DREAM RETURN 进入下一场"]
+    F --> C
+    E -->|"否"| G["FinishLastBossScene<br/>结算"]
+</div>
+    </div>
+<pre><code class="language-csharp">private static void FinishBossScene(BossSceneController self, SetupEventDelegate setupEvent)
+{
+    IncrementBossIndex();
+    if (bossIndex >= currentSequence.Count)
+    {
+        FinishLastBossScene(self);
+        return;
+    }
+    playerData.currentBossSequence = currentData;
+    // 找到场景里的梦门 FSM，设置下一个目标场景和入口
+    PlayMakerFSM dream = PlayMakerFSM.FindFsmOnGameObject(
+        self.gameObject, "Dream Enter Next Scene");
+    dream.FsmVariables.FindFsmString("To Scene").Value =
+        currentSequence.GetSceneAt(bossIndex);
+    dream.FsmVariables.FindFsmString("Entry Door").Value = "door_dreamEnter";
+    dream.SendEvent("DREAM RETURN");
+}</code></pre>
+    <p>场景之间通过梦门（Dream Enter）衔接，序列控制器在每个场景结束时动态改写梦门的目标场景。IncrementBossIndex 会跳过 CanLoad 为假的条目，使序列可配置。</p>
+
+    <h3>束缚与绑定：ChallengeBindings</h3>
+<pre><code class="language-csharp">public static void ApplyBindings()
+{
+    // 按绑定（护符限制、钉/壳/法等束缚）调整玩家状态
+}
+public static void RestoreBindings()
+{
+    // 序列结束后恢复
+}
+private static void SetCharmsEquipped(bool value) { ... }</code></pre>
+    <p>绑定在序列开始时应用、结束时恢复，包括强制卸下护符、限制装备等。SetMinValue 用多值取最小的方式施加属性上限。BossSequenceBindingsDoor 等配套 UI 显示当前束缚。</p>
+
+    <h2>16.4 配套：雕像、门与 UI</h2>
+    <table>
+        <thead><tr><th>组件</th><th>职责</th></tr></thead>
+        <tbody>
+            <tr><td>BossStatue</td><td>调谐/进阶雕像，记录 Completion 状态（对应 PlayerData 45 个 BossStatue.Completion）</td></tr>
+            <tr><td>BossSequenceDoor</td><td>诸神堂门，记录完成状态、控制解锁</td></tr>
+            <tr><td>BossSummaryUI / BossChallengeUI</td><td>战斗结算与挑战界面</td></tr>
+            <tr><td>BossStatueLoadManager</td><td>雕像挑战的场景加载管理</td></tr>
+        </tbody>
+    </table>
+
+    <h2>16.5 平台抽象：Platform 基类</h2>
+    <p>Platform 是一个抽象 MonoBehaviour，把所有平台相关的差异收敛到一处。游戏逻辑只调用 Platform.Current，不关心具体跑在什么设备上。</p>
+<pre><code class="language-csharp">public abstract class Platform : MonoBehaviour
+{
+    public static Platform Current => current;   // 全局访问点
+
+    // 存档（异步回调）
+    public abstract void Save(int slot, Action<bool> callback = null);
+    public abstract void ReadSaveSlot(int slot, Action<byte[]> callback);
+    public abstract void WriteSaveSlot(int slot, byte[] bytes, Action<bool> callback);
+    public abstract void IsSaveSlotInUse(int slot, Action<bool> callback);
+
+    // 成就
+    public abstract void PushAchievementUnlock(string achievementId);
+
+    // 屏幕/分辨率/帧率
+    // 震动 Mixer、系统语言、共享数据、Engagement（用户登录）...
+}</code></pre>
+
+    <h3>ISharedData：跨平台的键值存储</h3>
+<pre><code class="language-csharp">public interface ISharedData
+{
+    bool GetBool(string key, bool def);
+    void SetBool(string key, bool val);
+    int GetInt(string key, int def);
+    float GetFloat(string key, float def);
+    string GetString(string key, string def);
+    void Save();
+}</code></pre>
+    <p>设置类的零散数据（非存档）通过 ISharedData 抽象，PC 上可能落 PlayerPrefs 或文件，主机上走系统存储，调用方无感知。</p>
+
+    <h2>16.6 具体平台与在线子系统</h2>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+flowchart TB
+    P["Platform（抽象）"] --> D["DesktopPlatform<br/>本地文件存档"]
+    P --> X["XBoxConsolePlatform（sealed）"]
+    D --> OLS["DesktopOnlineSubsystem（抽象）"]
+    OLS --> STEAM["SteamOnlineSubsystem"]
+    OLS --> GOG["GOGGalaxyOnlineSubsystem"]
+    OLS --> GC["GameCoreOnlineSubsystem"]
+</div>
+    </div>
+<pre><code class="language-csharp">// DesktopPlatform：用本地文件系统实现存档
+public override void WriteSaveSlot(int slot, byte[] bytes, Action<bool> callback)
+{
+    // 写本地文件（对应第 7 章的存档落盘）
+}
+public override void PushAchievementUnlock(string achievementId)
+{
+    // 委托给 OnlineSubsystem
+}
+public VibrationMixer GetVibrationMixer() { ... }</code></pre>
+    <table>
+        <thead><tr><th>OnlineSubsystem</th><th>对接</th></tr></thead>
+        <tbody>
+            <tr><td>SteamOnlineSubsystem</td><td>Steam 成就、统计、手柄显示</td></tr>
+            <tr><td>GOGGalaxyOnlineSubsystem</td><td>GOG Galaxy 授权、成就</td></tr>
+            <tr><td>GameCoreOnlineSubsystem</td><td>Xbox GameCore，原生成就对话框、可接管存档</td></tr>
+        </tbody>
+    </table>
+    <div class="callout callout-info">
+        <p><strong>两层抽象的分工</strong>：Platform 抽象"设备能力"（存档、屏幕、震动、用户登录 Engagement）；OnlineSubsystem 抽象"商店/服务"（成就、统计、授权）。桌面平台组合一个在线子系统，主机平台则可能直接在 Platform 子类里实现。新增平台只需实现这两层，核心游戏逻辑不动。</p>
+    </div>
+
+    <h2>16.7 设计权衡</h2>
+    <table class="comparison">
+        <thead><tr><th>收益</th><th>代价</th></tr></thead>
+        <tbody>
+            <tr>
+                <td class="good">同一份逻辑适配多平台；平台差异集中隔离；异步回调适配主机存档；Boss 框架可复用、可配置</td>
+                <td class="bad">抽象层多、调用链长；异步回调风格增加理解成本；为多平台保留的能力在单一平台上是冗余；序列状态为静态，调试需注意全局状态</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="exercise">
+        <h3>思考与练习</h3>
+        <ol>
+            <li>说明 BossSceneController 如何用 bossesLeft 支持多 Boss 场景，无伤判定如何实现。</li>
+            <li>梳理 BossSequenceController 从序列开始到最后一场的推进流程，场景间如何衔接。</li>
+            <li>解释 ChallengeBindings 为什么要在序列开始应用、结束恢复，涉及哪些玩家状态。</li>
+            <li>列出 Platform 抽象基类收敛了哪些平台差异，为什么存档方法用异步回调。</li>
+            <li>区分 Platform 与 OnlineSubsystem 两层抽象的职责，新增一个平台需要实现什么。</li>
+        </ol>
+    </div>
+</main>
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="15-UI与地图系统.html">← 上一章：UI 与地图系统</a>
+        <a href="17-逆向方法论与Mod开发.html">第 17 章：逆向方法论与 Mod 开发 →</a>
+    </nav>
+</footer>
+<script src="assets/script.js"></script>
+</body>
+</html>

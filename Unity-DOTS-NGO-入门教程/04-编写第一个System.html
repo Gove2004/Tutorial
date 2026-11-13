@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 编写第一个 System - Unity DOTS 与 NGO 入门教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-作者工作流与Baking.html">← 上一章</a>
+        <a href="05-JobSystem与Burst.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>04　编写第一个 System：行为属于系统，不属于对象</h1>
+
+        <p>烘焙出来的实体有了数据，但还没有任何行为。这一章写第一个 System，让第三章的 Cube 真正转起来，并把一套熟悉的 MonoBehaviour 逻辑完整重构为 ECS 写法。</p>
+
+        <h2>4.1 ISystem：现代 ECS 的系统基类</h2>
+
+        <p>当前推荐的系统形式是实现 <code>ISystem</code> 的<strong>非托管 partial struct</strong>：</p>
+
+<pre><code class="language-csharp">using Unity.Burst;
+using Unity.Entities;
+using Unity.Transforms;
+
+public partial struct RotationSystem : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        float deltaTime = SystemAPI.Time.DeltaTime;
+
+        foreach (var (transform, speed) in
+            SystemAPI.Query&lt;RefRW&lt;LocalTransform&gt;, RefRO&lt;RotationSpeed&gt;&gt;())
+        {
+            transform.ValueRW = transform.ValueRO.RotateY(
+                speed.ValueRO.RadiansPerSecond * deltaTime);
+        }
+    }
+}
+</code></pre>
+
+        <p>这段代码有几个必须理解的硬性约定：</p>
+        <ul>
+            <li><code>partial</code> 不是可选项。Entities 的源生成器（source generator）会在编译期为查询和 Job 生成配套代码，必须声明 partial 才能让生成的部分与你的代码合并。</li>
+            <li>它是 struct 而非 class，运行在非托管世界，整个系统可以被 Burst 编译、不产生 GC。</li>
+            <li><code>OnUpdate</code> 接收 <code>ref SystemState</code>，系统自身的状态和所有上下文 API 都从这个引用获取。</li>
+        </ul>
+
+        <h2>4.2 系统的生命周期</h2>
+
+        <p><code>ISystem</code> 的方法都有默认实现，你只重写需要的：</p>
+
+        <table>
+            <thead>
+                <tr><th>方法</th><th>调用时机与用途</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>OnCreate(ref SystemState)</code></td><td>系统首次被创建时一次，用于初始化字段、缓存查询、配置更新条件。</td></tr>
+                <tr><td><code>OnUpdate(ref SystemState)</code></td><td>每帧（实际按所属系统组的调度）执行，核心逻辑所在。</td></tr>
+                <tr><td><code>OnDestroy(ref SystemState)</code></td><td>系统销毁时一次，用于释放 NativeContainer 等非托管资源。</td></tr>
+            </tbody>
+        </table>
+
+        <p>系统里可以声明实例字段保存状态（如缓存的 NativeArray、配置参数），但字段同样必须是非托管类型或 NativeContainer，并在 <code>OnDestroy</code> 里释放，否则会泄漏原生内存——这类泄漏 GC 不会帮你回收。</p>
+
+        <h2>4.3 SystemAPI.Query：声明你要哪些数据</h2>
+
+        <p><code>SystemAPI.Query&lt;T1, T2, ...&gt;()</code> 是主线程遍历实体的标准入口。泛型参数描述每个匹配实体要取出的组件，引擎自动筛出拥有这些组件的全部实体，逐个 Chunk 遍历。</p>
+
+        <h3>RefRO 与 RefRW：读写意图显式化</h3>
+        <ul>
+            <li><code>RefRO&lt;T&gt;</code>：只读访问，用 <code>.ValueRO</code> 取值。只读参数让 Job 安全系统知道这段逻辑不会修改该组件，从而允许更宽松的并行调度。</li>
+            <li><code>RefRW&lt;T&gt;</code>：读写访问，用 <code>.ValueRW</code> 取值（也可读 <code>.ValueRO</code>）。</li>
+        </ul>
+
+        <div class="callout callout-danger">
+            <strong>易错点</strong>：只读组件写成 <code>RefRW</code> 虽然能跑，但会收紧并行依赖、阻止其他只读 Job 同时执行，并可能触发安全系统报错。<strong>默认用 RefRO，只有确实要修改时才用 RefRW</strong>。
+        </div>
+
+        <h3>查询过滤：WithAll / WithNone / WithAny</h3>
+
+        <p>泛型参数里的组件会被取出；只用于过滤、不需要取值的组件用链式方法：</p>
+
+<pre><code class="language-csharp">// 处理“活着且被标记、但没有眩晕标签”的实体
+foreach (var (transform, speed) in
+    SystemAPI.Query&lt;RefRW&lt;LocalTransform&gt;, RefRO&lt;MovementSpeed&gt;&gt;()
+        .WithAll&lt;AliveTag&gt;()
+        .WithNone&lt;StunnedTag&gt;())
+{
+    // ...
+}
+</code></pre>
+
+        <ul>
+            <li><code>WithAll&lt;T&gt;()</code>：实体必须拥有 T；</li>
+            <li><code>WithNone&lt;T&gt;()</code>：实体必须不含 T；</li>
+            <li><code>WithAny&lt;TA, TB&gt;()</code>：至少拥有其中一个。</li>
+        </ul>
+
+        <p>需要拿到实体本身（比如记录下来交给 ECB）时，把 <code>Entity</code> 放进查询参数：</p>
+
+<pre><code class="language-csharp">foreach (var (entity, health) in
+    SystemAPI.Query&lt;Entity, RefRO&lt;Health&gt;&gt;())
+{
+    // entity 即当前实体
+}
+</code></pre>
+
+        <h3>变化过滤：只处理发生改变的数据</h3>
+
+<pre><code class="language-csharp">SystemAPI.Query&lt;RefRO&lt;InputState&gt;&gt;()
+    .WithChangeFilter&lt;InputState&gt;();
+</code></pre>
+
+        <p><code>WithChangeFilter</code> 让循环只处理该组件自上一帧以来被写入过的实体，适合输入、配置变化等场景，避免对未变数据重复计算。</p>
+
+        <h2>4.4 时间从哪来</h2>
+
+        <p>忘掉 <code>Time.deltaTime</code>，ECS 里通过 <code>SystemAPI.Time</code> 获取：</p>
+        <ul>
+            <li><code>SystemAPI.Time.DeltaTime</code>：当前帧的时间步长（float）；</li>
+            <li><code>SystemAPI.Time.ElapsedTime</code>：累计经过时间（double）；</li>
+        </ul>
+
+        <p>在 Burst 编译的系统里直接使用这些值即可，它们由引擎在调度时注入。</p>
+
+        <h2>4.5 ISystem 与 SystemBase 怎么选</h2>
+
+        <p>你会在旧资料里看到继承 <code>SystemBase</code> 的 class 写法。两者对比如下：</p>
+
+        <table>
+            <thead>
+                <tr><th></th><th>ISystem（推荐）</th><th>SystemBase（旧/托管）</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>形式</td><td>unmanaged struct</td><td>managed class</td></tr>
+                <tr><td>Burst 编译 OnUpdate</td><td>支持</td><td>不支持直接 Burst（需把逻辑放进 Job）</td></tr>
+                <tr><td>GC 开销</td><td>无</td><td>有托管开销</td></tr>
+                <tr><td>适用</td><td>新代码默认选择</td><td>必须访问托管对象、或维护旧系统时</td></tr>
+            </tbody>
+        </table>
+
+        <p>新写的系统一律用 <code>ISystem</code>。本教程后续全部基于它。</p>
+
+        <h2>4.6 完整重构：从 MonoBehaviour 到 ECS</h2>
+
+        <p>拿一个真实的移动逻辑做重构。原始 OOP 写法：</p>
+
+<pre><code class="language-csharp">public class EnemyMover : MonoBehaviour
+{
+    public float Speed = 3f;
+    public Transform Target;
+
+    void Update()
+    {
+        Vector3 dir = (Target.position - transform.position).normalized;
+        transform.position += dir * Speed * Time.deltaTime;
+    }
+}
+</code></pre>
+
+        <p>拆成 ECS 需要四个部分。运行时组件：</p>
+
+<pre><code class="language-csharp">using Unity.Entities;
+using Unity.Mathematics;
+
+public struct MovementSpeed : IComponentData
+{
+    public float Value;
+}
+
+// 目标用实体引用表达，而非 Transform
+public struct MoveTarget : IComponentData
+{
+    public Entity Entity;
+}
+</code></pre>
+
+        <p>Authoring 与 Baker（目标物体在烘焙时转成实体引用）：</p>
+
+<pre><code class="language-csharp">using Unity.Entities;
+using UnityEngine;
+
+public class EnemyMoverAuthoring : MonoBehaviour
+{
+    public float Speed = 3f;
+    public GameObject Target;
+}
+
+class EnemyMoverBaker : Baker&lt;EnemyMoverAuthoring&gt;
+{
+    public override void Bake(EnemyMoverAuthoring authoring)
+    {
+        var entity = GetEntity(authoring, TransformUsageFlags.Dynamic);
+        AddComponent(entity, new MovementSpeed { Value = authoring.Speed });
+        AddComponent(entity, new MoveTarget
+        {
+            Entity = GetEntity(authoring.Target, TransformUsageFlags.Dynamic)
+        });
+    }
+}
+</code></pre>
+
+        <p>移动系统。目标的位置通过 <code>SystemAPI.GetComponent&lt;LocalTransform&gt;</code> 查询：</p>
+
+<pre><code class="language-csharp">using Unity.Burst;
+using Unity.Entities;
+using Unity.Mathematics;
+using Unity.Transforms;
+
+public partial struct EnemyMoveSystem : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        float dt = SystemAPI.Time.DeltaTime;
+
+        foreach (var (transform, speed, target) in
+            SystemAPI.Query&lt;RefRW&lt;LocalTransform&gt;,
+                          RefRO&lt;MovementSpeed&gt;,
+                          RefRO&lt;MoveTarget&gt;&gt;())
+        {
+            var targetTransform =
+                SystemAPI.GetComponent&lt;LocalTransform&gt;(target.ValueRO.Entity);
+
+            float3 direction = math.normalize(
+                targetTransform.Position - transform.ValueRO.Position);
+
+            transform.ValueRW.Position +=
+                direction * speed.ValueRO.Value * dt;
+        }
+    }
+}
+</code></pre>
+
+        <div class="callout callout-info">
+            <strong>注意这里的思维变化</strong>：OOP 里 <code>Target</code> 是一个对象引用，直接读它的 <code>position</code>；ECS 里目标是另一个实体，必须通过查询显式取出它的 <code>LocalTransform</code>。数据不会“自己找上门”，每次跨实体访问都要显式声明。这种写法在第六章会用 <code>ComponentLookup</code> 优化，避免在循环内重复查询。
+        </div>
+
+        <h2>4.7 让系统在没有数据时停止更新</h2>
+
+        <p>默认系统每帧都会执行 OnUpdate，即使查询结果为空。可以在 <code>OnCreate</code> 里配置更新条件：</p>
+
+<pre><code class="language-csharp">[BurstCompile]
+public void OnCreate(ref SystemState state)
+{
+    // 仅当至少一个实体拥有 RotationSpeed 时才更新
+    state.RequireForUpdate&lt;RotationSpeed&gt;();
+}
+</code></pre>
+
+        <p>没有匹配实体时系统自动跳过，避免空转，这在事件型、阶段性系统里很有用。</p>
+
+        <h2>4.8 常见报错与排查</h2>
+
+        <details>
+            <summary>编译错误：类型未声明为 partial</summary>
+            <div class="details-content"><p>给 System struct 加上 <code>partial</code> 修饰符。源生成器需要分部类才能合并生成代码。</p></div>
+        </details>
+
+        <details>
+            <summary>查询循环里一个实体都没有</summary>
+            <div class="details-content">
+                <p>依次检查：① 实体是否真的同时拥有查询里的全部组件（在 Entity Inspector 核对）；② <code>WithNone</code> 是否误排除了目标；③ 组件是否在正确的 World；④ 结构变更是否还没回放。</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>安全系统报错：访问冲突 / 读写冲突</summary>
+            <div class="details-content"><p>检查 RefRO/RefRW 是否与实际读写一致；确认没有在主线程遍历的同时调度了会修改同一组件的 Job。第五章讲 Job 依赖后会更清楚。</p></div>
+        </details>
+
+        <div class="exercise">
+            <h3>思考与练习</h3>
+            <ol>
+                <li>在 4.6 的 EnemyMoveSystem 基础上，增加一个 <code>StunnedTag</code>，让带标签的实体跳过移动（用 WithNone 实现）。</li>
+                <li>把旋转系统改成同时沿 Y 轴上下浮动（提示：用 ElapsedTime 和 math.sin 修改 Position）。</li>
+                <li>给一个系统加 <code>RequireForUpdate</code>，在场景中没有匹配实体时用 Profiler 确认它不再执行。</li>
+                <li>解释为什么 RefRO 应作为默认选择，它对并行调度有什么帮助。</li>
+            </ol>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>ISystem 是 partial、非托管 struct，可 Burst 编译 OnUpdate；生命周期方法按需重写。</li>
+                <li>SystemAPI.Query 是主线程实体遍历入口，RefRO/RefRW 显式表达读写意图，默认用 RefRO。</li>
+                <li>WithAll/WithNone/WithAny 做过滤，WithChangeFilter 只处理变化数据，Entity 可作为查询参数取出。</li>
+                <li>时间通过 SystemAPI.Time 获取；RequireForUpdate 让系统在无数据时休眠。</li>
+                <li>跨实体访问必须显式查询组件，这是与 OOP 引用式访问的重要区别。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav">
+            <a href="03-作者工作流与Baking.html">← 上一章：作者工作流与 Baking</a>
+            <a href="05-JobSystem与Burst.html">下一章：Job System 与 Burst →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 12 章 敌人 AI 与战斗管线 - 空洞骑士源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="11-PlayMaker状态机体系.html">← 上一章：PlayMaker 状态机体系</a>
+    <a href="13-对象池与掉落系统.html">下一章：对象池与掉落系统 →</a>
+</nav>
+<main>
+    <h1>第 12 章　敌人 AI 与战斗管线</h1>
+    <p>本章拆解敌人的组织方式：一个敌人由哪些组件构成，骨钉命中后 HealthManager 如何在格挡、扣血、死亡之间分流，以及 Walker、Recoil 这些 C# 行为组件如何与 FSM 协作。</p>
+
+    <h2>12.1 敌人的组件构成</h2>
+    <p>和主角一样，敌人也是"C# 管理器 + 行为组件 + PlayMaker FSM"的组合，但核心是 HealthManager：</p>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+flowchart TB
+    E["敌人 GameObject"] --> HM["HealthManager<br/>生命值/受击/死亡的总入口"]
+    E --> BEHAVIOR["行为组件<br/>Walker（巡逻）/ Recoil（受击）<br/>各种移动/攻击脚本"]
+    E --> FSM["PlayMaker FSM<br/>具体 AI 状态编排（chaser 等）"]
+    E --> COLL["Collider2D / Rigidbody2D<br/>物理与触发"]
+    HM -->|"事件字符串"| FSM
+</div>
+    </div>
+    <p>HealthManager 不直接决定敌人怎么移动、怎么攻击，它只管"被打时如何响应"，并通过事件通知 FSM；具体 AI 行为由 FSM 和行为组件承担。这是职责分离。</p>
+
+    <h2>12.2 HitInstance：一次攻击的数据包</h2>
+    <p>命中信息不是零散参数，而是一个 [Serializable] 结构体：</p>
+<pre><code class="language-csharp">[Serializable]
+public struct HitInstance
+{
+    public GameObject Source;
+    public AttackTypes AttackType;
+    public int DamageDealt;
+    public float Direction;
+    public bool CircleDirection;
+    public float Multiplier;
+    public float MagnitudeMultiplier;
+    public bool IgnoreInvulnerable;
+    // ...
+
+    public float GetActualDirection(Transform target)
+    {
+        if (CircleDirection)
+        {
+            Vector2 offset = (Vector2)target.position - (Vector2)Source.transform.position;
+            return Mathf.Atan2(offset.y, offset.x) * 57.29578f;  // 环形方向按相对位置算
+        }
+        return Direction;
+    }
+}</code></pre>
+    <div class="callout callout-info">
+        <p><strong>固定方向与环形方向</strong>：普通攻击 Direction 是固定角度；CircleDirection 为真时，方向根据攻击来源和目标的相对位置动态计算，法术等范围攻击用它让击退方向总是"从命中点向外"。57.29578 是弧度转角度的常数。</p>
+    </div>
+
+    <h2>12.3 Hit 入口：三道前置门控</h2>
+<pre><code class="language-csharp">public void Hit(HitInstance hitInstance)
+{
+    if (!isDead && !(evasionByHitRemaining > 0f) && hitInstance.DamageDealt > 0)
+    {
+        FSMUtility.SendEventToGameObject(hitInstance.Source, "DEALT DAMAGE");
+        int cardinal = DirectionUtils.GetCardinalDirection(
+            hitInstance.GetActualDirection(transform));
+        if (IsBlockingByDirection(cardinal, hitInstance.AttackType))
+            Invincible(hitInstance);     // 格挡
+        else
+            TakeDamage(hitInstance);     // 受击
+    }
+}</code></pre>
+    <ul>
+        <li><code>isDead</code>——已死亡的敌人不再响应</li>
+        <li><code>evasionByHitRemaining</code>——受击后的短暂闪避窗口，防止同一帧多段攻击重复命中</li>
+        <li>伤害必须大于 0</li>
+    </ul>
+    <p>通过门控后，按攻击方向是否被格挡分流到 Invincible 或 TakeDamage。</p>
+
+    <h2>12.4 格挡分支：Invincible</h2>
+    <p>当敌人持盾或该方向有护甲（IsBlockingByDirection），攻击不扣血，而是触发完整的格挡反馈：</p>
+<pre><code class="language-csharp">FSMUtility.SendEventToGameObject(gameObject, "BLOCKED HIT");
+FSMUtility.SendEventToGameObject(hitInstance.Source, "HIT LANDED");
+if (hitInstance.AttackType == AttackTypes.Nail)
+{
+    if (cardinal == 0) HeroController.instance.RecoilLeft();   // 玩家被反震
+    if (cardinal == 2) HeroController.instance.RecoilRight();
+}
+GameManager.instance.FreezeMoment(1);                          // 顿帧
+GameCameras.instance.cameraShakeFSM.SendEvent("EnemyKillShake");
+GameObject blockFx = blockHitPrefab.Spawn();                  // 格挡火花，位置/朝向随方向</code></pre>
+    <div class="definition">
+        <h4>格挡反馈为什么要做全套？</h4>
+        <p>玩家需要立刻知道"这一击被挡住了"。于是同时给：玩家骨钉反震、全局顿帧、相机震动、按方向定位的格挡火花和音效。这些信号叠加让"砍在盾上"和"砍中肉体"有明确可感的区别。结尾设 evasionByHitRemaining=0.15 进入短暂冷却。</p>
+    </div>
+
+    <h2>12.5 TakeDamage：扣血与分流</h2>
+    <h3>事件通知与击退</h3>
+<pre><code class="language-csharp">FSMUtility.SendEventToGameObject(gameObject, "HIT");
+FSMUtility.SendEventToGameObject(hitInstance.Source, "HIT LANDED");
+FSMUtility.SendEventToGameObject(gameObject, "TOOK DAMAGE");
+if (recoil != null)
+    recoil.RecoilByDirection(cardinal, hitInstance.MagnitudeMultiplier);</code></pre>
+
+    <h3>按攻击类型播放命中特效</h3>
+    <p>骨钉、法术、暗影冲刺各有不同的命中特效，骨钉还会让主角获得灵魂：</p>
+<pre><code class="language-csharp">case AttackTypes.Nail:
+    if (enemyType != 3 && enemyType != 6)
+        HeroController.instance.SoulGain();       // 砍中回魂
+    strikeNailPrefab.Spawn(hitPos, Quaternion.identity);
+    // 火花朝向随命中方向随机旋转
+    break;
+case AttackTypes.Spell:
+    fireballHitPrefab.Spawn(...);
+    break;</code></pre>
+
+    <h3>扣血与死活分流</h3>
+<pre><code class="language-csharp">int finalDamage = Mathf.RoundToInt(hitInstance.DamageDealt * hitInstance.Multiplier);
+if (damageOverride) finalDamage = 1;
+hp = Mathf.Max(hp - finalDamage, -50);
+if (hp > 0)
+    NonFatalHit(hitInstance.IgnoreInvulnerable);   // 没死：硬直/闪避动画
+else
+    Die(hitInstance.GetActualDirection(transform),
+        hitInstance.AttackType, hitInstance.IgnoreInvulnerable);  // 死亡</code></pre>
+    <p>注意 hp 下限是 -50 而非 0，允许伤害溢出（某些机制需要知道超额伤害）。NonFatalHit 会设 0.2 秒闪避窗口或播放受击动画。</p>
+
+    <h2>12.6 Die：死亡全流程</h2>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+flowchart TB
+    A["isDead 去重<br/>发 ZERO HP 事件"] --> B["Boss 场景：Battle Enemies 计数 -1"]
+    B --> C{"hasSpecialDeath?"}
+    C -->|"是"| D["特殊死亡，不销毁，交给 FSM"]
+    C -->|"否"| E["isDead=true，关闭自身伤害"]
+    E --> F["FlingUtils 抛洒吉欧<br/>小/中/大三档，护符 24 加 20%"]
+    F --> G["enemyDeathEffects 死亡特效/音效"]
+    G --> H["OnDeath 事件"]
+</div>
+    </div>
+
+    <h3>战斗场景计数</h3>
+<pre><code class="language-csharp">PlayMakerFSM battle = FSMUtility.LocateFSM(battleScene, "Battle Control");
+FsmInt enemies = battle.FsmVariables.GetFsmInt("Battle Enemies");
+enemies.Value--;
+notifiedBattleScene = true;</code></pre>
+    <p>这是 Boss 房间判断"小怪是否清完"的机制：每个敌人死亡时给战斗控制 FSM 的计数减一，归零触发开门等后续。</p>
+
+    <h3>吉欧抛洒与贪婪护符</h3>
+<pre><code class="language-csharp">if (playerData.equippedCharm_24 && !playerData.brokenCharm_24)
+{
+    small += Mathf.CeilToInt(small * 0.2f);   // 贪婪护符：掉落增加 20%
+    // ...
+}
+GameObject[] drops = FlingUtils.SpawnAndFling(new FlingUtils.Config
+{
+    Prefab = smallGeoPrefab,
+    AmountMin = small, AmountMax = small,
+    AngleMin = 80, AngleMax = 100,            // 向上扇形抛洒
+    SpeedMin = 15, SpeedMax = 30
+}, transform, effectOrigin);</code></pre>
+    <p>不同攻击类型走不同结局：Splatter 直接生成碎尸并销毁；普通攻击抛洒吉欧并播放死亡特效；特殊死亡（hasSpecialDeath）不销毁物体，完全交给 FSM 处理（如某些 Boss 阶段）。</p>
+
+    <h2>12.7 C# 行为组件：Walker 与 Recoil</h2>
+    <h3>Walker：数据驱动的巡逻</h3>
+    <p>Walker 是纯 C# 写的巡逻组件，自带状态枚举（NotReady/WaitingForConditions/Stopped/Walking/Turning），含视线检测、警戒范围、伏击标记：</p>
+<pre><code class="language-csharp">private enum States { NotReady, WaitingForConditions, Stopped, Walking, Turning }
+[SerializeField] private LineOfSightDetector lineOfSightDetector;
+[SerializeField] private AlertRange alertRange;
+[SerializeField] private bool ambush;
+private const float CameraDistanceForActivation = 60f;</code></pre>
+    <p>它用相机距离（60）做激活门控，离屏敌人不跑逻辑以省性能；停顿、转向、缩放朝向都由序列化字段配置，同一个组件能支撑大量步行敌人。</p>
+
+    <h3>Recoil：受击冻结与击退</h3>
+<pre><code class="language-csharp">private enum States { Ready, Frozen, Recoiling }
+[SerializeField] public bool freezeInPlace;
+[SerializeField] private float recoilSpeedBase;
+[SerializeField] private float recoilDuration;</code></pre>
+    <p>Recoil 提供两种受击响应：冻结在原地（Frozen）或按方向击退（Recoiling），RecoilByDirection 被 HealthManager 调用。带 Sweep 检测防止击退时穿墙。</p>
+
+    <h2>12.8 EnemySpawner：概率生成</h2>
+<pre><code class="language-csharp">public float spawnChance = 0.75f;
+private void Start()
+{
+    if (Random.Range(0f, 1f) <= spawnChance)
+    {
+        iTween.MoveBy(gameObject, hashtable);   // 从地下移动 + 颜色渐变
+    }
+    else
+    {
+        gameObject.SetActive(false);            // 概率不生成
+    }
+}
+// 动画结束后激活敌人，并给其 chaser FSM 发 Start Alert</code></pre>
+    <p>生成器用 iTween 做"钻出地面"的位移和颜色渐变，按概率决定是否真的生成，激活时设置敌人 FSM 的警报变量。这让同一处敌人每次开局不一定出现，增加变化。</p>
+
+    <h2>12.9 打击感的三个来源</h2>
+    <p>把战斗"手感"拆开，它由三个可在代码中定位的机制共同构成：</p>
+    <ul>
+        <li><strong>顿帧 FreezeMoment</strong>：命中瞬间时间短暂冻结，强化命中重量感</li>
+        <li><strong>相机震动</strong>：cameraShakeFSM 按事件发不同强度震动</li>
+        <li><strong>击退/硬直</strong>：敌人 Recoil + 玩家反震，双向受力反馈</li>
+    </ul>
+
+    <div class="exercise">
+        <h3>思考与练习</h3>
+        <ol>
+            <li>列出敌人的组件构成，说明 HealthManager 为什么不直接负责 AI 移动。</li>
+            <li>追踪一次骨钉命中持盾敌人的完整分支，解释玩家如何通过反馈知道攻击被格挡。</li>
+            <li>说明 HitInstance 的 CircleDirection 与固定 Direction 的区别，各适用什么攻击。</li>
+            <li>追踪敌人死亡时 Boss 房间计数和吉欧掉落的流程，贪婪护符如何影响掉落？</li>
+            <li>分析 Walker 用相机距离做激活门控的性能意义，离屏敌人若照常跑逻辑会有什么成本？</li>
+        </ol>
+    </div>
+</main>
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="11-PlayMaker状态机体系.html">← 上一章：PlayMaker 状态机体系</a>
+        <a href="13-对象池与掉落系统.html">第 13 章：对象池与掉落系统 →</a>
+    </nav>
+</footer>
+<script src="assets/script.js"></script>
+</body>
+</html>

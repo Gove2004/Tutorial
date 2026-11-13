@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 NSM 神经状态机 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="05-MANN模式自适应神经网络.html">← 上一章：MANN</a>
+    <a href="07-局部运动相位.html">下一章：局部运动相位 →</a>
+</nav>
+
+<main>
+    <h1>06　NSM：神经状态机</h1>
+
+    <div class="paper-meta">
+        <dl>
+            <dt>论文</dt><dd>Neural State Machine for Character-Scene Interactions</dd>
+            <dt>作者</dt><dd>Sebastian Starke, He Zhang, Taku Komura, Jun Saito（共同一作）</dd>
+            <dt>发表</dt><dd>ACM Transactions on Graphics 38(6), Article 178, SIGGRAPH Asia 2019</dd>
+            <dt>仓库位置</dt><dd>AI4Animation/SIGGRAPH_Asia_2019</dd>
+        </dl>
+    </div>
+
+    <h2>6.1 场景交互为什么难</h2>
+    <p>看似简单的"坐到椅子上"需要：绕过障碍规划路径、在目标前精确调整位置与朝向、把周期性的行走与非周期性的坐下动作
+    编排在一起。此前的运动学方法只覆盖纯运动，且基于高度图的环境表示无法描述带凹陷的物体。NSM 的目标是用
+    <strong>单一模型</strong>生成移动、坐下、开门、搬运、避障等全部行为，并直接从几何学习以适应不同形状的家具。</p>
+
+    <h2>6.2 总体架构</h2>
+    <p>NSM 仍由运动预测网络与门控网络组成，但预测网络被进一步拆成<strong>编码器模块 + 预测模块</strong>：
+    四类异构输入先各自编码，再拼接送入由专家权重混合的预测网络。</p>
+
+    <pre class="mermaid">
+flowchart TD
+    F["帧输入 F<br/>姿态+轨迹+动作"] --> EF["帧编码器"]
+    G["目标输入 G<br/>目标位置/朝向/动作"] --> EG["目标编码器"]
+    I["交互几何 I（512）"] --> EI["交互几何编码器"]
+    E["环境几何 E（1408）"] --> EE["环境几何编码器"]
+    EF & EG & EI & EE --> H["拼接隐向量 H"]
+    Gate["门控网络<br/>相位 ⊗ 动作特征"] --> Exp["专家权重混合"]
+    H --> Pred["预测模块（3 层 512）"]
+    Exp --> Pred
+    Pred --> Y["当前姿态+双坐标轨迹+目标更新+接触+相位"]
+    style Gate fill:#fff2dd,stroke:#f08c1a
+    style Pred fill:#eaf7ed,stroke:#38a152
+    </pre>
+    <p class="mermaid-caption">图 6-1　NSM 架构：四编码器 + 专家混合预测模块</p>
+
+    <h2>6.3 四类输入</h2>
+    <table>
+        <thead><tr><th>输入</th><th>构成</th><th>关键参数</th></tr></thead>
+        <tbody>
+            <tr>
+                <td>帧输入 F</td>
+                <td>上一帧关节位置/旋转/速度（23 关节），t=13 个轨迹点的位置方向，7 类连续动作标签</td>
+                <td>2 秒窗口（−1s 到 +1s）</td>
+            </tr>
+            <tr>
+                <td>目标输入 G</td>
+                <td>目标位置（3D）、方向（2D）及目标处动作 one-hot</td>
+                <td>低级控制下目标点位于未来 1 秒；高级控制下取交互物体原点</td>
+            </tr>
+            <tr>
+                <td>交互几何 I</td>
+                <td>包裹交互对象的体积表示</td>
+                <td>512 维</td>
+            </tr>
+            <tr>
+                <td>环境几何 E</td>
+                <td>包裹角色自身的体积表示</td>
+                <td>1408 维</td>
+            </tr>
+        </tbody>
+    </table>
+    <p>7 类动作分别为 idle、walk、run、sit、open、carry、climb；目标动作中排除 climb，因为其发生时机难以外部指定。</p>
+
+    <h2>6.4 四个独立编码器</h2>
+    <p>每类输入由一个独立的三层全连接网络编码，隐层/输出维度按信息类型分别设置：</p>
+    <table>
+        <thead><tr><th>编码器</th><th>隐层/输出维度</th></tr></thead>
+        <tbody>
+            <tr><td>帧编码器 F</td><td>512</td></tr>
+            <tr><td>目标编码器 G</td><td>128</td></tr>
+            <tr><td>交互几何编码器 I</td><td>256</td></tr>
+            <tr><td>环境几何编码器 E</td><td>512</td></tr>
+        </tbody>
+    </table>
+
+    <h2>6.5 门控网络：Kronecker 积输入</h2>
+    <p>门控输入把<strong>二维相位向量 P = {sin p, cos p} 与动作/目标特征做 Kronecker 积</strong>：</p>
+    <div class="formula">
+        X̂ = P ⊗ X′，其中 X′ = { t<sup>a</sup>, g<sup>a</sup>, δ·g<sup>a</sup>, θ·g<sup>a</sup> }
+    </div>
+    <p>δ 是到目标位置的距离标量，θ 是与目标朝向的夹角标量，分别乘到目标动作向量上，用于接近目标时的步伐规划。
+    门控网络为三层、128 隐藏单元、softmax 输出。相位必须用二维向量而非一维标量，因为一维 0→1 相位在首尾处不连续、
+    不可微，而 (sin, cos) 构成连续可微空间。</p>
+    <div class="callout callout-info">
+        <span class="callout-title">设计动机</span>
+        <p>这一结构让网络为不同动作学习<strong>各自专属的循环/非循环相位函数</strong>，而不是像 PFNN 那样使用单一固定循环函数。
+        Kronecker 积让相位在网络更早处就产生影响，从而单模型能编码差异巨大的动作且保持锐利。</p>
+    </div>
+
+    <h2>6.6 输出构成</h2>
+    <ul>
+        <li>当前帧自我中心坐标系下的关节位置/旋转/速度</li>
+        <li>未来 1 秒自我中心坐标系下的预测关节位置（由未来轨迹定义）</li>
+        <li>未来 1 秒在<strong>自我中心与目标中心两套坐标系</strong>下的轨迹位置/方向/动作（t′=6 点）</li>
+        <li>更新后的目标参数、5 个关键关节（双脚/双手/髋）接触标签、相位更新量</li>
+    </ul>
+
+    <h2>6.7 体积表示与几何增强</h2>
+    <p>NSM 用<strong>体积表示（volumetric representation）</strong>取代高度图：在角色与交互对象周围采样体素网格，
+    因此能处理穿墙洞、侧向滑入椅子等带凹陷的情形。为在不增加数据量的前提下提升几何泛化能力，训练时采用
+    <strong>逐帧随机切换三维几何</strong>的增强——保持原始运动与交互上下文不变，只替换几何，网络因此学会适应多样的
+    家具形状。</p>
+
+    <h2>6.8 双向控制：自我中心 + 目标中心</h2>
+    <p>为抑制自回归推理接近目标时的误差累积，NSM 同时从两个视角生成未来轨迹：自我中心推理（从角色当前状态出发）与
+    目标中心推理（从目标位置反向推导），两者结果混合后再喂回网络，从而把角色高精度地引导到目标点。</p>
+
+    <pre class="mermaid">
+flowchart LR
+    Ego["自我中心推理<br/>角色 → 目标"] --> Blend["轨迹混合"]
+    Goal["目标中心推理<br/>目标 → 角色"] --> Blend
+    Blend --> Next["下一帧输入<br/>误差相互校正"]
+    style Blend fill:#e9f4ff,stroke:#007acc
+    </pre>
+    <p class="mermaid-caption">图 6-2　双向推理混合</p>
+
+    <h2>6.9 两级控制模式</h2>
+    <table>
+        <thead><tr><th>模式</th><th>目标来源</th><th>用途</th></tr></thead>
+        <tbody>
+            <tr><td>低级运动模式</td><td>目标输出与用户控制轨迹在 1 秒窗口内混合</td><td>键盘/手柄实时控制行走奔跑</td></tr>
+            <tr><td>高级目标模式</td><td>用户鼠标选定物体、键盘指定动作</td><td>角色自动接近并完成坐下/开门/搬运</td></tr>
+        </tbody>
+    </table>
+    <p>两种模式可随时无缝切换：给定一个目标动作（如"坐椅子"），网络会自动生成 idle→walk→sit 的中间状态序列，
+    行为上类似一个内部自动演化的状态机——这正是"神经状态机"名称的由来。</p>
+
+    <h2>6.10 训练规模</h2>
+    <p>据 NVIDIA 技术博客对该项目的记录，完整训练约 70 个 epoch、单 GPU 约 20 小时，训练后模型约 250 MB。</p>
+
+    <h2>6.11 局限</h2>
+    <ul>
+        <li>仍依赖外部标注的相位，且体积表示维度高、采样与编码成本大</li>
+        <li>单模型容量需求随动作种类快速增长（模型达数百 MB）</li>
+        <li>快速异步的多接触动作（如篮球运球）仍难以由单一相位刻画，引出下一章的局部相位</li>
+    </ul>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>表示选择</h4>
+                    <p>高度图为什么无法支持"侧向滑入椅子"这类动作？体积表示在带来表达力的同时增加了哪些成本？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>门控设计</h4>
+                    <p>为什么用 Kronecker 积而不是直接把相位和动作特征拼接？二维相位向量解决了一维标量的什么问题？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>双向推理</h4>
+                    <p>结合自回归误差累积的机制，解释目标中心推理如何对自我中心推理起到校正作用。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>NSM 用四编码器处理异构输入、专家混合预测模块输出，单模型覆盖运动与场景交互</li>
+        <li>门控输入为二维相位与动作特征的 Kronecker 积，支持按动作学习专属相位函数</li>
+        <li>体积表示取代高度图以处理凹陷几何，逐帧几何切换增强泛化</li>
+        <li>自我中心+目标中心双向推理抑制目标接近误差，两级控制模式可无缝切换</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://www.research.ed.ac.uk/files/112627363/papers_168s4_file2.pdf">NSM 论文原文</a></li>
+            <li><a href="https://developer.nvidia.com/blog/virtual-character-animation-system-uses-ai-to-generate-more-human-like-movements/">NVIDIA 技术博客：项目工程解读</a></li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="05-MANN模式自适应神经网络.html">← 上一章：MANN</a>
+        <a href="07-局部运动相位.html">下一章：局部运动相位 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

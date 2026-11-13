@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>阴影、动画与引擎管线定制 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="10-场景加载纹理与内存优化.html">← 上一章</a>
+        <a href="12-业务与引擎模块特征地图.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>阴影、动画与引擎管线定制</h1>
+        <p class="chapter-meta">模块二 · 优化策略实战 ｜ 对应原文策略 13、15、12</p>
+
+        <p>本章是模块二的最后三个策略，也是最贴近引擎底层的部分。它们共同指向一个高级认知：<strong>业务层的开关有时并不会真正阻止底层计算，想彻底省钱必须深入到管线与线程层面</strong>。</p>
+
+        <h2>11.1 阴影优化（策略 13）</h2>
+
+        <p>实时阴影基于 Shadow Map：从光源视角把场景深度渲染到一张纹理，再在主渲染中比较深度判断是否处于阴影。它的成本是<strong>额外的一次（或多次）整场景渲染</strong>，在没有缓存、角色又多的场景里开销很大。</p>
+
+        <p>原文对部分角色使用面片投影替代：</p>
+        <ol>
+            <li>在角色底部放置一个贴合地面的面片。</li>
+            <li>把角色模型的投影（或一张模糊的圆形阴影纹理）映射到面片上。</li>
+            <li>用面片（常称 Blob Shadow）模拟角色阴影，跟随角色移动。</li>
+        </ol>
+
+        <table>
+            <thead>
+                <tr><th>方案</th><th>成本</th><th>表现力</th><th>适用</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>实时 Shadow Map</td><td>高（额外深度 Pass）</td><td>真实、可投影到任意表面</td><td>高端机主角、关键场景</td></tr>
+                <tr><td>面片 Blob Shadow</td><td>低（一个贴图四边形）</td><td>仅地面圆形暗斑，无真实形状</td><td>低端机、大量小怪、远景角色</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-tip">
+            <strong>混合使用</strong>：常见做法是主角保留实时阴影，普通怪物用 Blob Shadow，远处角色连面片都省掉。这仍然是 LOD 思想在阴影上的应用。
+        </div>
+
+        <h2>11.2 动画多线程与分帧（策略 15）</h2>
+
+        <p>动画计算分两块：动画逻辑（采样、插值、状态机、IK）与蒙皮计算（骨骼矩阵、权重混合）。在大量角色同屏时，这是 CPU 大头。优化结合四个手段：</p>
+
+        <ul>
+            <li><strong>多线程 / Job System</strong>：把蒙皮等可并行计算拆到 Worker 线程，多核同时处理多个角色。</li>
+            <li><strong>距离分级</strong>：按摄像机距离决定更新频率。</li>
+            <li><strong>分帧更新</strong>：不必每个角色每帧都算，错开更新帧。</li>
+            <li><strong>镜头外暂停</strong>：不可见角色停止部分或全部计算。</li>
+        </ul>
+
+        <table>
+            <thead>
+                <tr><th>距离</th><th>更新策略</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>镜头附近</td><td>每帧高频更新，保证手感</td></tr>
+                <tr><td>中距离</td><td>降低频率（如每 2 帧）</td></tr>
+                <tr><td>远距离</td><td>进一步降频（如每 4 帧）</td></tr>
+                <tr><td>镜头外</td><td>按需求暂停，仅保留必要逻辑</td></tr>
+            </tbody>
+        </table>
+
+        <p>下面的调度器按距离把角色分配到不同更新间隔，并把每帧的实际更新量摊平，避免同一帧所有角色挤在一起：</p>
+
+<pre><code class="language-csharp">using System.Collections.Generic;
+using UnityEngine;
+
+public class AnimatorScheduler : MonoBehaviour
+{
+    private class Entry
+    {
+        public Animator animator;
+        public int interval;
+        public int phase;
+    }
+
+    [SerializeField] private Transform cameraTransform;
+    [SerializeField] private float nearDistance = 15f;
+    [SerializeField] private float midDistance = 35f;
+    [SerializeField] private float farDistance = 60f;
+
+    private readonly List<Entry> entries = new List<Entry>();
+    private int frameCounter;
+
+    public void Register(Animator animator)
+    {
+        entries.Add(new Entry { animator = animator, interval = 1, phase = 0 });
+    }
+
+    void Update()
+    {
+        frameCounter++;
+
+        foreach (Entry entry in entries)
+        {
+            if (entry.animator == null) continue;
+
+            float d = Vector3.Distance(entry.animator.transform.position,
+                                       cameraTransform.position);
+            entry.interval = ResolveInterval(d);
+
+            bool visible = d <= farDistance;
+            entry.animator.cullingMode = visible
+                ? AnimatorCullingMode.AlwaysAnimate
+                : AnimatorCullingMode.CullCompletely;
+
+            bool shouldTick = frameCounter % entry.interval == entry.phase;
+            entry.animator.enabled = visible && shouldTick;
+        }
+    }
+
+    private int ResolveInterval(float distance)
+    {
+        if (distance <= nearDistance) return 1;
+        if (distance <= midDistance) return 2;
+        return 4;
+    }
+}
+</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>注意分帧的视觉副作用</strong>：降频角色若与玩家突然拉近，需要能立即恢复每帧更新，否则会出现动作变慢的错觉。调度器应在距离跨越阈值的当帧重置 phase。
+        </div>
+
+        <h2>11.3 引擎管线定制（策略 12）</h2>
+
+        <p>针对不同设备档位可以定制不同渲染管线，低端机进一步做管线裁剪、渲染功能简化、渲染缓存与非必要特性关闭。这里有一个必须建立的关键认知：</p>
+
+        <div class="callout callout-danger">
+            <strong>业务层关闭某个功能，并不意味着引擎底层完全停止了相关计算。</strong><br>
+            例如脚本里禁用了某个后处理组件，但管线仍可能为它分配纹理、执行可见性判断或保留对应的渲染目标；只在业务层挂开关，底层的内存分配和部分 Pass 仍在运行。因此低端机必须在引擎管线层面直接裁掉对应分支，而不是依赖上层 flag。
+        </div>
+
+        <ul>
+            <li><strong>管线裁剪</strong>：为低端机构建不含多余 Pass 的精简管线，编译期就排除特性，而不是运行时判断。</li>
+            <li><strong>渲染缓存</strong>：复用中间渲染目标，减少每帧纹理分配。</li>
+            <li><strong>全量覆盖、无兼容回退</strong>：分档配置应明确每档确切启用什么，避免“默认开启再逐项关闭”遗漏。</li>
+        </ul>
+
+        <p>在 URP 中，这种定制通常通过分档的 Renderer Asset、Render Feature 的增删，以及为不同硬件构建不同的 Render Pipeline Asset 来实现，而不是依赖单一管线里的运行时开关。</p>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">基础练习</span>动画调度</h3>
+            <p>把同屏多个角色的 Animator 接入调度器，用 Profiler 对比距离分级前后的动画模块 CPU 耗时，并确认镜头外角色不再更新。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>开关失效</h3>
+            <p>请举出一个“业务层关闭但底层仍在耗资源”的具体例子，并说明你会如何验证底层计算是否真的停止（提示：从内存分配与 GPU Pass 两方面观察）。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">进阶挑战</span>Blob Shadow 方案</h3>
+            <p>为一组小怪实现跟随地面的 Blob Shadow，处理地形起伏与朝向，并对比实时阴影下的 GPU 耗时差异。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>面片 Blob Shadow 以极低代价替代实时 Shadow Map，适合低端机与大量小怪，可与实时阴影混合分级。</li>
+            <li>动画用 Job System 多线程 + 距离分级 + 分帧 + 镜头外暂停，把 CPU 优先给玩家附近角色。</li>
+            <li>引擎管线定制要在管线层直接裁剪，业务层开关不等于底层停止计算。</li>
+            <li>分档配置应全量明确、编译期裁剪，并在距离突变时及时恢复更新。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章</strong>：模块二学完了所有“兵器”，模块三把视野拉高，建立业务与引擎八大模块的特征地图。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="10-场景加载纹理与内存优化.html">← 上一章：场景加载、纹理与内存优化</a>
+            <a href="12-业务与引擎模块特征地图.html">下一章：业务与引擎模块特征地图 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

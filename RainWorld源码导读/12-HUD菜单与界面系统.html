@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>12 HUD、菜单与界面系统 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="11-渲染层与Futile框架.html">← 上一章</a>
+        <a href="13-音频系统.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>12 HUD、菜单与界面系统</h1>
+        <p>Rain World 的界面分两大类：游戏内叠加的 HUD，以及作为独立进程运行的 Menu。两者都构建在 Futile 之上，而不是 Unity 的 uGUI。本章分别讲清 HUD 的部件聚合结构与菜单的页面/对象树，以及它们如何复用输入系统。</p>
+
+        <h2>12.1 两类界面的区别</h2>
+<table>
+    <thead><tr><th>维度</th><th>HUD</th><th>Menu</th></tr></thead>
+    <tbody>
+        <tr><td>运行方式</td><td>挂在游戏进程内的叠加层</td><td>独立的 MainLoopProcess</td></tr>
+        <tr><td>基类</td><td>HUD + HudPart</td><td>Menu + Page + MenuObject</td></tr>
+        <tr><td>典型场景</td><td>计量器、地图、提示</td><td>主菜单、设置、角色选择、对话框</td></tr>
+    </tbody>
+</table>
+
+        <h2>12.2 HUD：部件聚合器</h2>
+        <p>HUD 本身不是可绘制对象，而是聚合一组 HudPart 并管理分层容器：</p>
+<pre><code class="language-csharp">public class HUD
+{
+    public IOwnAHUD owner;
+    public List<HudPart> parts;
+    public FContainer[] fContainers;
+    public FoodMeter foodMeter { get; private set; }
+    public Map map { get; private set; }
+    public TextPrompt textPrompt { get; private set; }
+    public RainMeter rainMeter;
+    public KarmaMeter karmaMeter;
+}</code></pre>
+        <p>OwnerType 用 ExtEnum 标记 HUD 当前服务于哪种屏幕（玩家、睡眠屏、死亡屏、快速旅行、竞技场、角色选择等），同一套 HUD 据此显示不同部件。</p>
+
+        <h3>HudPart：统一的部件基类</h3>
+<pre><code class="language-csharp">public abstract class HudPart
+{
+    public HUD hud;
+    public bool slatedForDeletion;
+    public virtual void Update() { }
+    public virtual void Draw(float timeStacker) { }
+    public virtual void ClearSprites() { }
+}</code></pre>
+        <p>注意 Draw 也接收 timeStacker，与渲染管线一致：HUD 同样在逻辑帧与渲染帧之间插值，保证计量器和画面同步平滑。</p>
+
+        <h2>12.3 核心计量器与 DLC 扩展</h2>
+        <p>基础三件套对应核心生存机制：</p>
+        <ul>
+            <li><strong>FoodMeter</strong>：胃里食物与冬眠所需点数。</li>
+            <li><strong>KarmaMeter</strong>：业力等级与门的通过条件。</li>
+            <li><strong>RainMeter</strong>：本周期降雨倒计时。</li>
+        </ul>
+        <p>此外有 Map（地图）、TextPrompt（交互提示）、DialogBox、TutorialText、RoomTransition 等。DLC 与合作模式以组合方式新增计量器，而不改基础类：</p>
+<pre><code class="language-csharp">public BreathMeter breathMeter;
+public ThreatPulser threatPulser;
+public HypothermiaMeter HypoMeter;
+public GourmandMeter gourmandmeter;
+public JollyMeter jollyMeter;
+public CamoMeter camoMeter;</code></pre>
+        <div class="callout callout-info">
+            <p>每个 DLC 角色专属的机制（呼吸、失温、饱腹、伪装、合作指针）都有独立 HudPart，按需挂载。这是“组合优于继承”在界面层的体现。</p>
+        </div>
+
+        <h2>12.4 Menu：作为进程的菜单</h2>
+        <p>Menu 直接继承 MainLoopProcess，与 RainWorldGame 同级，由 ProcessManager 切换：</p>
+<pre><code class="language-csharp">public abstract class Menu : MainLoopProcess
+{
+    public List<Page> pages;
+    public int currentPage;
+    public Vector2 mousePosition;
+    public bool mouseDown;
+    public MenuObject selectedObject;
+    public FContainer container;
+    public MenuScene scene;
+    public Player.InputPackage input;
+}</code></pre>
+        <p>菜单直接复用 Player.InputPackage 表达方向、确认、返回，因此同一套输入抽象既驱动游戏又驱动菜单。MenuScene 是菜单的背景场景（经常是会动的生物/环境），让菜单不只是静态画面。</p>
+
+        <h2>12.5 Page 与 MenuObject 树</h2>
+        <p>Page 继承 PositionedMenuObject，承载一页内的可选项：</p>
+<pre><code class="language-csharp">public class Page : PositionedMenuObject
+{
+    public string name;
+    public int index;
+    public List<SelectableMenuObject> selectables;
+    public MenuObject lastSelectedObject;
+    public MouseCursor mouseCursor;
+}</code></pre>
+        <p>MenuObject 是所有菜单元素的抽象基类，自带树形结构与容器解析：</p>
+<pre><code class="language-csharp">public abstract class MenuObject
+{
+    public Menu menu;
+    public List<MenuObject> subObjects;
+    public MenuObject owner;
+    public MenuObject[] nextSelectable;
+    public virtual FContainer Container {
+        get { return myContainer ?? owner?.Container ?? menu.container; }
+    }
+    public virtual bool Selected => menu.selectedObject == this;
+}</code></pre>
+        <p>nextSelectable 记录上下左右移动时跳到哪个可选项，是手柄/键盘方向导航的依据；容器则沿对象树向上解析，最终落到菜单的 FContainer。</p>
+
+        <h2>12.6 按钮交互：ButtonBehavior</h2>
+        <p>按钮的视觉反馈由 ButtonBehavior 单独管理，与按钮的布局/逻辑解耦：</p>
+<pre><code class="language-csharp">public class ButtonBehavior
+{
+    public float col;
+    public bool bump;
+    public bool clicked;
+    public float sizeBump;
+    public float flash;
+    public bool greyedOut;
+    public void Update()
+    {
+        if (owner.Selected && !greyedOut)
+        {
+            sizeBump = Custom.LerpAndTick(sizeBump, 1f, 0.1f, 0.1f); // 悬停放大
+            flash = 1f;
+        }
+    }
+}</code></pre>
+        <p>选中时放大、点击时闪光、禁用时变灰，都是这里驱动的。把“交互状态”从“元素定义”里分离，让不同外观的按钮复用同一套反馈逻辑。</p>
+
+        <h2>12.7 对话框与多输入支持</h2>
+        <p>Dialog 是一种覆盖在当前菜单之上的特殊交互（确认、通知、异步等待），ProcessManager 持有当前 dialog 并使其优先获得选中。菜单同时支持鼠标（menuesMouseMode）与手柄/键盘导航，选中对象在两种模式下统一由 selectedObject 表达，切换输入设备不改变菜单逻辑。</p>
+
+        <h2>12.8 整体关系</h2>
+<pre class="mermaid">
+flowchart TD
+    PM["ProcessManager"] --> GP["RainWorldGame"]
+    PM --> MN["Menu（进程）"]
+    GP --> HUD["HUD"]
+    HUD --> HP["HudPart：食物/业力/雨/地图/DLC"]
+    MN --> PG["Page"]
+    PG --> MO["MenuObject 树"]
+    MO --> BB["ButtonBehavior"]
+    HP -.FContainer.-> F["Futile 场景图"]
+    MO -.FContainer.-> F
+</pre>
+
+        <h2>12.9 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：在 HUD 里写死所有部件</summary>
+            <div class="details-content"><p>新机制应新增 HudPart 并按需挂载，而不是把 DLC 逻辑塞进基础 HUD，否则基础类会被各种角色特性污染。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：菜单只考虑鼠标而忽略 nextSelectable</summary>
+            <div class="details-content"><p>不设置 nextSelectable，手柄/键盘方向导航会失效或跳错。可选项必须维护导航连接。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：HUD 绘制不做插值</summary>
+            <div class="details-content"><p>Draw 必须用 timeStacker 插值，否则计量器在渲染帧会抖动或与游戏画面不同步。</p></div>
+        </details>
+
+        <h2>12.10 练习与思考</h2>
+        <ol>
+            <li>为一个新的 DLC 角色设计专属 HUD 机制，说明应创建什么 HudPart、挂在哪个容器、如何读取角色状态。</li>
+            <li>结合 MenuObject 的容器解析，解释一个深层嵌套按钮最终是如何被画到菜单 FContainer 上的。</li>
+            <li>思考：为什么菜单选择用独立的 ButtonBehavior 管理状态，而不是让按钮自己维护颜色和动画？这对换肤和复用有什么好处？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>界面分游戏内 HUD 与独立进程 Menu，都构建在 Futile 之上。</li>
+            <li>HUD 聚合 HudPart，基础计量器与 DLC 专属部件以组合方式扩展，Draw 同样按 timeStacker 插值。</li>
+            <li>Menu 由 Page 与 MenuObject 树组成，nextSelectable 支持方向导航，ButtonBehavior 管理交互反馈，对话框优先获得选中。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="11-渲染层与Futile框架.html">← 上一章：渲染层与 Futile 框架</a>
+            <a href="13-音频系统.html">下一章：音频系统 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

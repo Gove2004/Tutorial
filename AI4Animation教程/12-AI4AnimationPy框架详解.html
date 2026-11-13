@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>12 AI4AnimationPy 框架详解 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="11-Unity框架架构与代码走读.html">← 上一章：Unity 框架</a>
+    <a href="13-环境搭建与实战演练.html">下一章：环境搭建与实战 →</a>
+</nav>
+
+<main>
+    <h1>12　AI4AnimationPy 框架详解</h1>
+    <p>2026 年发布的 AI4AnimationPy 是本教程建议的研究主入口。它把原本依赖 Unity 编辑器的工作流迁移到纯 Python，
+    同时保留游戏引擎式的 ECS 架构与更新循环。本章讲解其核心设计。</p>
+
+    <h2>12.1 设计目标</h2>
+    <div class="definition">
+        <h4>官方定位</h4>
+        <p>框架完全运行在 NumPy 与 PyTorch 上，移除原工作流对 Unity 的依赖，用于动捕处理、模型训练、推理与实时可视化，
+        同时保留熟悉的 ECS 风格架构、更新循环与渲染管线。</p>
+    </div>
+
+    <h2>12.2 ECS 架构</h2>
+    <p>ECS 即 Entity-Component-System：</p>
+    <ul>
+        <li><strong>Entity（实体）</strong>：场景中的对象，如角色（Motion）、控制器、相机，本身只是组件的容器</li>
+        <li><strong>Component（组件）</strong>：挂载在实体上的数据与行为单元，如 RootModule、ContactModule、TrackingModule</li>
+        <li><strong>System（系统/更新循环）</strong>：按固定顺序逐帧驱动所有实体的更新，而不是依赖隐式的调用顺序</li>
+    </ul>
+    <p>文档中已验证的导入路径体现了包的模块划分，例如 <code>from ai4animation.AI.Stats import RunningStats</code>。</p>
+
+    <h2>12.3 生命周期</h2>
+    <p>每个实体遵循与游戏引擎一致的生命周期回调，文档明确列出 Awake、Start、OnEnable、OnDisable，以及每帧 Update 中的
+    PreStep 与 PostStep：</p>
+
+    <pre class="mermaid">
+stateDiagram-v2
+    [*] --> Awake
+    Awake --> Start
+    Start --> OnEnable
+    OnEnable --> Update: 进入逐帧循环
+    Update --> PreStep
+    PreStep --> PostStep
+    PostStep --> Update: 下一帧
+    Update --> OnDisable: 停止/失活
+    OnDisable --> OnEnable: 重新启用
+    OnDisable --> [*]: 销毁
+    </pre>
+    <p class="mermaid-caption">图 12-1　实体生命周期</p>
+
+    <h2>12.4 三种执行模式</h2>
+    <table>
+        <thead><tr><th>模式</th><th>渲染/窗口</th><th>适用场景</th></tr></thead>
+        <tbody>
+            <tr><td>Play</td><td>Raylib 实时渲染窗口</td><td>本地交互式演示与调试</td></tr>
+            <tr><td>Headless</td><td>无窗口，自动推进更新循环</td><td>服务器批处理、离线生成、CI</td></tr>
+            <tr><td>Manual</td><td>无自动循环，由外部代码手动步进</td><td>嵌入其他应用、自定义训练循环</td></tr>
+        </tbody>
+    </table>
+
+    <h2>12.5 Tensor 双后端</h2>
+    <p>框架的张量运算支持 NumPy 与 PyTorch 两个后端，可在运行时切换：训练用 PyTorch 以获得自动微分与 GPU 加速，
+    部署推理可用 NumPy/ONNX 以降低依赖。这种抽象让同一份 ECS 逻辑无需改写即可在不同后端运行。</p>
+<pre><code class="language-python">from ai4animation.AI.Stats import RunningStats
+
+stats = RunningStats(dim=input_dim)
+stats.update(x_batch)
+x_norm = stats.normalize(x_batch)
+
+y_pred = network(x_norm)
+y = stats.denormalize(y_pred)
+</code></pre>
+
+    <h2>12.6 网络模型清单</h2>
+    <p>Python 版把仓库多年的模型沉淀为可直接调用的网络实现，覆盖第二篇讲过的全部主线：</p>
+    <table>
+        <thead><tr><th>模型</th><th>对应论文</th></tr></thead>
+        <tbody>
+            <tr><td>MLP 基线</td><td>通用回归对照</td></tr>
+            <tr><td>PFNN</td><td>Holden 2017</td></tr>
+            <tr><td>MANN</td><td>2018</td></tr>
+            <tr><td>NSM</td><td>2019</td></tr>
+            <tr><td>PAE / DeepPhase</td><td>2022</td></tr>
+            <tr><td>Codebook Matching</td><td>2024</td></tr>
+        </tbody>
+    </table>
+
+    <h2>12.7 数据与特征模块</h2>
+    <p>Dataset 构建时挂载特征模块，这一设计在第 3 章已出现：</p>
+<pre><code class="language-python">Dataset(npz_path, [
+    lambda x: RootModule(x, hip_name, left_hip_name, right_hip_name,
+                         left_shoulder_name, right_shoulder_name),
+    lambda x: MotionModule(x),
+    lambda x: ContactModule(x, [
+        (left_ankle_name, 0.1, 0.25),
+        (right_ankle_name, 0.1, 0.25),
+    ]),
+    lambda x: GuidanceModule(x),
+])
+</code></pre>
+
+    <h2>12.8 训练与 ONNX 导出</h2>
+    <p>训练管线的关键环节：Dataset 产生归一化批次 → 网络前向 → 损失反传 → 周期评估，训练完成后可导出为 ONNX，
+    交由 ONNX Runtime 在无 PyTorch 依赖的环境推理。这使"研究环境（PyTorch）"与"部署环境（ONNX/NumPy）"解耦。</p>
+
+    <pre class="mermaid">
+flowchart LR
+        Raw["BVH/FBX/GLB"] --> Conv["convert 转换<br/>→ NPZ"]
+        Conv --> DS["Dataset + 模块"]
+        DS --> Train["PyTorch 训练"]
+        Train --> ONNX["ONNX 导出"]
+        ONNX --> Infer["ONNX Runtime 推理"]
+        style Train fill:#eaf7ed,stroke:#38a152
+        style ONNX fill:#fff2dd,stroke:#f08c1a
+    </pre>
+    <p class="mermaid-caption">图 12-2　Python 版训练与部署路径</p>
+
+    <h2>12.9 与 Unity 版的对应关系</h2>
+    <table>
+        <thead><tr><th>Unity 版</th><th>AI4AnimationPy</th></tr></thead>
+        <tbody>
+            <tr><td>MonoBehaviour / ECS 组件</td><td>Entity + Component</td></tr>
+            <tr><td>Unity Update 循环</td><td>Play / Headless / Manual 更新循环</td></tr>
+            <tr><td>Eigen 原生插件</td><td>NumPy / PyTorch 后端</td></tr>
+            <tr><td>外部 main.py + Inspector 路径</td><td>统一 Python 训练与 CLI</td></tr>
+            <tr><td>Unity 场景渲染</td><td>Raylib 渲染</td></tr>
+        </tbody>
+    </table>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>模式选择</h4>
+                    <p>在无显示器的远程服务器上批量生成 1000 段运动，应选哪种执行模式？说明理由。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>后端切换</h4>
+                    <p>双后端设计对训练与部署分别带来什么好处？为什么 ONNX 导出是其中的关键环节？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>架构迁移</h4>
+                    <p>结合图 12-1，说明 ECS 生命周期相比"脚本自由更新"在可复现性上有什么优势。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>AI4AnimationPy 以纯 NumPy/PyTorch 复刻 Unity 工作流，ECS 架构与更新循环保持一致</li>
+        <li>生命周期含 Awake/Start/OnEnable/Update(Pre/Post Step)/OnDisable；三种执行模式覆盖交互、批处理与嵌入</li>
+        <li>双后端兼顾 GPU 训练与轻量部署，训练后导出 ONNX 解耦研究与生产环境</li>
+        <li>模型清单覆盖 PFNN 到码本匹配全部主线，特征模块可插拔组装</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://facebookresearch.github.io/ai4animationpy/architecture/overview/">官方文档：架构总览</a></li>
+            <li><a href="https://facebookresearch.github.io/ai4animationpy/architecture/lifecycle/">官方文档：生命周期</a></li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="11-Unity框架架构与代码走读.html">← 上一章：Unity 框架</a>
+        <a href="13-环境搭建与实战演练.html">下一章：环境搭建与实战 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

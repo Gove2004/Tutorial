@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 3 章 单例体系与启动流程 - 空洞骑士源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="02-程序集与工程结构.html">← 上一章：程序集与工程结构</a>
+    <a href="04-场景切换管线.html">下一章：场景切换管线 →</a>
+</nav>
+<main>
+    <h1>第 3 章　单例体系与启动流程</h1>
+    <p>《空洞骑士》有一批贯穿整个游戏生命周期的管理器对象。本章拆解它们的单例实现方式、持久化机制，以及从游戏进程启动到主菜单出现的完整时序。</p>
+
+    <h2>3.1 一个反直觉的发现：泛型 Singleton 是死代码</h2>
+    <p>工程里存在一个写得相当完整的泛型单例基类 <code>Singleton&lt;T&gt;</code>，带线程锁、退出标记、重复实例检测：</p>
+<pre><code class="language-csharp">public class Singleton<T> : MonoBehaviour where T : MonoBehaviour
+{
+    private static T _instance;
+    private static object _lock = new object();
+    private static bool applicationIsQuitting = false;
+
+    public static T instance { get { /* 锁内 FindObjectOfType，找不到就新建并 DontDestroyOnLoad */ } }
+
+    public void Awake()
+    {
+        Debug.Log("TEST1 - AWAKE - " + GetInstanceID());  // 调试日志还没删
+        // ...
+    }
+}</code></pre>
+    <p>但对全工程做交叉引用搜索，<strong>没有任何一个类继承它</strong>：</p>
+<pre><code class="language-csharp">// 搜索 ": Singleton<" 的结果为 0</code></pre>
+    <div class="callout callout-info">
+        <p>这是一个典型的代码考古结论：<code>Singleton&lt;T&gt;</code> 是项目早期方案的遗留物（Awake 里残留的 <code>TEST1</code> 调试字符串是它试验性质的证据），后来团队转向每个管理器各自手写单例。读代码时不要被这个类误导，以为游戏的单例都走它的逻辑。</p>
+    </div>
+
+    <h2>3.2 手写单例的统一模式</h2>
+    <p>GameManager、HeroController、UIManager、GameCameras、SceneData、ObjectPool 等全部手写，但骨架高度一致，由三部分组成。</p>
+
+    <h3>部件一：静态字段 + 懒查找属性</h3>
+    <p>以 GameManager 为例：</p>
+<pre><code class="language-csharp">public static GameManager _instance;
+
+public static GameManager instance
+{
+    get
+    {
+        if (_instance == null)
+        {
+            _instance = UnityEngine.Object.FindObjectOfType&lt;GameManager&gt;();
+            if (_instance == null)
+                Debug.LogError("Couldn't find a Game Manager, make sure one exists in the scene.");
+            else if (Application.isPlaying)
+                UnityEngine.Object.DontDestroyOnLoad(_instance.gameObject);
+        }
+        return _instance;
+    }
+}
+
+public static GameManager UnsafeInstance => _instance;</code></pre>
+
+    <h3>部件二：Awake 里的去重</h3>
+<pre><code class="language-csharp">private void Awake()
+{
+    if (_instance == null)
+    {
+        _instance = this;
+        UnityEngine.Object.DontDestroyOnLoad(this);
+        SetupGameRefs();
+    }
+    else if (this != _instance)
+    {
+        UnityEngine.Object.Destroy(base.gameObject);  // 场景里出现第二个，自我销毁
+    }
+    else
+    {
+        SetupGameRefs();
+    }
+}</code></pre>
+    <p>懒查找属性和 Awake 构成双保险：<strong>无论外部先访问 instance 还是对象先 Awake，最终都只有一个实例，且一定被标记为 DontDestroyOnLoad</strong>。</p>
+
+    <h3>部件三：三种访问语义的变体</h3>
+    <p>HeroController 把访问方式拆成了三个静态入口，这个设计值得注意：</p>
+    <table>
+        <thead><tr><th>入口</th><th>行为</th><th>适用场景</th></tr></thead>
+        <tbody>
+            <tr><td><code>instance</code></td><td>找不到时输出 LogError</td><td>正常游戏逻辑，主角理应存在</td></tr>
+            <tr><td><code>SilentInstance</code></td><td>查找但不打错误日志</td><td>启动早期、对象可能还没生成的场景</td></tr>
+            <tr><td><code>UnsafeInstance</code></td><td>直接返回字段，不触发任何查找</td><td>对性能敏感或需要判断"是否已存在"的场合</td></tr>
+        </tbody>
+    </table>
+    <div class="callout callout-warning">
+        <p><strong>陷阱</strong>：<code>FindObjectOfType</code> 是成本不低的全场景扫描。手写单例把它放在 <code>_instance == null</code> 的分支里，正常情况下只执行一次；但如果你在大量物件的逻辑里反复访问一个尚未初始化的单例，就会触发多次扫描。判断单例是否存在时应使用 <code>UnsafeInstance</code>，而不是访问 <code>instance</code>。</p>
+    </div>
+
+    <h2>3.3 DontDestroyOnLoad 与持久对象</h2>
+    <p>被标记 <code>DontDestroyOnLoad</code> 的对象在场景切换时不会被卸载，它们共同构成游戏的"持久层"。核心成员包括：</p>
+    <ul>
+        <li><strong>GameManager</strong>——总控，持有 PlayerData、SceneData、gameState 等</li>
+        <li><strong>GameCameras</strong>——主相机 + HUD 相机及相机控制器</li>
+        <li><strong>UIManager</strong>——UI 画布与菜单系统</li>
+        <li><strong>HeroController</strong>——主角对象（注意：主角是持久对象，不随场景重建）</li>
+        <li><strong>CoreLoop</strong>——主线程调度器（见 3.5）</li>
+    </ul>
+    <div class="sidebar-note">
+        主角是持久对象这一点解释了很多设计：场景切换时 HeroController 不销毁，只是被移动到新场景的门口坐标（<code>LeaveScene</code>/<code>EnterScene</code>），所以主角的移动状态、输入队列在过门后可以延续。
+    </div>
+
+    <h2>3.4 事件委托：持久层的解耦手段</h2>
+    <p>GameManager 不直接引用场景里的具体物件，而是暴露一组 C# event，让场景物件在 Awake/Start 时订阅、销毁时退订：</p>
+<pre><code class="language-csharp">public event SavePersistentState SavePersistentObjects;
+public event ResetSemiPersistentState ResetSemiPersistentObjects;
+public event DestroyPooledObjects DestroyPersonalPools;
+public event UnloadLevel UnloadingLevel;
+public event RefreshLanguage RefreshLanguageText;
+public event EnterSceneEvent OnFinishedEnteringScene;</code></pre>
+    <p>例如 PersonalObjectPool 订阅 <code>DestroyPersonalPools</code>，在场景切换时收到通知清理自己注册的池对象。这样 GameManager 不需要知道场景里有哪些对象池，<strong>依赖方向是"场景物件知道管理器，管理器不知道具体物件"</strong>，这是全书反复出现的架构原则。</p>
+
+    <h2>3.5 CoreLoop：主线程调度器</h2>
+    <p><code>CoreLoop</code> 用 <code>[RuntimeInitializeOnLoadMethod]</code> 在任何场景加载之前自动创建，提供两类调度能力：</p>
+    <table>
+        <thead><tr><th>方法</th><th>作用</th></tr></thead>
+        <tbody>
+            <tr><td><code>InvokeNext(Action)</code></td><td>把动作排到下一帧执行（双缓冲列表，避免遍历中修改集合）</td></tr>
+            <tr><td><code>InvokeOnGameThread(Action)</code> / <code>InvokeSafe</code></td><td>把其他线程（如平台回调、IO 线程）的动作 marshal 回 Unity 主线程执行</td></tr>
+        </tbody>
+    </table>
+    <p>Unity 的 API 只能在主线程调用，而平台层的存档读写、成就回调往往来自后台线程，CoreLoop 就是它们回到主线程的统一通道。DesktopPlatform 里读取存档后的回调 <code>CoreLoop.InvokeSafe(() => callback(...))</code> 就是实际用例。</p>
+
+    <h2>3.6 完整启动时序</h2>
+    <p>把上面的部件串起来，从进程启动到主菜单的时序如下：</p>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+sequenceDiagram
+    participant Runtime as Unity 运行时
+    participant CL as CoreLoop
+    participant SM as StartManager(启动场景)
+    participant Plat as Platform
+    participant Menu as Menu_Title
+
+    Runtime->>CL: RuntimeInitializeOnLoadMethod 创建持久 CoreLoop
+    Note over Runtime: 启动场景加载，StartManager.Awake
+    SM->>Menu: LoadSceneAsync("Menu_Title") 但 allowSceneActivation=false
+    SM->>Plat: SetSceneLoadState，等待共享数据挂载
+    alt 首次启动且未设语言
+        SM->>SM: 显示语言选择，等待确认
+    end
+    SM->>Plat: 等待 IsSharedDataMounted
+    SM->>Plat: 等待 IsPlayerPrefsLoaded
+    SM->>Menu: allowSceneActivation=true，激活菜单场景
+    Note over Menu: 菜单场景中的 GameManager 等持久对象 Awake
+    Menu->>Menu: 各自手写单例去重 + DontDestroyOnLoad
+</div>
+    </div>
+    <p>StartManager 用一个 <code>allowSceneActivation</code> 门控把菜单场景的加载和"平台数据是否就绪"解耦：场景资源可以先在后台加载完，但只有共享数据、PlayerPrefs 都准备好后才激活，避免菜单在数据未就绪时初始化出错误状态。这个门控模式在第 4 章的场景管线里还会以更复杂的形式出现。</p>
+
+    <div class="exercise">
+        <h3>思考与练习</h3>
+        <ol>
+            <li>用证据论证 <code>Singleton&lt;T&gt;</code> 没有被任何类使用，并解释为什么保留它不会影响游戏运行。</li>
+            <li>对比 <code>instance</code>、<code>SilentInstance</code>、<code>UnsafeInstance</code> 三者的代价差异，给出各自的一个合理调用场景。</li>
+            <li>画出 GameManager 从"场景中存在两个实例"到最终只剩一个的执行流程，说明是哪段代码保证了唯一性。</li>
+            <li>解释 CoreLoop 为什么必须存在——如果平台层直接在后台线程调用 Unity API 会发生什么？</li>
+        </ol>
+    </div>
+</main>
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="02-程序集与工程结构.html">← 上一章：程序集与工程结构</a>
+        <a href="04-场景切换管线.html">第 4 章：场景切换管线 →</a>
+    </nav>
+</footer>
+<script src="assets/script.js"></script>
+</body>
+</html>

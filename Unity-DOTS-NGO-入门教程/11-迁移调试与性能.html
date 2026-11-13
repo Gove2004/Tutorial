@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>11 迁移、调试与性能 - Unity DOTS 与 NGO 入门教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="10-DOTS与网络的边界.html">← 上一章</a>
+        <a href="index.html">返回首页 →</a>
+    </nav>
+
+    <main>
+        <h1>11　迁移、调试与性能：从 OOP 项目渐进落地</h1>
+
+        <p>最后一章解决“学完之后怎么用回真实项目”：用什么工具观察 ECS、按什么方法论优化、如何不推翻重写地渐进迁移，以及最重要的——什么时候根本不该用 DOTS。</p>
+
+        <h2>11.1 观察 ECS 的工具</h2>
+
+        <h3>Hierarchy 与 Entity Inspector</h3>
+        <p>Unity 6.6 之后，实体直接显示在标准 Hierarchy 窗口里，与 GameObject、场景、子场景并列，旧的独立 Entities Hierarchy 窗口已弃用。展开 World 节点能看到实体，点开后在 Inspector 查看它的全部组件与当前值。编辑期通过 Editor World 节点看烘焙结果，播放期看运行时 World。</p>
+
+        <h3>Profiler</h3>
+        <p>Profiler 是判断“优化是否真的有效”的唯一裁判，重点看几个区域：</p>
+        <ul>
+            <li><strong>主线程</strong>：系统 OnUpdate、ECB 回放、等待 Job 的同步点（表现为 Complete 调用占用）；</li>
+            <li><strong>Worker 线程</strong>：并行 Job 是否真的分散到多核、负载是否均衡；</li>
+            <li><strong>内存/GC Alloc</strong>：播放时应接近零 GC 分配，出现分配就说明有托管对象或装箱泄漏进了系统。</li>
+        </ul>
+
+        <h3>Burst Inspector</h3>
+        <p>选中一个 Burst 编译的 Job 或方法，打开 Burst Inspector 可以查看它生成的原生汇编，确认循环是否被自动向量化（出现 SIMD 指令）、是否有意外的函数调用。这是高级验证手段，日常优化先用 Profiler，怀疑 Burst 没生效时再看汇编。</p>
+
+        <div class="callout callout-info">
+            <strong>方法论：先测量，再优化，再复测</strong>。不要凭“这段看起来慢”就改。用 Profiler 定位实际热点 → 改一处 → 同一条件下复测确认收益。没有基线的“优化”很可能只是把代码改得更难读，甚至更慢。
+        </div>
+
+        <h2>11.2 常见性能陷阱清单</h2>
+
+        <table>
+            <thead>
+                <tr><th>陷阱</th><th>信号</th><th>对策</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>主线程触发同步点</td>
+                    <td>Profiler 里 Job 被提前 Complete，主线程空等</td>
+                    <td>避免在 Job 还没完成时通过 EntityManager 访问同一数据；让依赖链自然推进</td>
+                </tr>
+                <tr>
+                    <td>系统里混入 GC 分配</td>
+                    <td>GC Alloc 列每帧有值</td>
+                    <td>改用 NativeContainer、非托管 struct；排查字符串、Lambda、装箱</td>
+                </tr>
+                <tr>
+                    <td>Archetype 过度碎片</td>
+                    <td>大量填不满的 Chunk，扫描 Chunk 数多</td>
+                    <td>收敛组件组合；高频开关改用 Enableable 而非增删组件</td>
+                </tr>
+                <tr>
+                    <td>组件过大</td>
+                    <td>每个 Chunk 容纳实体少，缓存利用率低</td>
+                    <td>按访问频率拆成小组件，冷数据移到 Blob 或缓冲</td>
+                </tr>
+                <tr>
+                    <td>NativeContainer 泄漏</td>
+                    <td>退出播放模式报警告/原生内存增长</td>
+                    <td>OnDestroy 中 Dispose，核对分配器与生命周期</td>
+                </tr>
+                <tr>
+                    <td>ECB 时机错误</td>
+                    <td>实体晚一帧才生效或本帧被多处理一次</td>
+                    <td>核对 Begin/End ECB 系统选择（第七章）</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>11.3 从 OOP 渐进迁移的策略</h2>
+
+        <p>不要尝试“重写整个游戏”，那几乎必然半途而废。遵循一条让项目随时可发布的路径：</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>用 Profiler 锁定热点</h4>
+                    <p>找出真正数量大、耗时高的系统（通常是单位模拟、粒子、子弹），而不是随便挑一个顺手的组件迁移。没有规模问题的逻辑留在 MonoBehaviour。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>把子场景与 Baker 搭起来</h4>
+                    <p>把热点对象移入子场景，定义 IComponentData 与 Baker，先只做数据转换、不改行为，用 Entity Baking Preview 验证数据正确。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>逐个系统替换</h4>
+                    <p>一个系统一个系统地把 Update 逻辑迁到 ISystem，先用主线程 Query 跑通，再用 IJobEntity + Burst 并行化。每替换一个就完整测试、保持可发布。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>最后处理结构变更与网络</h4>
+                    <p>把生成销毁统一到 ECB，需要联机时再按第八到十章接入 NGO 与桥接层。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="mermaid-wrapper">
+            <pre class="mermaid">
+flowchart LR
+    A["热点定位"] --&gt; B["子场景+Baker 数据转换"]
+    B --&gt; C["ISystem 逐个替换"]
+    C --&gt; D["Job+Burst 并行化"]
+    D --&gt; E["ECB / 网络接入"]
+    E --&gt; F["复测，随时可发布"]
+            </pre>
+        </div>
+
+        <h2>11.4 什么时候不该用 DOTS</h2>
+
+        <p>这是最该诚实面对的一节。DOTS 不是“更高级的 Unity”，它是有明确代价的专用工具：</p>
+        <ul>
+            <li><strong>对象数量少</strong>：UI 界面、菜单、解谜、叙事游戏，场景里同时活动的对象就几十个，MonoBehaviour 的开销完全不是瓶颈，DOTS 只增加复杂度。</li>
+            <li><strong>迭代速度优先</strong>：Game Jam、快速验证玩法的原型，OOP 的封装和即兴修改更快，ECS 的数据拆分和烘焙流程会拖慢节奏。</li>
+            <li><strong>重度依赖托管生态</strong>：项目大量使用只提供 MonoBehaviour 的第三方插件、旧资产，强行 ECS 化会产生大量桥接层，得不偿失。</li>
+            <li><strong>团队没有准备好</strong>：ECS、Burst、网络预测都有学习曲线，团队缺乏理解时，维护成本会高于性能收益。</li>
+        </ul>
+
+        <div class="callout callout-warning">
+            <strong>判断标准</strong>：先回答“我现在的性能问题，MonoBehaviour 真的解决不了吗？”如果 Profiler 显示帧率健康、没有 GC 尖峰、对象规模可控，那就<strong>不要用 DOTS</strong>。把它放在工具箱里，等问题真的出现再拿出来，而不是为了用而用。
+        </div>
+
+        <h2>11.5 结业综合项目建议</h2>
+
+        <p>检验整套掌握程度，做一个小而完整的作品，建议规格：</p>
+        <ul>
+            <li>子场景中烘焙出至少 5000 个移动实体，用 IJobEntity + Burst 做并行移动与避障；</li>
+            <li>用 ECB 实现实体的生成与生命周期（超龄销毁、命中销毁），全程零每帧 GC 分配；</li>
+            <li>接入 NGO，开一个 Host + Client 房间，用 NetworkVariable 同步全局计数、用 RPC 处理一个交互事件；</li>
+            <li>用一个托管桥接系统把 ECS 统计数据显示在 MonoBehaviour UI 上。</li>
+        </ul>
+
+        <p>完成这个项目，你就走完了从“听说 ECS 很好”到“能在工作中独立做技术选型与落地”的完整闭环。</p>
+
+        <h2>11.6 继续深入的路径</h2>
+        <ul>
+            <li><strong>官方示例</strong>：HelloCube（实体入门各场景）、Entity Framework Samples、NGO 的 Boss Room（注意官方已标注 2026 年起停止维护，作为模式参考而非版本基准）。</li>
+            <li><strong>官方手册</strong>：Entities 6.7、Burst、Collections、Netcode for Entities 手册，是排查具体 API 的第一手资料。</li>
+            <li><strong>读源码</strong>：Entities 与 NGO 的包源码就在项目 Library/PackageCache 中，遇到文档讲不清的行为，直接读系统与源生成器的实现。</li>
+            <li><strong>建立版本意识</strong>：DOTS 仍在快速演进，关注官方 Changelog 与 What's New，迁移前先读对应版本的 Upgrade Guide。</li>
+        </ul>
+
+        <div class="exercise">
+            <h3>思考与练习</h3>
+            <ol>
+                <li>打开一个旧项目用 Profiler 做一次完整分析，写出三个真实热点并判断各自是否值得迁移到 ECS。</li>
+                <li>为你的项目制定一份分阶段迁移计划，明确每个阶段的可发布状态与验证方式。</li>
+                <li>用 Burst Inspector 检查一个 Job 是否被向量化，如果没有，尝试调整循环写法后再确认。</li>
+                <li>诚实评估你当前想做的游戏：列出用 DOTS 的收益与代价，给出“用/不用/部分用”的结论和理由。</li>
+            </ol>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>实体在标准 Hierarchy 中观察；Profiler 定位热点与 GC，Burst Inspector 验证向量化，始终先测量再优化。</li>
+                <li>主要陷阱：同步点、GC 分配、Archetype 碎片、大组件、容器泄漏、ECB 时机。</li>
+                <li>渐进迁移按“热点 → Baker → 系统替换 → 并行化 → ECB/网络”推进，保持随时可发布。</li>
+                <li>规模小、迭代快、托管依赖重、团队没准备好时，不该用 DOTS。</li>
+                <li>用结业项目闭环检验，再通过官方示例与源码继续深入。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav">
+            <a href="10-DOTS与网络的边界.html">← 上一章：DOTS 与网络的边界</a>
+            <a href="index.html">返回首页 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

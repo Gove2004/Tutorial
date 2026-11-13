@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Draw Call 与合批优化 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-动静分离与LOD分级体系.html">← 上一章</a>
+        <a href="06-UI性能优化专题.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>Draw Call 与合批优化</h1>
+        <p class="chapter-meta">模块二 · 优化策略实战 ｜ 对应原文策略 3（自定义动态合批）</p>
+
+        <p>“减少 Draw Call”大概是被引用最多的性能口号，但很多人只记住了结论，不知道它为什么有效、边界在哪、以及合批本身也有成本。本章先解释 Draw Call 的成本结构，再对比四种主流合批方案，最后实现原文中的自定义动态合批。</p>
+
+        <h2>5.1 Draw Call 到底贵在哪里</h2>
+
+        <p>一次 Draw Call 的成本主要在 <strong>CPU 端</strong>，而不是 GPU：引擎要做渲染状态校验、把绘制命令和资源绑定写入命令缓冲区，再交给驱动翻译给 GPU。单次成本看起来不高，但一帧里若有上千个物体逐个提交，CPU 时间会被大量消耗在“提交动作”本身，而不是游戏逻辑。</p>
+
+        <p>其中更贵的是 <strong>SetPass Call（渲染状态切换）</strong>：切换 Shader、材质 Pass 意味着 GPU 流水线状态变更，代价远高于在同一状态下连续绘制。所以合批追求两个目标：减少 Draw Call 总数，更重要的是减少状态切换，让相同材质的对象尽量连续绘制。</p>
+
+        <h2>5.2 四种合批与实例化方案</h2>
+
+        <table>
+            <thead>
+                <tr><th>方案</th><th>原理</th><th>适用对象</th><th>主要限制 / 代价</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>静态合批</strong></td>
+                    <td>把标记为 Static 的物体在加载时合并为大网格，仍按可见性逐块剔除</td>
+                    <td>从不移动的建筑、地形装饰</td>
+                    <td>合并网格占用更多内存；运行时不能移动</td>
+                </tr>
+                <tr>
+                    <td><strong>动态合批</strong></td>
+                    <td>CPU 每帧把满足条件的小网格顶点拼在一起提交</td>
+                    <td>小体积、低顶点数的可移动物体</td>
+                    <td>有顶点数上限；CPU 逐帧合并本身耗时，可能得不偿失</td>
+                </tr>
+                <tr>
+                    <td><strong>GPU Instancing</strong></td>
+                    <td>一次调用绘制同一网格的多个实例，每实例通过缓冲传入不同变换/颜色</td>
+                    <td>大量重复对象（草、树、小怪、子弹）</td>
+                    <td>要求网格与材质相同；不同光照/贴图会打断实例化</td>
+                </tr>
+                <tr>
+                    <td><strong>SRP Batcher</strong></td>
+                    <td>URP/HDRP 中按材质持久化常量缓冲，减少每绘制的 GPU 准备工作</td>
+                    <td>使用兼容 Shader 的几乎所有对象</td>
+                    <td>不减少原始 Draw Call 数，而是降低每个 DC 的 CPU 成本；要求 Shader 兼容</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>不要混淆 SRP Batcher 与传统合批</strong>：SRP Batcher 不会让 Batches 数字变小，它的收益体现在 CPU 时间下降。判断它是否生效，要看 Inspector 与 Profiler，而不是数 Draw Call。
+        </div>
+
+        <h2>5.3 合批成立的前提条件</h2>
+
+        <p>无论哪种方案，要让对象进入同一批次，底层都要求渲染状态一致。常见的“合批杀手”包括：</p>
+        <ul>
+            <li>材质或 Shader Pass 不同（即使看起来一样，复制出来的材质也是不同实例）。</li>
+            <li>图集不一致：UI 与粒子使用不同图集无法合批。</li>
+            <li>光照环境差异：接受不同光源、不同阴影通道会拆分批次。</li>
+            <li>顶点属性、贴图采样器数量不一致。</li>
+        </ul>
+
+        <p>需要让同材质对象表现细微差异时，应使用 <code>MaterialPropertyBlock</code>（配合 Instancing）而不是克隆材质——克隆材质会直接破坏合批。</p>
+
+        <h2>5.4 自定义动态合批</h2>
+
+        <p>Unity 内置 Dynamic Batching 受顶点数和规则限制，而真实场景里存在大量<strong>状态动态变化</strong>的对象：建筑、树木、草块被销毁，场景物体随玩法出现或消失。原文的做法是：根据当前场景状态和摄像机位置，实时重新组织可合批对象，把<strong>相同材质 + 相同图集</strong>的对象手动合并，从而降低 Draw Call。</p>
+
+        <div class="mermaid">
+flowchart LR
+    A["对象出现/销毁事件"] --> B["标记合批组为脏"]
+    B --> C["按材质+图集分组"]
+    C --> D["合并各组成员网格"]
+    D --> E["重建合并 Mesh 并提交"]
+    E --> F["下一事件前复用"]
+    style A fill:#fdecea,stroke:#e53935,color:#14395a
+    style D fill:#e7f3ff,stroke:#007acc,color:#14395a
+        </div>
+
+        <p>关键工程点是<strong>不要每帧无脑重建</strong>：用脏标记 + 节流，只在成员真正变化时才重新合并，否则合批省下的 CPU 会被重建成本吃回去。</p>
+
+<pre><code class="language-csharp">using System.Collections.Generic;
+using UnityEngine;
+
+public class DynamicBatchGroup : MonoBehaviour
+{
+    private readonly List<MeshFilter> members = new List<MeshFilter>();
+    private readonly Dictionary<Material, List<CombineInstance>> buckets =
+        new Dictionary<Material, List<CombineInstance>>();
+
+    private Mesh combined;
+    private bool dirty;
+    private float lastRebuild;
+    [SerializeField] private float rebuildInterval = 0.25f;
+
+    public void Add(MeshFilter filter)
+    {
+        if (!members.Contains(filter))
+        {
+            members.Add(filter);
+            dirty = true;
+        }
+    }
+
+    public void Remove(MeshFilter filter)
+    {
+        if (members.Remove(filter))
+        {
+            dirty = true;
+        }
+    }
+
+    void Update()
+    {
+        if (!dirty || Time.unscaledTime - lastRebuild < rebuildInterval) return;
+        Rebuild();
+        lastRebuild = Time.unscaledTime;
+        dirty = false;
+    }
+
+    private void Rebuild()
+    {
+        buckets.Clear();
+        foreach (MeshFilter mf in members)
+        {
+            if (mf == null || !mf.gameObject.activeInHierarchy) continue;
+
+            Material mat = mf.GetComponent<MeshRenderer>().sharedMaterial;
+            if (!buckets.TryGetValue(mat, out List<CombineInstance> list))
+            {
+                list = new List<CombineInstance>();
+                buckets.Add(mat, list);
+            }
+            list.Add(new CombineInstance
+            {
+                mesh = mf.sharedMesh,
+                transform = mf.transform.localToWorldMatrix
+            });
+        }
+
+        if (combined == null) combined = new Mesh();
+        combined.Clear();
+
+        var all = new List<CombineInstance>();
+        var materials = new List<Material>();
+        foreach (var kv in buckets)
+        {
+            materials.Add(kv.Key);
+            all.AddRange(kv.Value);
+        }
+        combined.CombineMeshes(all.ToArray(), false, true);
+
+        MeshRenderer renderer = GetComponent<MeshRenderer>();
+        renderer.sharedMaterials = materials.ToArray();
+        GetComponent<MeshFilter>().sharedMesh = combined;
+    }
+}
+</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>使用前先评估</strong>：手动合并产生的大网格会降低逐对象剔除的精度——合并后无法单独剔除组内某个被遮挡的成员。因此组应按空间区域划分，而不是把全场景对象塞进一个大批次。
+        </div>
+
+        <h2>5.5 用 Frame Debugger 定位批次断裂</h2>
+
+        <p>当 Batches 数远超预期时，不要靠猜。Unity Frame Debugger 会按顺序列出每一次绘制，并明确标注两个相邻绘制为何没有合并（材质不同、光照不同、贴图不同等）。排查流程是：打开 Frame Debugger → 找到断裂点 → 读取原因 → 回到资源/材质层面修复 → 再次观察批次是否合并。</p>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">基础练习</span>识别合批杀手</h3>
+            <p>在 Frame Debugger 中找到一处本可合并却断裂的批次，记录其断裂原因，并修复后确认 Batches 数下降。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>合批反而变慢</h3>
+            <p>某团队开启动态合批后，Draw Call 下降了，但 CPU 帧时间反而上升。请给出至少两种可能原因，并说明你会如何用数据决定是否保留该方案。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">进阶挑战</span>空间分组</h3>
+            <p>在自定义合批基础上加入按区域（如网格格子）分组的逻辑，使不同区域的对象各自成组，兼顾合批收益与剔除精度。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>Draw Call 成本主要在 CPU 提交与状态切换，SetPass 比普通 DC 更贵。</li>
+            <li>静态合批、动态合批、GPU Instancing、SRP Batcher 各有适用边界，SRP Batcher 降的是单 DC 成本而非数量。</li>
+            <li>合批要求材质、图集、Pass、光照状态一致；细微差异用 MaterialPropertyBlock 而非克隆材质。</li>
+            <li>自定义动态合批用脏标记 + 节流重建，并按空间分组以保留剔除精度。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://docs.unity3d.com/Manual/FrameDebugger.html" target="_blank">Unity 手册：Frame Debugger</a></li>
+                <li><a href="https://docs.unity3d.com/Manual/GPUInstancing.html" target="_blank">Unity 手册：GPU Instancing</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-动静分离与LOD分级体系.html">← 上一章：动静分离与 LOD 分级体系</a>
+            <a href="06-UI性能优化专题.html">下一章：UI 性能优化专题 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

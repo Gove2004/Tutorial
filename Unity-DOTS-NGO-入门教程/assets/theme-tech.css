@@ -1,0 +1,18 @@
+:root {
+    --primary: #007acc;
+    --primary-dark: #005a9e;
+    --accent: #0969da;
+    --bg-main: #ffffff;
+    --bg-aside: #f0f2f5;
+    --text: #24292f;
+}
+
+body { background: var(--bg-aside); color: var(--text); }
+main { background: var(--bg-main); box-shadow: 0 2px 14px rgba(0, 0, 0, 0.08); }
+h1 { color: var(--primary); border-bottom-color: var(--primary); }
+h2 { color: #1f2328; }
+a { color: var(--accent); }
+.step-number { background: var(--primary); }
+.definition { border-color: var(--primary); }
+.definition h4 { color: var(--primary); }
+.tab-buttons button.active { border-bottom-color: var(--primary); color: var(--accent); }

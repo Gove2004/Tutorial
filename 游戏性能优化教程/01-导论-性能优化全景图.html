@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>导论：性能优化全景图 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <span></span>
+        <a href="02-核心指标与性能预算.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>导论：性能优化全景图</h1>
+        <p class="chapter-meta">模块一 · 基础与度量 ｜ 本章建立整套课程的认知框架，不涉及具体代码</p>
+
+        <p>很多开发者对“性能优化”的第一印象，是一位资深工程师对着 Profiler 火焰图沉思许久，然后在某个神秘函数里改了几行代码，帧率就上去了。这件事看起来高度依赖个人经验，门槛很高。《王者荣耀》团队提出的目标恰恰相反：<strong>通过架构改造、引擎优化与工具研发，把性能优化的门槛降下来，让每位开发者都能精准定位瓶颈</strong>。</p>
+
+        <p>本章先回答三个问题：为什么这件事值得投入、一个成熟团队的性能能力由哪些层次构成、以及优化工作遵循什么底层逻辑。</p>
+
+        <h2>1.1 性能问题为什么是“硬伤”</h2>
+
+        <p>功能 bug 影响的是一部分玩家、在特定条件下触发；而性能问题是<strong>普惠性的体验惩罚</strong>——只要设备跑不动，每个使用该设备的玩家在每一帧都在承受。在移动端，这种惩罚具体表现为四种可感知的现象：</p>
+
+        <table>
+            <thead>
+                <tr><th>现象</th><th>玩家感受</th><th>直接后果</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>帧率低、掉帧</td><td>画面不连贯，拖技能方向、瞄准跟手性差</td><td>竞技类游戏中直接影响操作公平性</td></tr>
+                <tr><td>帧时间尖峰（卡顿）</td><td>画面突然“冻”一下</td><td>比稳定低帧更刺眼，极易被录屏传播</td></tr>
+                <tr><td>持续高负载</td><td>机身发烫、风扇狂转（手机 SoC 降频）</td><td>越玩越卡，形成恶性循环</td></tr>
+                <tr><td>内存占用过高</td><td>应用被系统杀掉、闪退</td><td>留存数据与商店评分同时受损</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>移动端的特殊约束</strong>：安卓设备的芯片、分辨率、内存规格高度碎片化，且手机没有桌面显卡那样的持续散热能力，长时间高负载会触发温控降频。因此“在旗舰机上跑满 60 帧”只覆盖了一小部分玩家，真正的目标是<strong>在可接受的机型覆盖率内，让更多设备稳定达到目标帧率</strong>。
+        </div>
+
+        <h2>1.2 性能能力的三层模型</h2>
+
+        <p>原文把性能优化的能力归纳为三个递进层次。这个模型也是本教程的主干结构。</p>
+
+        <div class="mermaid">
+flowchart TB
+    L3["第三层：建立持续优化能力<br/>性能标准 + 数据采集 + 分析工具 + 分析方法 + 优化管线<br/>让优化可量化、可复用、可持续"]
+    L2["第二层：知道哪里值得优化<br/>理解业务架构、游戏框架、渲染/动画/粒子/UI/内存系统的模块特征"]
+    L1["第一层：知道怎么优化<br/>LOD、动静分离、合批、裁剪、异步、多线程、管线定制等手段库"]
+    L1 --> L2 --> L3
+    style L1 fill:#e7f3ff,stroke:#007acc,color:#14395a
+    style L2 fill:#fff6e8,stroke:#e65100,color:#14395a
+    style L3 fill:#f5eefb,stroke:#8e44ad,color:#14395a
+        </div>
+
+        <h3>第一层：知道怎么优化——手段库</h3>
+        <p>掌握一组具体的优化手段，例如 LOD、动静分离、合批、裁剪、异步加载、多线程、管线定制、阴影替代、动画分帧、内存池化等。这是“兵器”，本教程模块二（第 4–11 章）会逐一讲解它们的原理、用法与代价。</p>
+
+        <h3>第二层：知道哪里值得优化——模块特征</h3>
+        <p>同一个手段用在错误的模块上毫无收益。只有理解了 UI 框架、网络同步、技能系统、渲染管线、动画、粒子、内存管理各自的工作原理，才能判断哪些地方有冗余、哪些计算能缓存、哪些模块能异步或分级。这是模块三（第 12 章）的内容。</p>
+
+        <h3>第三层：建立持续优化能力——工程体系</h3>
+        <p>当项目规模大到无法靠某个人盯完全部场景时，需要把性能标准、数据采集、分析工具、分析方法和优化流水线固化下来，让性能优化从“依赖专家个人经验”变成团队的常规工程动作。这是模块四（第 13–14 章）的内容。</p>
+
+        <h2>1.3 所有优化手段背后的四条逻辑</h2>
+
+        <p>本教程后面会讲 15 个以上具体策略，但它们并不零散，几乎都能归到下面四条逻辑里。理解这四条，比记住策略名称更重要。</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>不做不必要的工作</h4>
+                    <p>最廉价的计算是根本不执行的计算。删除玩家感知弱的功能、裁掉视野外对象、关闭低端机非关键特性，都属于这一类。动静分离、特效裁剪、距离分级本质上都是在回答“这件事现在是否真的需要做”。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>把运行时成本搬到离线阶段</h4>
+                    <p>玩家不会为加载界面之外的预处理买单。寻路拐点预计算、距离场生成、粒子有效区域裁剪、导航数据烘焙，都是把 CPU 开销从“每帧实时计算”转移到“离线一次计算、运行时直接读取”。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>让必要的工作更高效</h4>
+                    <p>无法删除的工作，就降低单位成本：用合批减少 Draw Call、用对象池避免反复分配、用 Job System 把计算摊到多核、用缓存复用中间结果。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>把资源倾斜给关键路径</h4>
+                    <p>帧预算是固定的，分配必须有优先级。团战瞬间把 CPU 让给战斗逻辑与关键特效、镜头附近的角色高频更新而远处角色降频，都是在做同一件事：<strong>牺牲玩家看不见、不敏感的部分，保住玩家正在交互的部分</strong>。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>1.4 四个常见认知误区</h2>
+
+        <div class="callout callout-danger">
+            <strong>误区一：性能优化 = 减少 Draw Call。</strong><br>
+            Draw Call 只是渲染维度的一个指标。如果瓶颈在 CPU 逻辑、GC 卡顿或内存带宽，拼命合批不会带来帧率提升，反而可能因合批的 CPU 开销让情况更糟。先定位瓶颈，再选手段。
+        </div>
+
+        <div class="callout callout-danger">
+            <strong>误区二：优化是上线前的冲刺任务。</strong><br>
+            上线后才发现架构层面无法支撑目标帧率，往往需要重写管线，代价远高于早期介入。性能预算、模块规范、自动化采集应当在项目中期就建立，而不是等内容全部做完。
+        </div>
+
+        <div class="callout callout-danger">
+            <strong>误区三：我手机上不卡，所以没问题。</strong><br>
+            开发机通常是旗舰芯片，恰好是最不能代表真实用户的设备。优化必须针对目标机型矩阵，在低端代表机上测量。
+        </div>
+
+        <div class="callout callout-danger">
+            <strong>误区四：凭感觉改，改完“好像流畅了”。</strong><br>
+            没有前后对比数据的优化无法证伪，也无法排除测量噪声。本教程反复强调一条纪律：<strong>任何优化都要先采集基线数据，改动后用相同场景、相同口径复测，用数据确认收益</strong>。
+        </div>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>性能手段归类</h3>
+            <p>假设你在一款开放世界游戏里看到下面三个优化：远处的树木停止动画更新、加载界面提前烘焙导航网格、多个相同材质的小怪合并为一次绘制。尝试把它们分别对应到 1.3 节的四条逻辑上，并说明每个优化牺牲了什么、保住了什么。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">实践任务</span>建立你的机型矩阵</h3>
+            <p>列出你当前项目（或假设项目）需要覆盖的 3–5 款代表机型，按 GPU 能力和内存分档，并标注每档的目标帧率。思考：为什么不能只选当年最新的旗舰机作为测试机？</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>性能问题是覆盖全部低配置玩家的普惠性体验惩罚，移动端还受碎片化和散热降频约束。</li>
+            <li>性能能力分三层：会用手段（怎么优化）、理解模块（哪里值得优化）、固化体系（持续优化）。</li>
+            <li>具体策略背后是四条逻辑：不做不必要的工作、成本离线化、提高单位效率、资源向关键路径倾斜。</li>
+            <li>第一条工程纪律：先测量、再改动、用同口径复测，拒绝“凭感觉”。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章预习</strong>：要测量就得先有准确的指标语言。下一章辨析 FPS 与帧时间的区别，并建立一套可落地的性能预算。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="02-核心指标与性能预算.html">下一章：核心指标与性能预算 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

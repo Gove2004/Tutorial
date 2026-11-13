@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>场景加载、纹理与内存优化 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-距离场碰撞优化.html">← 上一章</a>
+        <a href="11-阴影动画与引擎管线定制.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>场景加载、纹理与内存优化</h1>
+        <p class="chapter-meta">模块二 · 优化策略实战 ｜ 对应原文策略 8、9、14 及内存管理</p>
+
+        <p>本章把三个与“数据何时进入内存”相关的策略放在一起，它们共同回答两个问题：如何让资源加载不造成帧尖峰，以及如何避免内存被用不到的数据占满。</p>
+
+        <h2>10.1 场景加载优化（策略 8）</h2>
+
+        <p>场景加载有三个优化方向：<strong>离线分析、异步加载、空间划分与加载优先级</strong>。一次性同步加载整个场景会让主线程长时间阻塞，产生明显的加载卡顿甚至 ANR。正确流程是：</p>
+
+        <div class="mermaid">
+flowchart LR
+            A["离线分析场景物件"] --> B["空间划分区块"]
+            B --> C["按距离/重要性计算加载优先级"]
+            C --> D["异步分帧加载"]
+            D --> E["由近到远平滑显示"]
+            style A fill:#f5eefb,stroke:#8e44ad,color:#14395a
+            style D fill:#e7f3ff,stroke:#007acc,color:#14395a
+        </div>
+
+        <ul>
+            <li>异步加载把读取与实例化摊到多帧，单帧只处理一小部分，避免主线程被占满。</li>
+            <li>由近到远显示：玩家身边的内容先出现，远处物件随后淡入，配合距离阈值让加载行为难以被察觉。</li>
+            <li>优先级要动态更新，玩家快速转向或传送时，新方向的物件应立即提权。</li>
+        </ul>
+
+        <h2>10.2 Mipmap 与纹理优化（策略 9）</h2>
+
+        <p>Mipmap 为纹理预生成多级缩小版本：物体离远或被斜看时，采样更小的层级，既减少远处摩尔纹/锯齿，又降低缓存未命中带来的带宽开销。代价是纹理内存约增加三分之一。</p>
+
+        <p>原文针对<strong>视角相对固定</strong>的游戏进一步优化：相邻帧视野变化很小时，不必重复生成大量相似的纹理数据，按实际视野变化决定是否更新层级，从而同时降低纹理生成开销、内存占用与 CPU 计算。实践中还应：</p>
+        <ul>
+            <li>使用硬件压缩格式（移动端 ASTC/ETC2），并按用途选择合适的 Mipmap 策略（UI 2D 贴图通常不需要 Mipmap）。</li>
+            <li>控制纹理最大尺寸，分辨率永远不超过实际显示需要。</li>
+            <li>关注 Mipmap 剥离（Mipmap Stripping）与流式纹理（Texture Streaming），按距离只加载需要的层级。</li>
+        </ul>
+
+        <h2>10.3 Model 元素延迟加载（策略 14）</h2>
+
+        <p>部分数据接口在调用时会把完整的 Model 元数据一次性载入内存，但运行逻辑往往只用到其中少数字段。原文的原则是：<strong>需要什么加载什么，什么时候需要什么时候加载</strong>。</p>
+
+        <table>
+            <thead>
+                <tr><th>手段</th><th>效果</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>首次访问时才加载（懒加载）</td><td>不访问就不产生 IO 与内存</td></tr>
+                <tr><td>只加载实际需要的字段</td><td>避免整表/整对象载入</td></tr>
+                <tr><td>延迟加载低频属性</td><td>把冷数据推迟到真正使用</td></tr>
+                <tr><td>减少启动阶段加载</td><td>缩短启动时间、降低启动内存峰值</td></tr>
+            </tbody>
+        </table>
+
+        <p>C# 中可直接用 <code>System.Lazy&lt;T&gt;</code> 表达首次访问语义：</p>
+
+<pre><code class="language-csharp">using System;
+
+public class HeroModel
+{
+    private readonly Lazy<HeroDetail> detail;
+    private readonly Lazy<HeroSkinLibrary> skins;
+
+    public HeroModel(Func<HeroDetail> detailFactory, Func<HeroSkinLibrary> skinFactory)
+    {
+        detail = new Lazy<HeroDetail>(detailFactory);
+        skins = new Lazy<HeroSkinLibrary>(skinFactory);
+    }
+
+    public HeroDetail Detail => detail.Value;
+    public HeroSkinLibrary Skins => skins.Value;
+}
+</code></pre>
+
+        <h2>10.4 内存管理：池化与碎片</h2>
+
+        <p>引擎层内存管理通常由对象池、内存池与内存分配器组成。运行中频繁 new / destroy 会产生两个问题：分配本身的 CPU 成本，以及反复分配释放导致的<strong>内存碎片</strong>——空闲内存总量够，但没有连续大块可分配。</p>
+
+        <ul>
+            <li><strong>对象池</strong>：回收对象而不是销毁，再次需要时复用，避免重复实例化与 GC。</li>
+            <li><strong>内存池</strong>：预分配固定大小块，分配/归还都是 O(1)，且不产生碎片。</li>
+            <li><strong>分配器</strong>：按生命周期选择不同分配策略，短生命周期对象用线性/栈分配，长生命周期用通用堆。</li>
+        </ul>
+
+        <p>一个通用对象池实现：</p>
+
+<pre><code class="language-csharp">using System.Collections.Generic;
+using UnityEngine;
+
+public class GameObjectPool
+{
+    private readonly Stack<GameObject> available = new Stack<GameObject>();
+    private readonly GameObject prefab;
+    private readonly Transform root;
+
+    public GameObjectPool(GameObject prefab, Transform root, int preload)
+    {
+        this.prefab = prefab;
+        this.root = root;
+
+        for (int i = 0; i < preload; i++)
+        {
+            GameObject instance = Create();
+            instance.SetActive(false);
+            available.Push(instance);
+        }
+    }
+
+    public GameObject Get()
+    {
+        GameObject instance = available.Count > 0 ? available.Pop() : Create();
+        instance.SetActive(true);
+        return instance;
+    }
+
+    public void Release(GameObject instance)
+    {
+        instance.SetActive(false);
+        instance.transform.SetParent(root, false);
+        available.Push(instance);
+    }
+
+    private GameObject Create()
+    {
+        return Object.Instantiate(prefab, root);
+    }
+}
+</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>池化的常见误用</strong>：
+            <ul>
+                <li>取出对象时未重置状态（血量、位置、协程残留），导致脏数据 bug。</li>
+                <li>池只增不减、预分配过大，长期占用内存反而更糟，应设置容量上限与回收策略。</li>
+                <li>把创建成本极低、生命周期简单的对象也塞进池，徒增复杂度。</li>
+            </ul>
+        </div>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">基础练习</span>对象池接入</h3>
+            <p>把项目中频繁生成的子弹/特效改为对象池，用 Profiler 对比改造前后的 GC Alloc 与实例化耗时。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>懒加载边界</h3>
+            <p>懒加载是否适用于所有数据？请分析在战斗中首次访问触发同步 IO 会带来什么风险，以及如何规避。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">进阶挑战</span>池容量治理</h3>
+            <p>为对象池增加容量上限与闲置超时回收，使池大小随实际使用量自适应，而不是只增不减。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>场景加载走离线分析、空间划分、优先级、异步分帧、由近到远显示的完整流程。</li>
+            <li>Mipmap 用空间换带宽与画质，视角固定时可按视野变化减少重复纹理生成。</li>
+            <li>Model 延迟加载用懒加载只载入需要的字段，降低启动内存峰值。</li>
+            <li>对象池/内存池消除重复分配与碎片，但必须重置状态并治理容量。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章</strong>：进入图形与动画的高级主题，讲面片阴影、动画 Job 分帧，以及引擎管线定制。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="09-距离场碰撞优化.html">← 上一章：距离场碰撞优化</a>
+            <a href="11-阴影动画与引擎管线定制.html">下一章：阴影、动画与引擎管线定制 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

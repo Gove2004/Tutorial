@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>11 Unity 框架架构与代码走读 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="10-类别码本匹配.html">← 上一章：类别码本匹配</a>
+    <a href="12-AI4AnimationPy框架详解.html">下一章：AI4AnimationPy →</a>
+</nav>
+
+<main>
+    <h1>11　Unity 框架架构与代码走读</h1>
+    <p>本章基于仓库当前 master 分支的真实目录结构，讲解 Unity 版的工程组织、编辑器工作流与运行时组件。
+    阅读时建议对照仓库代码，而不是把它当作抽象概念。</p>
+
+    <h2>11.1 仓库目录的真实结构</h2>
+    <p>主仓库的 <code>AI4Animation/</code> 目录下，一个原生插件目录加七个按年份/会议命名的项目目录：</p>
+<pre class="tree"><code>AI4Animation/
+├── Plugins/                  # 原生 Eigen 插件（x86 / x86_64）
+│   ├── Libraries/            # 编译好的原生 dll
+│   └── Source/Eigen/         # C# 包装层
+├── SIGGRAPH_2017/            # PFNN（Original + Adam 两个 Demo）
+├── SIGGRAPH_2018/            # MANN 四足
+├── SIGGRAPH_Asia_2019/       # NSM 场景交互
+├── SIGGRAPH_2020/            # 局部运动相位
+├── SIGGRAPH_2022/            # DeepPhase
+├── SIGGRAPH_2024/            # 类别码本匹配
+└── （当前 master 未包含 2021 NAL 的工程目录，仅在 README 中提供论文入口）</code></pre>
+
+    <div class="callout callout-warning">
+        <span class="callout-title">需要注意的事实</span>
+        <p>当前 master 分支中<strong>没有 SIGGRAPH_2021 工程目录</strong>。引用或复现 NAL 时，应以 README 链接的论文为准，
+        不要假设仓库里有对应 Unity 工程。各年份项目是独立的 Unity 工程，并非一个共用工程内的不同场景。</p>
+    </div>
+
+    <h2>11.2 2017：单体脚本时代</h2>
+    <p>最早的 PFNN 工程结构简单直接。Unity 工程的 <code>Assets/</code> 下核心逻辑集中在两个 C# 脚本：</p>
+    <ul>
+        <li><code>BioAnimation_Original.cs</code>：论文原始实现，包含数据处理、网络推理、轨迹混合、IK 与场景绘制的全部逻辑</li>
+        <li><code>BioAnimation_Adam.cs</code>：社区改进版，对应不同的优化器与参数设置</li>
+    </ul>
+    <p>这种"一个大脚本包办一切"的写法便于论文复现，但模块边界模糊、难以扩展。后续年份的项目逐步把它拆分成
+    实体、组件与系统式的结构。</p>
+
+    <h2>11.3 原生矩阵运算：Eigen 插件</h2>
+    <p><code>Plugins/</code> 目录提供编译好的 Eigen（C++ 线性代数库）原生二进制，分 x86 与 x86_64 两套，
+    <code>Source/Eigen/</code> 是对应的 C# 包装层。Unity 通过 P/Invoke 调用原生库完成矩阵运算，
+    避免在纯 C# 中实现高性能线性代数。</p>
+    <div class="callout callout-info">
+        <span class="callout-title">工程含义</span>
+        <p>这也解释了为什么早期仓库强绑定 Windows 平台与特定 CPU 架构——原生 dll 是平台相关的。迁移到其他平台时，
+        需要重新编译原生插件，或改用纯托管实现。</p>
+    </div>
+
+    <h2>11.4 编辑器工作流：菜单与 Inspector</h2>
+    <p>从 2020 项目的 ReadMe 可以确认，数据处理通过 Unity 顶部 <code>AI4Animation</code> 菜单下的三类工具完成：</p>
+    <table>
+        <thead><tr><th>菜单分组</th><th>工具</th><th>职责</th></tr></thead>
+        <tbody>
+            <tr><td>Importer</td><td>BVH Importer</td><td>批量导入原始 BVH，生成 Unity 内的运动资产</td></tr>
+            <tr><td>Tools</td><td>MotionProcessor</td><td>按管线（如 Quadruped Pipeline）自动处理原始动捕，含相位/接触/特征</td></tr>
+            <tr><td>Exporter</td><td>Motion Exporter</td><td>导出训练数据，可配置 Frame Shifts、Frame Buffer、Write Mirror</td></tr>
+        </tbody>
+    </table>
+    <p>场景侧由一个挂载 <code>MotionEditor</code> 组件的空 GameObject 承载，目标帧率等参数在 Inspector 的
+    Editor Settings 中配置（例如 30 Hz）。</p>
+
+    <h2>11.5 训练与权重的对接方式</h2>
+    <p>2020 项目的训练仍在 Unity 外部完成，流程在 ReadMe 中有明确记录：</p>
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content"><p>用 Motion Exporter 导出训练数据，写入工程内 <code>DeepLearning/</code> 目录</p></div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content"><p>把数据放入 <code>DeepLearning/Models/ExpertModel/</code> 的数据集目录，运行外部 <code>main.py</code> 开始训练</p></div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content"><p>训练产出二进制权重，把训练目录路径填入角色 ExpertModel 组件的 Inspector 字段，点击 Play 即可运行</p></div>
+        </div>
+    </div>
+    <p>预训练权重统一放在 <code>DeepLearning/Weights</code>。到 2024 项目，外部训练已切换为 PyTorch，Unity 侧通过
+    ONNX 加载模型——工程内可以看到 <code>ONNXTraining</code> 示例与对应的 C# 脚本。</p>
+
+    <h2>11.6 ECS 风格的运行时架构</h2>
+    <p>AI4AnimationPy 官方文档明确说明其保留了原版"熟悉的 ECS 风格架构与更新循环"。反推 Unity 版的运行时设计，
+    角色运动由分层的实体与组件在每帧更新中驱动，而不是依赖 MonoBehaviour 的隐式调用顺序：</p>
+
+    <pre class="mermaid">
+flowchart TD
+        Input["输入设备<br/>手柄/键盘"] --> Controller["控制器组件<br/>生成未来轨迹"]
+        Controller --> Model["模型组件<br/>ExpertModel 推理"]
+        Model --> IK["IK 组件<br/>接触修正"]
+        IK --> Actor["角色实体<br/>写入骨骼 Transform"]
+        Actor --> Draw["调试绘制<br/>轨迹/接触/相位"]
+        style Model fill:#eaf7ed,stroke:#38a152
+        style IK fill:#fff2dd,stroke:#f08c1a
+    </pre>
+    <p class="mermaid-caption">图 11-1　运行时更新链</p>
+
+    <h2>11.7 2024 工程中的示例模块</h2>
+    <p>2024 Unity 工程的 <code>Assets/Examples/</code> 下包含一组可独立打开的示例场景，体现框架的能力边界：</p>
+    <table>
+        <thead><tr><th>示例</th><th>用途</th></tr></thead>
+        <tbody>
+            <tr><td>Blank</td><td>空工程模板，新项目起点</td></tr>
+            <tr><td>IK</td><td>逆向运动学后处理演示（Robot Kyle 角色）</td></tr>
+            <tr><td>KDTree</td><td>KD 树空间检索，含独立 C# 示例</td></tr>
+            <tr><td>MeshCollider</td><td>基于网格碰撞体的环境几何处理</td></tr>
+            <tr><td>ONNXTraining</td><td>在 Unity 中加载/训练 ONNX 模型</td></tr>
+            <tr><td>Optimization</td><td>性能优化相关示例</td></tr>
+        </tbody>
+    </table>
+
+    <h2>11.8 常见工程陷阱</h2>
+    <div class="callout callout-danger">
+        <span class="callout-title">踩坑清单</span>
+        <ul>
+            <li><strong>架构不匹配</strong>：原生 dll 分 x86/x64，Unity 工程的目标架构必须与插件一致，否则运行时找不到入口</li>
+            <li><strong>帧率不一致</strong>：处理数据时的目标帧率（如 30 Hz）与特征窗口假设必须一致，混用时窗口长度会错位</li>
+            <li><strong>镜像开关</strong>：导出时 Write Mirror 决定数据是否翻倍，训练与推理的特征布局要对应</li>
+            <li><strong>路径硬编码</strong>：ExpertModel 依赖 Inspector 中的目录路径，换机器或移动工程后需要重新指定</li>
+        </ul>
+    </div>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>代码走读</h4>
+                    <p>打开 2017 工程的 <code>BioAnimation_Original.cs</code>，按"数据处理、推理、轨迹混合、IK、绘制"给代码分段，统计各部分的大致行数占比。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>流程复现</h4>
+                    <p>依据 11.5，画出从 BVH 导入到 Play 运行的完整数据流，标注哪些步骤在 Unity 内、哪些在外部 Python 完成。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>架构判断</h4>
+                    <p>为什么把单体脚本拆成 ECS 风格组件后更利于扩展？结合更新顺序与模块复用回答。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>Unity 版由原生 Eigen 插件与七个独立年份工程组成，当前 master 不含 2021 工程目录</li>
+        <li>2017 为单体脚本，后续演进为 ECS 风格的实体/组件/更新循环；矩阵运算依赖平台相关的原生 dll</li>
+        <li>编辑器通过 Importer/Tools/Exporter 三类菜单工作，外部 main.py 训练后把路径填回 ExpertModel</li>
+        <li>2024 工程以 PyTorch + ONNX 为核心，Examples 覆盖 IK、KDTree、MeshCollider、ONNX 等模块</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://raw.githubusercontent.com/sebastianstarke/AI4Animation/master/AI4Animation/SIGGRAPH_2020/ReadMe.md">2020 项目 ReadMe（编辑器工作流原始记录）</a></li>
+            <li><a href="https://github.com/sebastianstarke/AI4Animation">主仓库目录</a></li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="10-类别码本匹配.html">← 上一章：类别码本匹配</a>
+        <a href="12-AI4AnimationPy框架详解.html">下一章：AI4AnimationPy →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

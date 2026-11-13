@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UI 性能优化专题 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="05-DrawCall与合批优化.html">← 上一章</a>
+        <a href="07-动态自适应与特效分级.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>UI 性能优化专题</h1>
+        <p class="chapter-meta">模块二 · 优化策略实战 ｜ 对应原文策略 2、11，并结合 UGUI 机制展开</p>
+
+        <p>UI 是游戏里最容易被忽视的性能热点。逻辑上它只是“几个面板”，但在复杂项目里，UI 元素数量可能远超场景物体，且大量 UI 是半透明的，天然带来 Overdraw。本章先讲清楚 UGUI 最核心的 Canvas 重建机制，再覆盖 3D UI、管线分离、字体描边与图集治理。</p>
+
+        <h2>6.1 Canvas 重建机制：一个元素变化，整个画布重算</h2>
+
+        <p>UGUI 的更新遵循“脏标记 → 重建”模型。当一个 UI 元素变化时，它会被标记为布局脏（Layout Dirty）或顶点脏（Vertices Dirty），并向上冒泡。在 Canvas 触发重建（WillRenderCanvases）时，<strong>会遍历该 Canvas 下所有被标记的元素，重新计算布局并重建顶点缓冲</strong>。</p>
+
+        <div class="callout callout-danger">
+            <strong>关键陷阱</strong>：重建的成本与 Canvas 内元素总数相关，而不只是变化的元素。如果一个含上千元素的大 Canvas 里只有一个小图标在闪烁，每次闪烁都可能导致整个 Canvas 重新遍历。这就是 UI 卡顿最常见的根源。
+        </div>
+
+        <h3>Canvas 拆分原则</h3>
+        <ul>
+            <li><strong>静态与动态分离</strong>：不变的背景、装饰放进静态 Canvas；频繁变化的血条、计时器、动画放进独立小 Canvas，把重建范围限制在小画布内。</li>
+            <li><strong>按功能区域拆分</strong>：不同面板、不同 HUD 区域各自独立，避免打开一个面板影响到其他区域。</li>
+            <li><strong>嵌套 Canvas 用于隔离冒泡</strong>：子 Canvas 可以阻止脏标记继续向上传播。</li>
+        </ul>
+
+        <div class="callout callout-warning">
+            <strong>Canvas 不是越多越好</strong>：跨 Canvas 的元素无法合批，每个 Canvas 至少产生独立批次，Canvas 过多会推高 Draw Call。拆分目标是隔离“高频变化”，而不是给每个元素都建 Canvas，需要在重建成本与批次数之间权衡。
+        </div>
+
+        <h2>6.2 策略 2：3D UI</h2>
+
+        <p>部分 UI 可以用 3D 面片实现以替代传统 UGUI，从而直接复用引擎已有的<strong>材质系统、图集、合批机制与渲染管线</strong>。这种方式特别适合小地图以及一些特殊 UI——它们本质上更接近“贴在面片上的纹理”，没有复杂的布局与交互需求，用 3D 渲染反而能与场景对象一起合批，避免 UI 与 3D 两套体系的重复开销。</p>
+
+        <h2>6.3 策略 11：UI 渲染管线分离</h2>
+
+        <p>UI 渲染与 3D 场景渲染的需求差异明显：3D 需要完整的空间剔除、光照、阴影，而 UI 基本是屏幕空间的二维绘制。把 <strong>UI Camera 与 3D Camera 的渲染管线拆分</strong>，可以减少两条管线之间的重复计算。</p>
+
+        <ul>
+            <li>UI 元素几乎都位于屏幕范围内，因此 UI 管线可以减少不必要的 Camera Culling 计算。</li>
+            <li>独立的 UI 管线可以跳过光照、阴影等与 UI 无关的特性。</li>
+            <li>避免 3D 场景的一些全屏 Pass 误作用于 UI 层。</li>
+        </ul>
+
+        <h2>6.4 字体、描边与顶点放大</h2>
+
+        <p>文字组件上的视觉修饰会成倍增加顶点数，这是容易被忽略的隐性成本：</p>
+
+        <table>
+            <thead>
+                <tr><th>组件</th><th>顶点放大</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>普通文本</td><td>1 倍基准</td><td>每个字符四边形</td></tr>
+                <tr><td>Shadow（阴影）</td><td>约 2 倍</td><td>额外复制一份偏移顶点</td></tr>
+                <tr><td>Outline（描边）</td><td>约 5 倍</td><td>四个方向各复制一份顶点</td></tr>
+            </tbody>
+        </table>
+
+        <p>原文建议低端机降低字体描边质量甚至直接关闭。此外，动态字体图集在遇到图集外字符时会触发重建，运行时大量生僻字还可能撑爆图集；项目应尽量使用预生成字符集或 TextMeshPro 并固化字体资产。</p>
+
+        <h2>6.5 UI Overdraw 与图集治理</h2>
+
+        <p>UI 是半透明 Overdraw 的主要来源。常见问题包括：全屏不透明背景之上再叠多层半透明面板、用大尺寸透明图做 Mask、圆角矩形叠层。应在 Overdraw 调试视图中定位高重叠区域，移除不可见的底层背景，Mask 优先用矩形裁剪而非像素级透明遮罩。</p>
+
+        <ul>
+            <li><strong>图集</strong>：同一面板、同一批次的 Sprite 必须打进同一图集，散图会打断合批。</li>
+            <li>避免同一贴图被重复打进多个图集，造成内存翻倍。</li>
+            <li>控制图集尺寸，移动端单张图集通常不超过 2048，超大图集既浪费内存又降低采样效率。</li>
+        </ul>
+
+        <h2>6.6 工程实现：节流的 UI 刷新</h2>
+
+        <p>很多 UI 刷新是被数据变化事件高频触发的，但视觉上不需要这么快响应。对刷新做节流合并，可以把一帧内的多次变化收敛为一次重建：</p>
+
+<pre><code class="language-csharp">using System;
+using UnityEngine;
+
+public class ThrottledLabel : MonoBehaviour
+{
+    private Action refresh;
+    private bool queued;
+    [SerializeField] private float interval = 0.1f;
+    private float nextAllowed;
+
+    public void Bind(Action onRefresh)
+    {
+        refresh = onRefresh;
+    }
+
+    public void RequestRefresh()
+    {
+        if (queued) return;
+        queued = true;
+
+        float wait = Mathf.Max(0f, nextAllowed - Time.unscaledTime);
+        Invoke(nameof(Flush), wait);
+    }
+
+    private void Flush()
+    {
+        queued = false;
+        nextAllowed = Time.unscaledTime + interval;
+        refresh?.Invoke();
+    }
+
+    void OnDisable()
+    {
+        CancelInvoke();
+        queued = false;
+    }
+}
+</code></pre>
+
+        <h2>6.7 原文归纳的三类 UI 性能问题</h2>
+        <ol>
+            <li><strong>事件响应产生冗余</strong>：数据事件被重复监听、面板未取消订阅导致刷新放大。</li>
+            <li><strong>UI 重建产生额外开销</strong>：大 Canvas 内高频变化触发整画布重建。</li>
+            <li><strong>面板更新存在冗余</strong>：隐藏面板仍在刷新、不可见区域仍在重算。</li>
+        </ol>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">基础练习</span>拆分 Canvas</h3>
+            <p>检查项目中最大的一个 Canvas，列出其中的静态与动态元素，给出拆分方案，并用 Profiler 对比拆分前后 <code>Canvas.BuildBatch</code> 的耗时。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>顶点预算</h3>
+            <p>一个带 Outline 的文本列表有 50 行，每行 10 个字符。估算描边让该列表的顶点数膨胀了多少，并判断在低端机上是否值得保留描边。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">进阶挑战</span>隐藏即停</h3>
+            <p>实现一套机制，保证面板被关闭或移出屏幕时，其所有刷新请求与事件监听都被挂起，重新显示时再恢复。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>UGUI 采用脏标记重建，重建成本与 Canvas 元素总数相关；用静态/动态分离和子 Canvas 限制重建范围。</li>
+            <li>3D UI 复用引擎材质与合批体系，适合小地图等二维面片型界面。</li>
+            <li>UI 与 3D 管线拆分，减少重复剔除与无关特性。</li>
+            <li>描边/阴影成倍放大顶点；UI 半透明叠层是 Overdraw 重灾区；图集决定合批能否成立。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://docs.unity3d.com/Manual/UICanvas.html" target="_blank">Unity 手册：Canvas</a></li>
+                <li><a href="https://docs.unity3d.com/Manual/UIOptimization.html" target="_blank">Unity 手册：UI 性能优化</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="05-DrawCall与合批优化.html">← 上一章：Draw Call 与合批优化</a>
+            <a href="07-动态自适应与特效分级.html">下一章：动态自适应与特效分级 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

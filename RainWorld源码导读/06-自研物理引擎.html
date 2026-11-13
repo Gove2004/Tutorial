@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 自研物理引擎 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="05-世界加载与房间系统.html">← 上一章</a>
+        <a href="07-生物骨架与模板系统.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>06 自研物理引擎</h1>
+        <p>Rain World 没有使用 Unity 内置的 PhysX，而是写了一套基于圆形刚体、瓦片扫描碰撞和弹簧质点约束的 2D 物理系统。生物那柔软、连贯、从物理中涌现的动作，正是这套引擎的产物。本章拆解它的每一个组成部分。</p>
+
+        <h2>6.1 为什么要自研物理</h2>
+        <p>PhysX 是为通用刚体设计的，擅长离散碰撞、关节、网格碰撞，但它有几个不适合 Rain World 的地方：</p>
+        <ul>
+            <li><strong>需要软体/质点弹簧的可控感</strong>：蛞蝓猫、蜥蜴的身体由多个圆形 chunk 用弹簧连接，姿态要能被代码直接驱动，PhysX 关节调参困难且结果不稳定。</li>
+            <li><strong>瓦片世界的确定性</strong>：地形是规则 20 像素瓦片，自研扫描碰撞比通用引擎更快、结果更可预测。</li>
+            <li><strong>位置型修正的稳定性</strong>：直接修改位置的约束能避免高速穿透，且与固定步长配合后几乎不会爆炸。</li>
+        </ul>
+
+        <h2>6.2 物理更新的完整顺序</h2>
+        <p>回顾第 3、5 章，物理在 Room.Update 内被驱动，单个对象的物理顺序在 PhysicalObject.Update 中：</p>
+<pre class="mermaid">
+flowchart TD
+    A["Room.Update 遍历 updateList"] --> B["PhysicalObject.Update(eu)"]
+    B --> C["每个 BodyChunk.Update：重力/阻力/积分/瓦片碰撞"]
+    C --> D["同步抽象瓦片位置"]
+    D --> E["BodyChunkConnection.Update：弹簧约束"]
+    E --> F["Appendage.Update：肢体"]
+    F --> G["Room 阶段：对象间圆形碰撞（分桶）"]
+</pre>
+
+        <h2>6.3 BodyChunk：圆形刚体</h2>
+        <p>BodyChunk 是物理世界的最小刚体，本质是一个带质量的圆：</p>
+<pre><code class="language-csharp">public Vector2 pos;       // 当前位置（像素）
+public Vector2 lastPos;   // 上一逻辑步位置
+public Vector2 lastLastPos;
+public Vector2 vel;       // 速度（像素/步）
+public float rad;         // 半径
+public float mass;
+public float gravity;
+public int contactPoint;  // 接触方向（地形碰撞结果）</code></pre>
+
+        <h3>半隐式欧拉积分</h3>
+        <p>BodyChunk.Update 先施加力、再积分位置，属于半隐式欧拉（semi-implicit Euler）：</p>
+<pre><code class="language-csharp">vel.y -= gravity;                 // 1. 重力
+// 空气/水阻力、浮力处理 ...
+lastLastPos = lastPos;
+lastPos = pos;
+pos += vel;                       // 2. 积分（速度先更新，位置后更新）</code></pre>
+        <p>在水中则用浮力替换部分重力，并按 <code>waterDrag</code> 衰减速度；沙地区间有额外的阻力与埋身处理。</p>
+
+        <h2>6.4 瓦片扫描碰撞</h2>
+        <p>地形碰撞分垂直、水平两个方向，思路一致：<strong>找出 chunk 边缘在一个逻辑步内扫过的瓦片范围，逐一检查 Solid，命中则把位置推回、速度反弹</strong>。以落地（向下）为例：</p>
+<pre><code class="language-csharp">if (SolidFloor(k, num2) && !SolidFloor(k, num2 + 1) && ...)
+{
+    pos.y = ((float)num2 + 1f) * 20f + TerrainRad;   // 推回地面
+    if (vel.y < 0f - owner.impactTreshhold)
+        owner.TerrainImpact(index, new IntVector2(0, -1), Mathf.Abs(vel.y), ...);
+    contactPoint.y = -1;
+    vel.y = Mathf.Abs(vel.y) * owner.bounce;         // 反弹
+    if (vel.y < owner.gravity || vel.y < 1f + 9f * (1f - owner.bounce))
+        vel.y = 0f;                                   // 小速度归零，停止抖动
+}</code></pre>
+        <ul>
+            <li><strong>bounce 弹性系数</strong>：决定反弹保留多少速度，生物身体通常很低，接近 0。</li>
+            <li><strong>surfaceFriction</strong>：碰撞时按摩擦衰减水平速度，让物体在地面减速。</li>
+            <li><strong>impactTreshhold</strong>：冲击速度超过阈值才触发 TerrainImpact（音效、扬尘、受伤），轻微接触不响。</li>
+            <li><strong>MaxRepeats 紧急退出</strong>：限制单个 chunk 碰撞检查次数，极端情况下强制跳出并记日志，防止卡死。</li>
+        </ul>
+        <div class="callout callout-info">
+            <p><strong>先垂直后水平的顺序</strong>：BodyChunk.Update 依次调用 CheckVerticalCollision、斜坡检查、CheckHorizontalCollision。分轴处理避免了斜向碰撞的歧义，每轴只解决一个方向的穿透，是 2D 瓦片碰撞的经典做法。</p>
+        </div>
+
+        <h2>6.5 BodyChunkConnection：弹簧约束</h2>
+        <p>多个 chunk 之间用 BodyChunkConnection 维持距离，这是生物身体保持连贯形态的关键。三种约束类型：</p>
+        <table>
+            <thead><tr><th>类型</th><th>生效条件</th><th>用途</th></tr></thead>
+            <tbody>
+                <tr><td>Normal</td><td>总是</td><td>双向维持固定距离（身体主干）</td></tr>
+                <tr><td>Pull</td><td>仅当被拉长（距离变大）</td><td>只拉不推，模拟可弯曲但不撕裂的连接</td></tr>
+                <tr><td>Push</td><td>仅当被压缩（距离变小）</td><td>只推不拉，保持身体刚度、防止折叠塌陷</td></tr>
+            </tbody>
+        </table>
+<pre><code class="language-csharp">public void Update()
+{
+    float num = Vector2.Distance(chunk1.pos, chunk2.pos);
+    if (type == Type.Normal || (type == Type.Pull && num > distance)
+        || (type == Type.Push && num < distance))
+    {
+        Vector2 vector = Custom.DirVec(chunk1.pos, chunk2.pos);
+        Vector2 vector2 = vector * ((distance - num) * weightSymmetry * elasticity);
+        Vector2 vector3 = vector * ((distance - num) * (1f - weightSymmetry) * elasticity);
+        chunk1.pos -= vector2; chunk1.vel -= vector2;   // 同时改位置和速度
+        chunk2.pos += vector3; chunk2.vel += vector3;
+    }
+}</code></pre>
+        <p>这是典型的<strong>位置型动力学（PBD）思路</strong>：根据距离偏差直接修正位置，并同步修正速度。<code>weightSymmetry</code> 按质量比分配修正量，重的 chunk 移动得少；<code>elasticity</code> 控制约束的软硬。</p>
+
+        <h2>6.6 Appendage：程序化肢体</h2>
+        <p>触手、尾巴、长舌等附属结构由 Appendage 表达，它是一组分段位置，<strong>每节位置由实现 IHaveAppendages 的 owner 决定</strong>，引擎本身只负责存储与查询：</p>
+<pre><code class="language-csharp">public void Update()
+{
+    for (int i = 0; i < segments.Length; i++)
+    {
+        segments[i] = ownerApps.AppendagePosition(appIndex, i);
+        if (i > 0) totalLength += Vector2.Distance(segments[i - 1], segments[i]);
+    }
+}</code></pre>
+        <p>它提供 <code>LineCross</code> 线段交叉检测，用于判断矛是否砍中触手、触手是否缠绕对象；位置与方向可在分段间插值。把“肢体如何摆动”留给生物自己，引擎只提供几何能力，是又一处组合设计。</p>
+
+        <h2>6.7 对象间碰撞：空间分桶</h2>
+        <p>除了地形，对象之间也要碰撞。Room 用 <code>physicalObjects</code>（按 3 个碰撞层分桶）避免 O(n²) 全量检测，碰撞阶段两两检查 chunk 圆形重叠：</p>
+<pre><code class="language-csharp">// 同一空间格内的两个对象，逐 chunk 检测圆形重叠
+float num = Vector2.Distance(chunk.pos, otherChunk.pos);
+if (num < chunk.rad + otherChunk.rad)
+{
+    // 按质量比推开，修正位置与速度
+    Collide(otherObject, otherChunk, chunk, ...);
+}</code></pre>
+        <p>碰撞响应同样按质量比分配位移，重的物体不易被推动；<code>Collide</code> 是虚方法，子类可重写以实现“碰到时发生什么”（如受伤、黏附、触发）。</p>
+
+        <h2>6.8 FPhysics：多边形碰撞子系统</h2>
+        <p>除了瓦片，Rain World 还有一套基于多边形的物理（FPhysics 命名空间），用于非瓦片的特殊地形与物体：</p>
+        <ul>
+            <li><code>FPPolygonalCollider</code>：多边形碰撞体，支持任意轮廓，配合 <code>terrain.TrySnapToTerrain</code> 做吸附式碰撞。</li>
+            <li><code>FPhysicsNode</code>：多边形物理节点，可组成自定义结构。</li>
+            <li>BodyChunk 的垂直碰撞里会先尝试 <code>terrain.TrySnapToTerrain</code>，命中多边形地形则直接吸附，再走瓦片逻辑，两套系统并存。</li>
+        </ul>
+
+        <h2>6.9 流体与环境阻力</h2>
+        <p>水不是简单的开关，而是独立的 Water 对象（属于 accessModifiers），影响其中所有 chunk：浮力抵消重力、水阻力衰减速度、水面溅起效果。房间的 <code>defaultWaterLevel</code> 决定初始水位，WaterFlux 还能让水位动态涨落。这些环境力都在 BodyChunk.Update 开头按 chunk 是否处于水中施加。</p>
+
+        <h2>6.10 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：在一个步内施加过大速度导致穿透</summary>
+            <div class="details-content"><p>扫描碰撞依赖“一个步内扫过的瓦片范围”，若单步位移超过几个瓦片仍可能漏检或异常。突发加速应分多帧施加，或检查 contactPoint 后再行动。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：弹性/约束参数过大导致抖动</summary>
+            <div class="details-content"><p>elasticity 接近 1、bounce 过高会让约束反复过冲，chunk 持续抖动。生物身体宜用低弹性，靠多帧收敛而非单步硬拉。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：绕过 PhysicalObject.Update 直接改位置</summary>
+            <div class="details-content"><p>直接写 pos 会跳过碰撞与约束，导致穿墙或身体脱节。外部移动应使用 RelativeMoveFromOutsideMyUpdate 等专用方法，让引擎统一处理。</p></div>
+        </details>
+
+        <h2>6.11 练习与思考</h2>
+        <ol>
+            <li>手工推演 BodyChunkConnection 在两 chunk 距离被压缩到小于 distance 时，Normal 与 Push 两种类型各自的修正方向与结果。</li>
+            <li>结合代码说明为什么“先更新所有 chunk、再统一施加连接约束”的顺序，比“每更新一个 chunk 立刻约束”更稳定。</li>
+            <li>思考：PBD 直接改位置的做法与 PhysX 基于冲量（impulse）的解法相比，在稳定性、性能和可控性上各有什么取舍？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>自研物理由圆形刚体、瓦片扫描碰撞、弹簧约束、程序化肢体和多边形子系统组成。</li>
+            <li>BodyChunk 用半隐式欧拉积分，瓦片碰撞分轴推回并按 bounce/摩擦处理，带冲击阈值与防死循环保护。</li>
+            <li>BodyChunkConnection 用 PBD 思路按质量比修正位置与速度，三类型分别处理拉/压。</li>
+            <li>对象碰撞靠空间分桶，FPhysics 提供多边形能力，水与环境以力的形式参与每步更新。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="05-世界加载与房间系统.html">← 上一章：世界加载与房间系统</a>
+            <a href="07-生物骨架与模板系统.html">下一章：生物骨架与模板系统 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 - 实时控制：相位函数网络 - 角色动画生成的深度学习发展史</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-深度学习入场-动作流形学习.html">← 上一章</a>
+        <a href="06-生成模型时代-文本到动作.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>实时控制：相位函数网络</h1>
+
+        <p>这一章是这个教程对你最有用的章节——<strong>AI4Animation 系列的核心思想全在这里</strong>。2017-2020 年，深度学习真正进入了"实时游戏控制"领域：角色跟着摇杆走、跑、跳、攀爬，全部实时生成。而这一切的关键，是一个看起来很简单但极其聪明的概念：<strong>相位（Phase）</strong>。</p>
+
+        <h2>5.1 问题：从"编辑器"到"实时控制器"</h2>
+
+        <p>上一章的 Holden 2016 能编辑/插值动作，但它不能干游戏里最核心的一件事：<strong>实时响应玩家输入</strong>。游戏要求每 16ms（60fps）输出一帧动作，输入是"摇杆方向 + 按键 + 当前姿态"。</p>
+
+        <p>把这个问题形式化：</p>
+
+        <div class="definition">
+            <h4>条件动作生成（Conditional Motion Generation）</h4>
+            <p>给定当前姿态 <code>x<sub>t</sub></code> 和用户控制信号 <code>c</code>（速度、方向、动作类型），生成下一帧姿态 <code>x<sub>t+1</sub></code>。游戏里每一帧都要调用一次。</p>
+        </div>
+
+        <p>难点在于：<strong>同样的"往前跑"，左脚着地和右脚着地时，下一帧的预期动作完全不同</strong>。如果网络不区分这个，生成的动作会左右脚混乱、抖成帕金森。</p>
+
+        <h2>5.2 核心思想：相位（Phase）</h2>
+
+        <div class="definition">
+            <h4>运动相位（Motion Phase）</h4>
+            <p>用一个标量（或向量）描述"角色当前处于运动周期的哪个位置"。走路是周期运动：左脚踏出 → 右脚踏出 → 左脚踏出……这个周期可以用一个相位角 φ ∈ [0, 2π) 表示。φ 每走完一圈，就是一个完整的步态周期。</p>
+        </div>
+
+        <p>为什么相位是关键：</p>
+        <ul>
+            <li><strong>它把"时序"变成"条件"</strong>：网络不需要自己"记住"走到哪一步了，你把相位直接告诉它</li>
+            <li><strong>它让网络学会"分状态"</strong>：给同样的输入，但相位不同，网络输出不同——左脚着地还是右脚着地，网络分得清</li>
+            <li><strong>它是可控的</strong>：你让相位随玩家速度自然推进，角色就自动从走过渡到跑（走的周期变快 = 跑的周期）</li>
+        </ul>
+
+        <div class="sidebar-note">
+            <strong>游戏开发者视角</strong>：这有点像你熟悉的 Blend Tree / State Machine，但相位是<strong>连续且自动推进</strong>的，不用动画师手摆状态切换条件。而且相位是从数据里学出来的运动周期，不是人定的。
+        </div>
+
+        <h2>5.3 三篇里程碑论文（AI4Animation 血脉）</h2>
+
+        <h3>① PFNN：Phase-Functioned Neural Network（Holden 2017）</h3>
+
+        <div class="definition">
+            <h4>Holden, Komura, Saito. "Phase-Functioned Neural Networks for Character Control." SIGGRAPH 2017</h4>
+            <p>网络参数由一个"相位相关的函数"动态生成：把相位 φ 输入一个小的网络，输出主网络每一层的权重。不同相位用不同权重，相当于"每帧根据步态位置切换一个专用网络"。</p>
+        </div>
+
+        <p>效果：单个网络实时生成<strong>行走、奔跑、跳跃、攀爬</strong>，且过渡自然——这是第一个能在游戏引擎里实时跑的深度学习角色控制器。英伟达当时做了大力宣传。</p>
+
+        <h3>② Local Motion Phases（Starke 2019）</h3>
+
+        <div class="definition">
+            <h4>Starke, Zhang, Komura, Saito. "Local Motion Phases for Learning Multi-Character Controllers." SIGGRAPH 2019</h4>
+            <p>把单个全局相位推广为<strong>每个肢体一个局部相位</strong>（左脚相位、右脚相位、手臂相位……），并支持多角色控制（足球运动员带球、传球、抢断）。<strong>作者 Sebastian Starke 就是 AI4Animation 的作者。</strong></p>
+        </div>
+
+        <p>为什么局部相位更强：</p>
+        <ul>
+            <li>走路是全局周期，但"挥手"和"踢腿"各有自己的周期，全局一个相位表达不了</li>
+            <li>每个肢体独立相位 → 可以生成"边走边挥手"这种组合动作</li>
+            <li>多角色：同一套机制可以控制不同体型/不同运动能力的角色</li>
+        </ul>
+
+        <h3>③ Neural Animation Layering（Starke 2020）</h3>
+
+        <div class="definition">
+            <h4>Starke et al. "Neural Animation Layering for Synthesizing Martial Arts Movements." SIGGRAPH 2020</h4>
+            <p>把动作分成<strong>基础层（locomotion，走路/站立）</strong>和<strong>叠加层（overlay，出拳/格挡/表情）</strong>，分别建模再合成。解决"组合动作"问题——站着能出拳，走着也能出拳，只是手臂动作叠加在腿部运动之上。</p>
+        </div>
+
+        <p>这和你游戏开发里的"分层动画"（Locomotion Layer + Upper Body Layer）思想完全一致，只不过层的内容由网络生成，而不是动画师预先 blend。</p>
+
+        <h2>5.4 相位怎么算出来？一个关键工程问题</h2>
+
+        <p>相位不是天上掉下来的，它要从数据里提取。常见做法：</p>
+
+        <table>
+            <thead>
+                <tr><th>方法</th><th>思路</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>人工定义</strong></td>
+                    <td>走路/跑步这类周期运动，直接看根节点速度的周期性，手动对齐相位</td>
+                </tr>
+                <tr>
+                    <td><strong>从脚部数据提取</strong></td>
+                    <td>通过"脚何时着地/离地"定义步态周期（Starke 2019 的做法）</td>
+                </tr>
+                <tr>
+                    <td><strong>学习得到</strong></td>
+                    <td>让网络自己学一个相位表示（更灵活，用于非周期动作）</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>局限（要诚实）</strong>：相位方法的前提是<strong>动作有周期性</strong>。对于完全非周期的动作（比如舞蹈中一个即兴的转身、随机伸手），单一相位表达不了。这也是后来生成模型时代要解决的问题——但在此之前，相位方法统治了实时控制领域整整三年。
+        </div>
+
+        <h2>5.5 AI4Animation：把论文变成游戏引擎里的东西</h2>
+
+        <div class="definition">
+            <h4>AI4Animation（sebastianstarke/AI4Animation）</h4>
+            <p>Sebastian Starke 开源的项目，把上述论文实现在 Unity 里：深度学习实时生成角色动画，支持第三人称控制、不同动作类型、物理交互。是目前"学术成果 → 游戏引擎落地"最著名的开源参考实现。</p>
+        </div>
+
+        <p>为什么这个项目值得你啃（也值得先了解再啃）：</p>
+        <ul>
+            <li>它是<strong>端到端</strong>的：数据准备 → 训练 → Unity 推理，一条龙，你能看到完整工程链路</li>
+            <li>它用的网络是<strong>轻量级</strong>的：MLP 为主，不需要 GPU 服务器就能训练，你的 RTX 笔记本完全跑得动</li>
+            <li>它直接对接 Unity：<strong>和你已有的技能栈无缝衔接</strong>——这也是你老师选这个方向给你做入门的原因</li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>啃 AI4Animation 的正确姿势</strong>：不要一上来就钻代码。先跑通 demo 感受效果，再读它的 README 和论文（Local Motion Phases 那篇），最后才看代码——<strong>先有直觉，再读实现</strong>。代码只是论文的工程化表达。
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>相位 = 运动周期的连续表示，把"时序记忆"变成"网络条件"，是实时控制的关键</li>
+            <li>PFNN（2017）：相位驱动网络权重，实时生成走/跑/跳/爬</li>
+            <li>Local Motion Phases（2019）：每个肢体一个相位，支持组合动作与多角色——AI4Animation 核心</li>
+            <li>Neural Animation Layering（2020）：基础层 + 叠加层，解决"边走边打"</li>
+            <li>AI4Animation = 学术 → Unity 的落地标杆，是理解本方向工程的入口</li>
+        </ul>
+
+        <h2>思考题</h2>
+        <ol>
+            <li>为什么"给同样的输入但相位不同，网络要输出不同动作"？用走路举例说明。</li>
+            <li>PFNN 的"相位→网络权重"和"相位作为网络输入"相比，有什么好处？提示：想想不同相位对应的姿态分布差异有多大。</li>
+            <li>如果你要在 Unity 里给一个四足生物（狗）做实时控制器，局部相位应该怎么定义？和两足人有何不同？</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-深度学习入场-动作流形学习.html">← 上一章：动作流形学习</a>
+            <a href="06-生成模型时代-文本到动作.html">下一章：生成模型时代 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

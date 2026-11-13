@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>核心指标与性能预算 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-导论-性能优化全景图.html">← 上一章</a>
+        <a href="03-渲染管线与线程模型.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>核心指标与性能预算</h1>
+        <p class="chapter-meta">模块一 · 基础与度量 ｜ 建立后续所有章节共用的指标语言</p>
+
+        <p>“帧率低”是一个无法指导行动的描述——低在哪里？是每帧都慢，还是偶发卡顿？瓶颈在 CPU 还是 GPU？要回答这些问题，必须先掌握一组定义清晰、可量化的指标。本章先纠正最常见的度量错误，再逐一解释核心指标，最后给出如何制定性能预算。</p>
+
+        <h2>2.1 为什么专业分析用帧时间而不是 FPS</h2>
+
+        <p>FPS（每秒帧数）是帧时间的倒数再乘以 1000：</p>
+
+        <div class="definition">
+            <h4>帧时间与帧率的换算</h4>
+            <p><code>帧时间(ms) = 1000 / FPS</code></p>
+            <p>60 FPS 对应 16.67 ms，30 FPS 对应 33.33 ms，120 FPS 对应 8.33 ms。</p>
+        </div>
+
+        <p>FPS 是一个<strong>非线性</strong>指标，同样下降 10 FPS，对应的帧时间增量完全不同：</p>
+
+        <table>
+            <thead>
+                <tr><th>FPS 变化</th><th>帧时间变化</th><th>每帧实际多花的时间</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>60 → 50</td><td>16.67 → 20.00 ms</td><td>+3.33 ms</td></tr>
+                <tr><td>30 → 20</td><td>33.33 → 50.00 ms</td><td>+16.67 ms</td></tr>
+            </tbody>
+        </table>
+
+        <p>更严重的问题是<strong>平均 FPS 会掩盖帧时间尖峰</strong>。假设一秒内 59 帧都在 16 ms 左右，只有 1 帧因为加载资源耗时 110 ms，平均 FPS 仍然接近 59，但玩家会清晰地感到一次“冻屏”。因此性能分析的主指标应当是<strong>帧时间（毫秒）及其分布</strong>，而不是平均帧率。</p>
+
+        <div class="callout callout-tip">
+            <strong>看分布而非只看均值</strong>：实际采集时通常关注 P50（中位数，代表常态）、P95/P99（代表长尾，即最差的那部分帧）以及超过预算帧的占比。一个稳定 50 FPS 的游戏，体验往往好于平均 60 FPS 但频繁尖峰的游戏。
+        </div>
+
+        <h2>2.2 渲染维度的核心指标</h2>
+
+        <h3>Draw Call 与 SetPass Call</h3>
+        <p>Draw Call 是 CPU 通知 GPU 绘制一个物体（或一批物体）的命令。每次调用都有 CPU 端的驱动开销，因此数量过多时瓶颈出在 CPU 提交阶段。SetPass Call 指切换渲染状态（通常是切换 Shader/材质 Pass）的次数，状态切换往往比单纯的 Draw Call 更贵，合批的主要目标之一就是减少它。</p>
+
+        <div class="sidebar-note">
+            注意区分：<strong>合批（Batching）</strong>把多个物体合并成一次 Draw Call；<strong>批处理次数（Batches）</strong>是最终实际提交的 Draw Call 数。场景里物体数不变，合批越有效，Batches 越少。
+        </div>
+
+        <h3>三角形与顶点数</h3>
+        <p>GPU 顶点处理阶段的负载，通常以单帧三角形总数（Tris）和顶点数（Verts）衡量。移动端 GPU 对顶点处理的预算有限，模型面数、LOD 切换直接影响这一指标。</p>
+
+        <h3>Overdraw（过度绘制）</h3>
+        <p>同一个像素在一帧内被重复绘制的次数。不透明物体因深度测试，过度绘制相对可控；<strong>半透明物体、粒子特效、多层 UI 是 Overdraw 重灾区</strong>，它们无法靠深度测试提前剔除，像素着色器会被反复执行。Overdraw 高通常意味着 GPU 填充率瓶颈。</p>
+
+        <h3>纹理与带宽</h3>
+        <p>纹理采样数量、分辨率和压缩格式决定显存占用与内存带宽消耗。移动端带宽直接关系功耗与发热，这也是纹理压缩（如 ASTC）和 Mipmap 存在的意义。</p>
+
+        <h2>2.3 内存维度的核心指标</h2>
+
+        <table>
+            <thead>
+                <tr><th>指标</th><th>含义</th><th>关注点</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>总内存占用</td><td>应用从系统分配的全部内存</td><td>逼近系统杀线会被直接终止，不同机型杀线不同</td></tr>
+                <tr><td>托管堆内存（Heap）</td><td>GC 管理的 C# 堆</td><td>堆持续增长触发 GC，造成帧尖峰</td></tr>
+                <tr><td>GC Alloc / 帧</td><td>每帧新产生的托管分配量</td><td>目标是趋近于 0，运行中每帧分配是卡顿的常见根源</td></tr>
+                <tr><td>Native 内存</td><td>引擎、资源、纹理的非托管内存</td><td>资源卸载是否及时、是否有泄漏</td></tr>
+                <tr><td>内存峰值</td><td>一段时间内的最高占用</td><td>决定能否通过系统审核与低端机兼容，而非平均值</td></tr>
+            </tbody>
+        </table>
+
+        <h2>2.4 卡顿（Jank）</h2>
+
+        <p>卡顿是帧时间超出阈值的事件。常见判定口径是：单帧耗时超过预算的 1.5～2 倍记为一次 Jank，超过更久记为严重 Jank。这个指标把“偶发冻屏”从平均数据里单独拎出来统计，正好对应玩家最容易录屏吐槽的那类问题。</p>
+
+        <h2>2.5 制定性能预算（Performance Budget）</h2>
+
+        <p>性能预算是<strong>在目标帧率下，把每帧的时间和各项资源预先分配给各模块的上限表</strong>。它的作用是让“是否超标”有客观判定标准，而不是等玩家反馈。下面是一个面向 60 FPS（16.67 ms 预算）移动端项目的示意预算，具体数字需根据目标机型实测调整：</p>
+
+        <table>
+            <thead>
+                <tr><th>类别</th><th>预算项</th><th>示例上限（60 FPS 档）</th></tr>
+            </thead>
+            <tbody>
+                <tr><td rowspan="2">帧时间</td><td>CPU 总耗时</td><td>≤ 12 ms（留余量给 GPU 与系统）</td></tr>
+                <tr><td>GPU 总耗时</td><td>≤ 14 ms</td></tr>
+                <tr><td rowspan="3">几何</td><td>单帧三角形</td><td>≤ 50 万</td></tr>
+                <tr><td>Batches（DC）</td><td>≤ 200</td></tr>
+                <tr><td>SetPass Call</td><td>≤ 80</td></tr>
+                <tr><td>内存</td><td>峰值总内存</td><td>≤ 1.5 GB（低端档需更低）</td></tr>
+                <tr><td>GC</td><td>每帧 GC Alloc</td><td>0 B（稳态运行）</td></tr>
+                <tr><td>动画</td><td>同时更新的骨骼角色</td><td>按距离分级，镜头外暂停</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>预算不是越低越好</strong>：预算过紧会逼团队牺牲大量画面质量，过松则等于没有约束。正确做法是先在目标机型上做基线测试，摸清硬件能力，再按模块重要性分配，并随版本迭代校准。
+        </div>
+
+        <h2>2.6 统一测量口径</h2>
+
+        <p>数据要能横向对比，采集口径必须固定，否则优化前后的差异可能只是场景不同造成的：</p>
+        <ul>
+            <li><strong>固定场景与操作路径</strong>：定义几个标准测试场景（主城、野外、团战），用脚本化或固定手动路径复现。</li>
+            <li><strong>预热（Warmup）</strong>：跳过刚进入场景的前若干帧，等待资源加载、 shader 编译完成后再统计。</li>
+            <li><strong>多次采样</strong>：每个场景至少跑 3 次取分布，避免单次偶然结果。</li>
+            <li><strong>控制变量</strong>：对比两个版本时，画质设置、分辨率、网络条件保持一致。</li>
+        </ul>
+
+        <h3>附：轻量帧时间记录器</h3>
+        <p>在没有完整工具链时，可以用下面的脚本把帧时间落盘，再用表格软件分析 P95/P99：</p>
+
+<pre><code class="language-csharp">using System.Collections.Generic;
+using System.IO;
+using UnityEngine;
+
+public class FrameTimeLogger : MonoBehaviour
+{
+    private readonly List<float> frameTimes = new List<float>(6000);
+    private float elapsed;
+
+    void Update()
+    {
+        frameTimes.Add(Time.unscaledDeltaTime * 1000f);
+        elapsed += Time.unscaledDeltaTime;
+    }
+
+    void OnApplicationQuit()
+    {
+        frameTimes.Sort();
+        int count = frameTimes.Count;
+        float p50 = frameTimes[count / 2];
+        float p95 = frameTimes[Mathf.Min(count - 1, (int)(count * 0.95f))];
+        float p99 = frameTimes[Mathf.Min(count - 1, (int)(count * 0.99f))];
+
+        string path = Path.Combine(Application.persistentDataPath, "frame_time.csv");
+        File.WriteAllLines(path, new[]
+        {
+            "p50_ms,p95_ms,p99_ms",
+            $"{p50:F2},{p95:F2},{p99:F2}"
+        });
+        Debug.Log($"frame profile saved: {path}");
+    }
+}
+</code></pre>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>识别伪装的好数据</h3>
+            <p>某版本报告显示平均帧率从 58 提升到 61，但玩家差评反而增加。请列出至少两种可能的原因（提示：从帧时间分布、Jank、测量场景三个角度思考）。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">实践任务</span>编写一份预算</h3>
+            <p>为一款 30 FPS 的中低端安卓机项目，估算 33.33 ms 预算下 CPU 与 GPU 的时间分配，并写出你会如何确定 Draw Call 与内存上限，而不是凭空写一个数字。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>帧时间是线性度量，FPS 是其非线性倒数；分析要看帧时间的 P50/P95/P99 分布，而非平均帧率。</li>
+            <li>渲染指标包括 Draw Call/SetPass、面数、Overdraw、纹理带宽；内存指标关注峰值、GC Alloc 与 Native 内存。</li>
+            <li>性能预算把帧时间和资源上限分配给各模块，需要基于实测基线制定。</li>
+            <li>固定场景、预热、多次采样的统一口径，是数据可对比的前提。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://docs.unity3d.com/ScriptReference/Time-unscaledDeltaTime.html" target="_blank">Unity 脚本 API：Time.unscaledDeltaTime</a></li>
+                <li><a href="https://developer.android.com/topic/performance/vitals" target="_blank">Android Vitals：帧率与卡顿官方指标说明</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="01-导论-性能优化全景图.html">← 上一章：性能优化全景图</a>
+            <a href="03-渲染管线与线程模型.html">下一章：渲染管线与线程模型 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

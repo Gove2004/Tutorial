@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 2 章 程序集与工程结构 - 空洞骑士源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="01-导论与源码全景.html">← 上一章：导论与源码全景</a>
+    <a href="03-单例体系与启动流程.html">下一章：单例体系与启动流程 →</a>
+</nav>
+<main>
+    <h1>第 2 章　程序集与工程结构</h1>
+    <p>本章建立全书的"物理地图"：2600 多个文件分布在哪些工程和目录里，每块代码的职责是什么，以及它们之间的依赖方向。读完之后，你应该能在听到某个机制时立刻知道该去哪个目录找它。</p>
+
+    <h2>2.1 五个工程的职责划分</h2>
+    <p><code>Solution.sln</code> 包含五个工程，对应游戏编译后的五个 DLL。Unity 的编译规则是：<code>Plugins</code> 等目录下的代码先编译成 <code>Assembly-CSharp-firstpass</code>，普通目录下的代码后编译成 <code>Assembly-CSharp</code>，后者可以引用前者。</p>
+    <table>
+        <thead><tr><th>工程</th><th>cs 文件数</th><th>职责</th></tr></thead>
+        <tbody>
+            <tr><td><strong>Assembly-CSharp</strong></td><td>2678</td><td>游戏全部自有逻辑 + 随主工程一起编译的第三方库，是本教程的绝对主体</td></tr>
+            <tr><td><strong>Assembly-CSharp-firstpass</strong></td><td>51</td><td>先编译的第三方代码：GOG 平台对接、PolyAndCode 循环滚动列表、Unity 官方图像特效（Bloom/景深/抗锯齿等）</td></tr>
+            <tr><td><strong>TeamCherry.Localization</strong></td><td>14</td><td>本地化运行时，多语言文本的加载与查找（<code>Language.Get(...)</code>）</td></tr>
+            <tr><td><strong>TeamCherry.Cinematics</strong></td><td>10</td><td>过场视频系统，与 CinematicPlayer 配合</td></tr>
+            <tr><td><strong>TeamCherry.BuildBot</strong></td><td>4</td><td>构建/打包辅助工具，不参与游戏运行时逻辑</td></tr>
+        </tbody>
+    </table>
+
+    <div class="mermaid-wrap">
+<div class="mermaid">
+flowchart LR
+    FP["Assembly-CSharp-firstpass<br/>GOG / 图像特效 / 循环列表"]
+    LOC["TeamCherry.Localization"]
+    CIN["TeamCherry.Cinematics"]
+    BB["TeamCherry.BuildBot<br/>构建期工具"]
+    AC["Assembly-CSharp<br/>游戏主逻辑"]
+    ENG["UnityEngine.* / PlayMaker<br/>引擎与插件 DLL"]
+
+    FP --> AC
+    LOC --> AC
+    CIN --> AC
+    ENG --> FP
+    ENG --> AC
+    BB -. 运行时不参与 .-> AC
+</div>
+    </div>
+
+    <h2>2.2 Assembly-CSharp 内部目录地图</h2>
+    <p>主工程里除了根目录平铺的 827 个游戏类，其余文件按来源分成若干目录。可以按"游戏自有 / 输入 / 第三方 / 序列化补充"四类来记。</p>
+
+    <h3>游戏自有目录</h3>
+    <table>
+        <thead><tr><th>目录</th><th>文件数</th><th>内容</th></tr></thead>
+        <tbody>
+            <tr><td>（根目录）</td><td>827</td><td>游戏全部核心类：GameManager、HeroController、HealthManager、UIManager 等，全局命名空间</td></tr>
+            <tr><td>GlobalEnums</td><td>32</td><td>全部枚举：ActorStates、MapZone、SceneType、HazardType 等</td></tr>
+            <tr><td>HutongGames.PlayMaker.Actions</td><td>1140</td><td>PlayMaker 动作（官方通用动作 + Team Cherry 自定义动作混在一起）</td></tr>
+            <tr><td>HutongGames.PlayMaker</td><td>3</td><td>PlayMaker 辅助：ActionHelpers、UpdateHelper、碰撞接口</td></tr>
+            <tr><td>HutongGames.PlayMaker.Ecosystem.Utils</td><td>7</td><td>PlayMaker 生态工具（代理器、事件桥接）</td></tr>
+            <tr><td>TeamCherry / TeamCherry.GameCore</td><td>5 / 5</td><td>场景默认设置、世界物品清单、引用定位等内部工具</td></tr>
+            <tr><td>HKMenu</td><td>2</td><td>主菜单专属组件</td></tr>
+        </tbody>
+    </table>
+
+    <h3>输入系统目录</h3>
+    <table>
+        <thead><tr><th>目录</th><th>文件数</th><th>内容</th></tr></thead>
+        <tbody>
+            <tr><td>InControl</td><td>115</td><td>第三方输入库核心：设备抽象、输入动作基类</td></tr>
+            <tr><td>InControl.NativeDeviceProfiles</td><td>224</td><td>各平台原生手柄的设备配置</td></tr>
+            <tr><td>InControl.UnityDeviceProfiles</td><td>178</td><td>Unity 输入后端下的手柄配置</td></tr>
+            <tr><td>XInputDotNetPure</td><td>9</td><td>Xbox 360 手柄的 XInput 绑定</td></tr>
+        </tbody>
+    </table>
+
+    <h3>第三方与兼容目录</h3>
+    <table>
+        <thead><tr><th>目录</th><th>文件数</th><th>内容</th></tr></thead>
+        <tbody>
+            <tr><td>TMProOld</td><td>82</td><td>旧版 TextMeshPro 文本渲染（项目早期版本的遗留）</td></tr>
+            <tr><td>UnityEngine.UI / UI.Extensions</td><td>18 / 1</td><td>UGUI 补充组件</td></tr>
+            <tr><td>GUIBlendModes</td><td>3</td><td>2D 精灵混合模式工具</td></tr>
+            <tr><td>SecPlayerPrefs</td><td>2</td><td>加密 PlayerPrefs 的实现</td></tr>
+            <tr><td>System.Security.Cryptography</td><td>1</td><td>存档加密所需的加密算法补充</td></tr>
+            <tr><td>System.Runtime.Serialization.Formatters.Binary</td><td>1</td><td>BinaryFormatter，用于加密存档的字节包装</td></tr>
+            <tr><td>TeamCherry.PS5 / Localization.Platform</td><td>8 / 6</td><td>主机平台移植层代码（PC 版运行时基本不触达）</td></tr>
+        </tbody>
+    </table>
+
+    <div class="sidebar-note">
+        注意一个反编译现象：像 <code>System.Security.Cryptography</code> 这种 .NET 基础库代码出现在游戏工程里，通常是因为游戏用了某个 Mono 版本中缺失、需要随游戏一起补编的类型。这不是 Team Cherry 自己实现了加密算法，而是 BCL（基础类库）的兼容性回填。
+    </div>
+
+    <h2>2.3 关键第三方依赖清单</h2>
+    <p>从 csproj 的引用和源码目录可以还原出游戏的技术选型：</p>
+    <table>
+        <thead><tr><th>依赖</th><th>类型</th><th>在游戏中的用途</th></tr></thead>
+        <tbody>
+            <tr><td><strong>PlayMaker</strong></td><td>可视化状态机</td><td>场景内几乎所有物件的行为逻辑，是双轨架构的一轨（第 11 章详解）</td></tr>
+            <tr><td><strong>InControl</strong></td><td>输入抽象</td><td>键鼠/手柄统一、多平台手柄适配，InputHandler 建在它之上</td></tr>
+            <tr><td><strong>TeamCherry.TK2D</strong></td><td>2D 工具包</td><td>定制版 2D Toolkit：tk2dSprite 精灵、tk2dCamera 相机，大量类 RequireComponent 它</td></tr>
+            <tr><td><strong>iTween</strong></td><td>补间动画</td><td>数值插值动画，如 EnemySpawner 的 MoveBy、机关缓动</td></tr>
+            <tr><td><strong>TextMeshPro（旧版）</strong></td><td>文本渲染</td><td>对话、UI 文字</td></tr>
+            <tr><td><strong>PolyAndCode</strong></td><td>循环列表</td><td>日志、护符等长列表的虚拟滚动，避免一次性生成大量 UI 元素</td></tr>
+            <tr><td><strong>UnityStandardAssets.ImageEffects</strong></td><td>屏幕特效</td><td>Bloom、色彩校正、景深、暗角等，挂在主相机上</td></tr>
+        </tbody>
+    </table>
+
+    <h2>2.4 GlobalEnums：32 个枚举速查</h2>
+    <p>枚举是理解游戏语义的捷径——它们列出了某个维度上全部合法的取值。重点枚举先记住这几个：</p>
+    <table>
+        <thead><tr><th>枚举</th><th>表达的维度</th></tr></thead>
+        <tbody>
+            <tr><td><code>ActorStates</code></td><td>主角的 9 个粗粒度主状态（grounded/idle/running/airborne/no_input 等）</td></tr>
+            <tr><td><code>MapZone</code></td><td>地图区域（遗忘十字路、苍绿之径、深邃巢穴……），驱动地图与音乐切换</td></tr>
+            <tr><td><code>SceneType</code></td><td>场景类型（游戏场景/菜单/过场），GameManager 用它决定加载与暂停策略</td></tr>
+            <tr><td><code>HazardType</code></td><td>危险类型：普通伤害、尖刺、酸液、深坑，决定死亡演出方式</td></tr>
+            <tr><td><code>GatePosition</code></td><td>门口的位置（左/右/上/下门），决定主角入场朝向与落点</td></tr>
+            <tr><td><code>PhysLayers</code></td><td>物理层编号，射线检测与碰撞过滤的依据</td></tr>
+            <tr><td><code>DamageMode / CollisionSide / AttackDirection</code></td><td>伤害模式、碰撞方向、攻击方向，战斗管线的基础词汇</td></tr>
+        </tbody>
+    </table>
+    <div class="callout callout-tip">
+        <p>读任何一个类之前，先扫一眼它 using 了哪些 GlobalEnums、字段里出现了哪些枚举类型——这能在 30 秒内告诉你这个类处理的是哪个维度的问题。</p>
+    </div>
+
+    <h2>2.5 一个实用的目录定位口诀</h2>
+    <ul>
+        <li>找"机制与管理器" → 根目录，按 <code>XxxManager</code> / <code>XxxController</code> 检索</li>
+        <li>找"某个 FSM 里能调的动作" → HutongGames.PlayMaker.Actions，按 ActionCategory 语义检索</li>
+        <li>找"合法取值/状态分类" → GlobalEnums</li>
+        <li>找"手柄按键/设备适配" → InControl 三个目录</li>
+        <li>找"屏幕视觉特效" → firstpass 的 ImageEffects</li>
+        <li>找"多语言文本" → TeamCherry.Localization 工程</li>
+    </ul>
+
+    <div class="exercise">
+        <h3>思考与练习</h3>
+        <ol>
+            <li>不看教程，尝试在根目录定位负责以下功能的类并说出依据：骨钉攻击判定、场景物件状态、相机震动、吉欧计数器。</li>
+            <li>解释为什么 Assembly-CSharp 可以引用 firstpass，而 firstpass 不能反向引用（结合 Unity 的编译顺序）。</li>
+            <li>打开 <code>GlobalEnums/MapZone.cs</code>，数一下共有多少个地图区域，并思考 PlayerData 为什么还要同时保存 <code>mapZone</code> 字段而不是直接从场景读取。</li>
+            <li>在 PlayMaker.Actions 目录里分别找出 2 个官方通用 Action 和 2 个 Team Cherry 自定义 Action，总结你辨别二者的方法。</li>
+        </ol>
+    </div>
+</main>
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="01-导论与源码全景.html">← 上一章：导论与源码全景</a>
+        <a href="03-单例体系与启动流程.html">第 3 章：单例体系与启动流程 →</a>
+    </nav>
+</footer>
+<script src="assets/script.js"></script>
+</body>
+</html>

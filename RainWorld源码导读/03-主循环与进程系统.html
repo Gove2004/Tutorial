@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 主循环与进程系统 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-总体架构鸟瞰.html">← 上一章</a>
+        <a href="04-抽象世界层.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>03 主循环与进程系统</h1>
+        <p>Rain World 没有用 Unity 的场景（Scene）来切换主菜单、游戏、过场，而是自建了一套“进程”系统：一个长生命周期的管理器持有若干可替换的进程对象，每个进程独立负责自己的逻辑与渲染。本章拆解这套系统的三个核心角色，以及进程之间如何切换。</p>
+
+        <h2>3.1 三个核心角色</h2>
+        <table>
+            <thead><tr><th>类</th><th>性质</th><th>职责</th></tr></thead>
+            <tbody>
+                <tr><td><code>RainWorld</code></td><td>MonoBehaviour</td><td>挂载在场景中的 Unity 入口，持有 processManager、progression、options、shaders 等全局对象，由 Unity 每帧驱动</td></tr>
+                <tr><td><code>ProcessManager</code></td><td>普通 C# 类</td><td>持有当前主进程 currentMainLoop、旁支进程列表、进程切换队列、黑屏与对话框，负责进程的创建与切换</td></tr>
+                <tr><td><code>MainLoopProcess</code></td><td>抽象类</td><td>所有进程的基类，实现固定时间步长，定义 Update / GrafUpdate 等生命周期方法</td></tr>
+            </tbody>
+        </table>
+        <p>驱动关系非常直接：Unity 每帧调用 <code>RainWorld.Update()</code>，后者在初始化完成后调用 <code>processManager.Update(Time.deltaTime)</code>，管理器再驱动当前进程。</p>
+<pre><code class="language-csharp">// RainWorld.cs
+if (processManagerInitialized)
+{
+    processManager.Update(Time.deltaTime);
+}</code></pre>
+
+        <h2>3.2 固定 40 FPS 时间步长</h2>
+        <p>这是进程系统里最精巧的部分。游戏逻辑以固定频率 40 FPS 推进，与显示器刷新率无关；渲染则在两个逻辑帧之间插值。全部秘密在 <code>MainLoopProcess.RawUpdate</code>：</p>
+<pre><code class="language-csharp">public virtual void RawUpdate(float timeDelta)
+{
+    if (processActive)
+    {
+        timeStacker += timeDelta;
+        if (timeStacker > 0.25f)   // 防止掉帧严重时疯狂补帧
+        {
+            timeStacker = 0.25f;
+        }
+        int num = 0;
+        while (timeStacker >= 1f / 40f && num < 2)
+        {
+            Update();
+            timeStacker -= 1f / 40f;
+            num++;
+        }
+        GrafUpdate(timeStacker);   // 用剩余时间做插值渲染
+    }
+}</code></pre>
+        <p>逐行理解：</p>
+        <ul>
+            <li><code>timeStacker</code> 是时间累加器，把真实帧的 deltaTime 攒起来。</li>
+            <li>每攒够 <code>1/40</code> 秒，就触发一次逻辑 <code>Update()</code>，并扣掉对应时间。</li>
+            <li><strong>一帧最多补 2 次</strong>（<code>num &lt; 2</code>），且累加器封顶 0.25 秒，避免卡顿后“死亡螺旋”式地无限补帧。</li>
+            <li><code>GrafUpdate(timeStacker)</code> 拿到的是不足一个逻辑步的剩余时间，归一化后正好落在 0 到 1/40 之间，用作插值系数。</li>
+        </ul>
+        <div class="definition">
+            <h4>为什么要固定步长</h4>
+            <p>Rain World 的物理是自研的位置型积分，对更新频率极其敏感。固定步长能保证<strong>任何机器上的物理结果一致、可复现</strong>，这对生态模拟、存档确定性和竞速公平性都很重要。代价是高刷新率屏幕不会让逻辑更快，只是画面更平滑。</p>
+        </div>
+        <div class="callout callout-info">
+            <p><strong>GrafUpdate 如何插值</strong>：渲染时用 <code>timeStacker * 40f</code> 得到 0~1 的插值系数，在 <code>lastPos</code> 与 <code>pos</code> 之间取值。这就是为什么 BodyChunk 要同时保存 <code>lastLastPos</code>、<code>lastPos</code>、<code>pos</code> 三个历史位置。</p>
+        </div>
+
+        <h2>3.3 进程 ID 与进程工厂</h2>
+        <p>进程的类型用 <code>ProcessID</code> 标识，它是一个 ExtEnum（可扩展枚举），因此模组可以注册自己的进程。原版定义了 30 多个进程，常见的有：</p>
+<table>
+    <thead><tr><th>ProcessID</th><th>对应进程类</th><th>用途</th></tr></thead>
+    <tbody>
+        <tr><td>MainMenu</td><td>MainMenu</td><td>主菜单</td></tr>
+        <tr><td>Game</td><td>RainWorldGame</td><td>游戏内主进程</td></tr>
+        <tr><td>Initialization</td><td>InitializationScreen</td><td>启动初始化画面</td></tr>
+        <tr><td>SleepScreen / DeathScreen / StarveScreen</td><td>SleepAndDeathScreen</td><td>睡眠、死亡、饿死画面</td></tr>
+        <tr><td>GhostScreen / KarmaToMaxScreen</td><td>GhostEncounterScreen</td><td>回声遭遇、业力提升</td></tr>
+        <tr><td>RegionSelect / OptionsMenu</td><td>RegionSelectMenu / OptionsMenu</td><td>区域选择、选项</td></tr>
+        <tr><td>SlideShow</td><td>SlideShow</td><td>过场幻灯片</td></tr>
+        <tr><td>FastTravelScreen</td><td>FastTravelScreen</td><td>快速旅行</td></tr>
+    </tbody>
+</table>
+        <p>新进程不是用反射创建的，而是在 <code>PostSwitchMainProcess</code> 里用一长串 if-else 工厂式分派：</p>
+<pre><code class="language-csharp">if (ID == ProcessID.Game)
+{
+    currentMainLoop = new RainWorldGame(this);
+}
+else if (ID == ProcessID.MainMenu)
+{
+    currentMainLoop = new MainMenu(this, ...);
+}
+else if (ID == ProcessID.SleepScreen || ID == ProcessID.DeathScreen)
+{
+    currentMainLoop = new SleepAndDeathScreen(this, ID);
+}
+// ... 其余进程</code></pre>
+
+        <h2>3.4 进程切换的三阶段</h2>
+        <p>进程切换不是瞬间完成的，而是借黑屏淡入淡出分阶段进行，确保旧进程被干净关闭、新进程被安全创建。完整流程如下：</p>
+
+<pre class="mermaid">
+flowchart LR
+    A["请求切换<br/>RequestMainProcessSwitch"] --> B["淡出 0→1<br/>黑屏渐显"]
+    B --> C["PreSwitch<br/>关闭旧进程/释放资源"]
+    C --> D["模组 finalization"]
+    D --> E["PostSwitch<br/>工厂创建新进程"]
+    E --> F["淡入 1→0<br/>黑屏消失"]
+</pre>
+
+        <h3>阶段一：请求与淡出</h3>
+        <p>调用 <code>RequestMainProcessSwitch</code> 时，如果当前有对话框，请求会先进入 <code>_processSwitchQueue</code> 排队；否则直接进入 <code>ActualProcessSwitch</code>，记录 <code>upcomingProcess</code> 并启动黑屏。随后每帧 <code>fadeToBlack</code> 递增：</p>
+<pre><code class="language-csharp">fadeToBlack += deltaTime / blackFadeTime;
+if (fadeToBlack > 1f)
+{
+    PreSwitchMainProcess(upcomingProcess);
+    processAfterModFinalization = upcomingProcess;
+    upcomingProcess = null;
+}</code></pre>
+
+        <h3>阶段二：PreSwitch，关闭旧进程</h3>
+        <p><code>PreSwitchMainProcess</code> 负责收尾：隐藏开发者界面、销毁附加可视化对象、根据情况调用 <code>ShutDownProcess()</code> 或 <code>PauseProcess()</code>、释放音频与 Futile 资源、重置输入处理器。</p>
+<pre><code class="language-csharp">if (currentMainLoop.pauseProcessOnNextComplete)
+{
+    currentMainLoop.PauseProcess();
+}
+else
+{
+    currentMainLoop.ShutDownProcess();
+}
+if (!currentMainLoop.pauseProcessOnNextComplete && pendingProcess == null)
+{
+    soundLoader.ReleaseAllUnityAudio();
+    AssetManager.HardCleanFutileAssets();
+}</code></pre>
+
+        <h3>阶段三：模组 finalization 与 PostSwitch</h3>
+        <p>切换黑屏期间会运行模组 finalization（让模组在新进程启动前完成初始化），完成后 <code>PostSwitchMainProcess</code> 用工厂创建新进程，随后 <code>fadeToBlack</code> 递减、黑屏移除，新进程开始运行。</p>
+
+        <div class="callout callout-warning">
+            <p><strong>为什么切换要夹在黑屏中间</strong>：旧进程销毁与新进程创建会产生大量资源释放与加载，若在画面可见时进行会出现对象凭空消失/出现。黑屏把这些“脏动作”全部遮住，同时给资源加载留出时间，是体验与稳定性的双重保障。</p>
+        </div>
+
+        <h2>3.5 旁支进程与对话框</h2>
+        <p>除了主进程，ProcessManager 还维护 <code>sideProcesses</code> 列表。旁支进程同样被 RawUpdate 驱动，但不占据主进程位置，典型代表：</p>
+        <ul>
+            <li><code>MenuMicrophone</code>：菜单环境麦克风/音频处理，进出游戏时按需增删。</li>
+            <li><code>Dialog</code> 系列：对话框作为旁支进程独立运行，因此能浮在任意主进程之上。</li>
+        </ul>
+        <p>对话框通过 <code>dialogStack</code> 管理，<code>ShowNextDialog</code> 在条件满足时把栈顶对话框取出并加入旁支进程。这也解释了为什么请求切换时若有对话框，切换要排队——避免对话框与进程切换互相干扰。</p>
+
+        <h2>3.6 进程的生命周期方法</h2>
+        <p>MainLoopProcess 定义了一组可重写的生命周期钩子，子类按需实现：</p>
+        <table>
+            <thead><tr><th>方法</th><th>调用时机</th></tr></thead>
+            <tbody>
+                <tr><td><code>Init</code></td><td>进程创建后初始化</td></tr>
+                <tr><td><code>Update</code></td><td>每个固定逻辑步（40 FPS）</td></tr>
+                <tr><td><code>GrafUpdate</code></td><td>每个渲染帧，做插值</td></tr>
+                <tr><td><code>ShutDownProcess</code></td><td>进程被彻底关闭时</td></tr>
+                <tr><td><code>PauseProcess / ResumeProcess</code></td><td>进程被挂起（保留）/恢复时</td></tr>
+            </tbody>
+        </table>
+        <p>注意 <code>pendingProcess</code> 机制：某些进程（如睡眠、死亡）可以被挂起保留而非销毁，恢复时通过 <code>pendingProcess</code> 直接拿回，避免重复构建。</p>
+
+        <h2>3.7 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：在 Update 里写与帧率相关的假设</summary>
+            <div class="details-content">
+                <p>Update 永远以 40 FPS 调用，不要在里面乘 Time.deltaTime，也不要假设它和渲染帧率一致。需要平滑表现的逻辑放到 GrafUpdate 并用 timeStacker。</p>
+            </div>
+        </details>
+        <details>
+            <summary>陷阱二：误以为进程切换是同步的</summary>
+            <div class="details-content">
+                <p>调用 RequestMainProcessSwitch 后当前进程不会立刻停止，黑屏淡出需要若干帧。切换后要执行的逻辑不能写在调用点之后，应放进新进程的 Init，或利用进程提供的回调。</p>
+            </div>
+        </details>
+        <details>
+            <summary>陷阱三：混淆 ShutDown 与 Pause</summary>
+            <div class="details-content">
+                <p>ShutDown 会销毁进程并释放资源，Pause 只挂起保留状态。判断该用哪个，看进程是否需要稍后原样恢复（如临时过场），错用会导致状态丢失或资源泄漏。</p>
+            </div>
+        </details>
+
+        <h2>3.8 练习与思考</h2>
+        <ol>
+            <li>假设显示器在 144 Hz 下运行，结合 RawUpdate 说明：一帧渲染中 timeStacker 大约是多少？一帧内最多会触发几次 Update？</li>
+            <li>在 ProcessManager 中追踪一次从主菜单进入游戏的完整路径，写出依次经过的方法名与 fadeToBlack 的变化。</li>
+            <li>思考：若把 timeStacker 的 0.25 秒上限和“每帧最多补 2 次”去掉，在游戏严重卡顿（如掉帧到 5 FPS）时会发生什么？这两个保护分别解决什么问题？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>RainWorld 是 Unity 入口，ProcessManager 管理进程，MainLoopProcess 是进程基类，三者构成自驱动的进程系统。</li>
+            <li>逻辑以固定 40 FPS 时间步长推进，GrafUpdate 用剩余时间插值，保证物理一致、画面平滑。</li>
+            <li>进程 ID 是可扩展枚举，新进程在 PostSwitch 中工厂式创建。</li>
+            <li>切换经淡出、PreSwitch 关闭、模组 finalization、PostSwitch 创建、淡入五阶段，黑屏遮住资源变化。</li>
+            <li>旁支进程承载音频与对话框，进程可 ShutDown 或 Pause/Resume。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="02-总体架构鸟瞰.html">← 上一章：总体架构鸟瞰</a>
+            <a href="04-抽象世界层.html">下一章：抽象世界层 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

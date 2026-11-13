@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>08 - 脉络总结：论文清单与学习路径 - 角色动画生成的深度学习发展史</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="07-物理与学习-强化学习路线.html">← 上一章</a>
+    </nav>
+
+    <main>
+        <h1>脉络总结：论文清单与学习路径</h1>
+
+        <p>最后一章把所有碎片拼成一张完整地图：<strong>20 年时间线总览、关键论文速查表、术语表、数据集清单，以及给新人的具体行动路线</strong>。学完这一章，你应该能对任何人讲清楚"这个方向从哪来、现在到哪了、下一步去哪"。</p>
+
+        <h2>8.1 20 年时间线总览</h2>
+
+        <div class="timeline">
+            <div class="timeline-item">
+                <span class="year">2002</span>
+                <h4>运动图 Motion Graphs</h4>
+                <p>Kovar et al. SIGGRAPH。动作片段建图拼接——"拼动作"的开端。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2015-2016</span>
+                <h4>动作流形学习</h4>
+                <p>Holden et al. SIGGRAPH 2016。卷积自编码器压缩/编辑动作——"学动作"的起点。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2016</span>
+                <h4>Motion Matching</h4>
+                <p>Clavet, GDC 2016 (EA)。每帧最近邻搜索，传统路线巅峰，至今用于 3A。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2017</span>
+                <h4>PFNN 相位函数网络</h4>
+                <p>Holden et al. SIGGRAPH。相位驱动的实时控制器，走/跑/跳/爬。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2018</span>
+                <h4>DeepMimic</h4>
+                <p>Peng et al. SIGGRAPH Asia。强化学习 + 动捕参考，物理角色里程碑。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2019-2020</span>
+                <h4>局部相位与分层</h4>
+                <p>Starke et al. SIGGRAPH：Local Motion Phases（多角色）、Neural Animation Layering（分层合成）。AI4Animation 核心。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2021</span>
+                <h4>AMP 动作先验</h4>
+                <p>Peng et al. SIGGRAPH。对抗式动作先验，物理角色摆脱逐帧对齐。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2022</span>
+                <h4>文本到动作爆发</h4>
+                <p>HumanML3D 数据集 + T2M/TEMOS/MotionCLIP/MotionDiffuse/MDM。语义级生成。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2023</span>
+                <h4>扩散提速与 GPT 化</h4>
+                <p>MLD（潜空间扩散）、T2M-GPT（动作分词自回归）、MotionGPT（统一理解+生成）。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2024-至今</span>
+                <h4>合流与多模态</h4>
+                <p>生成模型 + 物理 RL 合流；音乐到舞蹈、多条件可控生成、视频/图像驱动动作。</p>
+            </div>
+        </div>
+
+        <h2>8.2 关键论文速查表</h2>
+
+        <p>按"先读哪篇"排序，每篇标注它在你学习路径中的位置：</p>
+
+        <table>
+            <thead>
+                <tr><th>优先级</th><th>论文</th><th>年份/会议</th><th>一句话贡献</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>必读 ①</strong></td>
+                    <td>Holden - A Deep Learning Framework for Character Motion Synthesis and Editing</td>
+                    <td>2016 SIGGRAPH</td>
+                    <td>动作流形学习的基石，先建立"压缩/编辑"直觉</td>
+                </tr>
+                <tr>
+                    <td><strong>必读 ②</strong></td>
+                    <td>Starke - Local Motion Phases for Learning Multi-Character Controllers</td>
+                    <td>2019 SIGGRAPH</td>
+                    <td>AI4Animation 核心思想，局部相位多角色控制</td>
+                </tr>
+                <tr>
+                    <td><strong>必读 ③</strong></td>
+                    <td>Tevet - Human Motion Diffusion Model (MDM)</td>
+                    <td>2022/ICLR 2023</td>
+                    <td>扩散模型生成动作的代表作，当前主流的入口</td>
+                </tr>
+                <tr>
+                    <td><strong>选读</strong></td>
+                    <td>Kovar - Motion Graphs</td>
+                    <td>2002 SIGGRAPH</td>
+                    <td>了解传统"拼动作"的起点与局限</td>
+                </tr>
+                <tr>
+                    <td><strong>选读</strong></td>
+                    <td>Holden - Phase-Functioned Neural Networks</td>
+                    <td>2017 SIGGRAPH</td>
+                    <td>相位概念首秀，实时控制的根基</td>
+                </tr>
+                <tr>
+                    <td><strong>选读</strong></td>
+                    <td>Starke - Neural Animation Layering</td>
+                    <td>2020 SIGGRAPH</td>
+                    <td>分层合成，组合动作的解法</td>
+                </tr>
+                <tr>
+                    <td><strong>选读</strong></td>
+                    <td>Zhang - MotionDiffuse</td>
+                    <td>2022 CVPR</td>
+                    <td>扩散+文本到动作的第一波</td>
+                </tr>
+                <tr>
+                    <td><strong>选读</strong></td>
+                    <td>Chen - MLD (Motion Latent Diffusion)</td>
+                    <td>2023 CVPR</td>
+                    <td>潜空间扩散提速，工程上更实用</td>
+                </tr>
+                <tr>
+                    <td><strong>选读</strong></td>
+                    <td>Zhang - T2M-GPT / Jiang - MotionGPT</td>
+                    <td>2023</td>
+                    <td>动作分词自回归，GPT 化路线</td>
+                </tr>
+                <tr>
+                    <td><strong>选读</strong></td>
+                    <td>Peng - DeepMimic / AMP</td>
+                    <td>2018/2021</td>
+                    <td>物理路线两大里程碑</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-tip">
+            <strong>阅读技巧</strong>：读论文不要从头到尾精读。先看<strong>摘要 + 方法图 + 结果视频</strong>，搞懂"它解决什么问题、用什么思路"，再按需深入公式。动作生成论文几乎都有演示视频，看视频建立直觉比读公式快 10 倍。
+        </div>
+
+        <h2>8.3 术语表</h2>
+
+        <table>
+            <thead>
+                <tr><th>术语</th><th>含义</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>运动学动作</strong></td>
+                    <td>只描述姿态随时间变化，不涉及力/物理仿真的动作</td>
+                </tr>
+                <tr>
+                    <td><strong>动作流形</strong></td>
+                    <td>合理动作所在的低维连续子空间</td>
+                </tr>
+                <tr>
+                    <td><strong>相位 Phase</strong></td>
+                    <td>运动周期的连续位置（0~2π），描述"走到哪一步"</td>
+                </tr>
+                <tr>
+                    <td><strong>局部相位</strong></td>
+                    <td>每个肢体各自的运动周期相位</td>
+                </tr>
+                <tr>
+                    <td><strong>重定向 Retargeting</strong></td>
+                    <td>把动作从一套骨骼映射到另一套骨骼</td>
+                </tr>
+                <tr>
+                    <td><strong>潜在空间 Latent Space</strong></td>
+                    <td>编码器压缩后的低维向量空间</td>
+                </tr>
+                <tr>
+                    <td><strong>扩散模型</strong></td>
+                    <td>从噪声逐步去噪生成数据的生成模型</td>
+                </tr>
+                <tr>
+                    <td><strong>动作 token</strong></td>
+                    <td>用 VQ-VAE 把动作离散成的"词"，供自回归模型使用</td>
+                </tr>
+                <tr>
+                    <td><strong>动作先验 Motion Prior</strong></td>
+                    <td>描述"什么样算自然动作"的可学习分布/判别器</td>
+                </tr>
+                <tr>
+                    <td><strong>SMPL</strong></td>
+                    <td>参数化人体模型（体型+姿态参数），AMASS 等数据集的标准表示</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>8.4 数据集与资源清单</h2>
+
+        <ul>
+            <li><strong>AMASS</strong>：大规模动捕数据（SMPL 格式），动作生成的原料库</li>
+            <li><strong>HumanML3D</strong>：文本-动作对标准基准（2022），文本到动作评测必用</li>
+            <li><strong>KIT-ML</strong>：早期文本-动作数据集</li>
+            <li><strong>AI4Animation</strong>：Sebastian Starke 的 Unity 开源实现——你老师指定的入门项目</li>
+            <li><strong>MDM 官方仓库</strong>：扩散模型生成动作的参考实现，读代码入口</li>
+        </ul>
+
+        <h2>8.5 给新人的行动路线</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>第 1-2 周：建直觉</h4>
+                    <p>看完本教程全部章节 → 看 AI4Animation 的 demo 视频 → 找一段动捕可视化视频，知道"数据长什么样"。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>第 3-4 周：跑通一个基线</h4>
+                    <p>在本地（你的 RTX 笔记本即可）跑通一个轻量文本到动作或动作生成 demo（如 MDM 或类似仓库的推理），亲手看到"文本 → 动作"的输出。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>第 5-6 周：精读三篇核心</h4>
+                    <p>Holden 2016 → Local Motion Phases → MDM。每篇读摘要+方法+看视频，写下"它解决什么、留下什么"。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>第 7-8 周：啃 AI4Animation</h4>
+                    <p>先跑 demo，再读代码。重点看：数据怎么准备、相位怎么算、网络怎么训练、Unity 怎么推理。做笔记。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">5</span>
+                <div class="step-content">
+                    <h4>第 9 周起：找一个自己的小改进</h4>
+                    <p>在跑通的基线上，换一个条件（比如加轨迹控制）、换一个数据集、或者换一种相位提取方式，记录实验对比——这就是你研究生阶段的第一个工作原型。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="callout callout-info">
+            <strong>学习目标校准</strong>：不要追求"把所有论文读完"。目标是——<strong>能讲清楚发展脉络、能跑通基线、能读懂 AI4Animation 的核心代码、能提出一个小改进</strong>。这四点达到，你就已经比 90% 的新生领先了。
+        </div>
+
+        <h2>8.6 最后：整个发展史的一页纸总结</h2>
+
+        <div class="definition">
+            <h4>一句话</h4>
+            <p>角色动画生成从<strong>「拼动作」</strong>（运动图/Motion Matching，靠数据量堆覆盖度）走到<strong>「学动作」</strong>（自编码器，发现动作流形），再到<strong>「控动作」</strong>（相位网络，实时响应输入），进而<strong>「生动作」</strong>（扩散/GPT，文本到动作），并沿着<strong>「物理正确」</strong>（强化学习）分支并行演进——<strong>数据越来越大、条件越来越多、生成越来越自然</strong>。</p>
+        </div>
+
+        <h2>本教程到此结束</h2>
+        <p>祝你顺利啃下 AI4Animation。记住：你已经有 Unity 工程能力和 NLP/深度学习基础，这个方向的每一块砖你都能搬动，缺的只是地图——这张地图，现在你已经有了。</p>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="07-物理与学习-强化学习路线.html">← 上一章：物理与学习</a>
+            <a href="index.html">返回目录</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

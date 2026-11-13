@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 1 章 导论与源码全景 - 空洞骑士源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">← 返回目录</a>
+    <a href="02-程序集与工程结构.html">下一章：程序集与工程结构 →</a>
+</nav>
+<main>
+    <h1>第 1 章　导论与源码全景</h1>
+
+    <p>在打开任何一个源文件之前，先弄清楚"手里这份东西到底是什么"。这决定了你应该用什么预期去读它——哪些东西是开发者的真实意图，哪些只是反编译工具的产物，哪些地方信息已经永久丢失。</p>
+
+    <h2>1.1 这份源码的来源</h2>
+    <p>Unity 游戏编译后，C# 代码会被编译成 .NET 程序集（DLL），放在游戏数据目录下。《空洞骑士》的对应位置是：</p>
+    <p><span class="filepath">hollow_knight_Data/Managed/Assembly-CSharp.dll</span></p>
+    <p>其中 <code>Assembly-CSharp.dll</code> 装着游戏自有代码，<code>PlayMaker.dll</code>、<code>UnityEngine.*.dll</code> 等是引擎与第三方库。反编译工具（ILSpy、dnSpy 等）把这些 DLL 的 IL（中间语言）重新翻译成 C# 源码，就得到了本教程的教材。工程文件 <code>Solution.sln</code> 里的引用路径留下了反编译者机器上的痕迹：</p>
+<pre><code class="language-xml">&lt;HintPath&gt;D:\SteamLibrary\steamapps\common\Hollow Knight\hollow_knight_Data\Managed\UnityEngine.CoreModule.dll&lt;/HintPath&gt;</code></pre>
+
+    <div class="definition">
+        <h4>版本锚点：1.5.12459</h4>
+        <p>这个数字在源码里反复出现：<code>GameManager.saveFormatVersion</code>、DesktopPlatform 写入的版本化文件名 <code>user1_1.5.12459.dat</code>、存档升级逻辑记录的系统版本号。它对应《空洞骑士》Godmaster（神居）版本线的发布格式。读源码时以这个版本为准，更早版本（1.0–1.4）的类结构和存档格式与本教材存在差异。</p>
+    </div>
+
+    <h2>1.2 反编译代码的六个典型特征</h2>
+    <p>下面这些特征会贯穿全书，提前认识它们可以避免大量误读。</p>
+
+    <h3>特征一：注释和原始局部变量名永久丢失</h3>
+    <p>编译后的 IL 不保留注释，也不保留未被反射/序列化使用的局部变量名。反编译器只能按类型自动命名，所以你会大量看到这样的局部变量：</p>
+    <ul>
+        <li><code>num</code>、<code>num2</code>、<code>num3</code>……——整型或浮点局部变量</li>
+        <li><code>flag</code>、<code>flag2</code>……——布尔局部变量</li>
+        <li><code>text</code>、<code>text2</code>……——字符串局部变量</li>
+        <li><code>obj</code>、<code>obj2</code>……——对象引用</li>
+    </ul>
+    <p>注意区分：<strong>类的字段和 public 方法名是保留的</strong>（Unity 序列化和反射依赖它们），所以 <code>HeroController.dashSpeed</code> 这样的字段名是开发者起的真名，而方法体里的 <code>int num = 0;</code> 是工具生成的。读代码时字段名承载的信息密度远高于局部变量名。</p>
+
+    <h3>特征二：游戏自有代码位于全局命名空间</h3>
+    <p>游戏的绝大多数类（GameManager、HeroController、HealthManager……）<strong>没有命名空间</strong>，直接处于全局命名空间下；而枚举被收在 <code>GlobalEnums</code> 命名空间，第三方库各有自己的命名空间：</p>
+    <table>
+        <thead><tr><th>内容</th><th>命名空间</th></tr></thead>
+        <tbody>
+            <tr><td>游戏自有类（约 800 个根目录文件）</td><td>全局（无 namespace）</td></tr>
+            <tr><td>32 个枚举文件</td><td><code>GlobalEnums</code></td></tr>
+            <tr><td>PlayMaker 自定义动作</td><td><code>HutongGames.PlayMaker.Actions</code></td></tr>
+            <tr><td>输入库</td><td><code>InControl</code></td></tr>
+        </tbody>
+    </table>
+    <p>另外你会看到 <code>namespace GlobalEnums;</code> 这种<strong>文件作用域命名空间</strong>写法，这是 C# 10 语法，是反编译工具的输出风格，不是当年开发者的原始写法（游戏开发时主流是 C# 6）。</p>
+
+    <h3>特征三：迭代器协程被高质量还原</h3>
+    <p>C# 的 <code>yield return</code> 协程在 IL 里会被编译成名为 <code>&lt;方法名&gt;d__N</code> 的状态机类。本教材使用的反编译器把它们成功还原回了 <code>IEnumerator</code> 迭代方法，所以你读不到尖括号类名，看到的是接近手写的协程代码，例如 GameManager 里的 <code>BeginSceneTransitionRoutine</code>。这是这份源码质量较高的一个标志，但要知道底层运行时它仍然是一个状态机对象。</p>
+
+    <h3>特征四：显式的 base. 与 Object. 前缀</h3>
+    <p>反编译器倾向于把所有隐式调用写全，于是出现大量 <code>base.transform</code>、<code>base.gameObject</code>、<code>Object.DontDestroyOnLoad</code>、<code>Object.FindObjectOfType</code>。这里的 <code>Object</code> 是 <code>UnityEngine.Object</code>，不是 C# 的 <code>System.Object</code>，阅读时自动忽略这些前缀即可。</p>
+
+    <h3>特征五：发布版调试代码被主动剥离</h3>
+    <p>开发版里的作弊菜单、调试钩子在发布构建中被条件编译或直接清空。<code>CheatManager.cs</code> 是最直观的标本：</p>
+<pre><code class="language-csharp">public static bool IsCheatsEnabled => false;   // 硬编码关闭
+
+public void DrawGUI()
+{
+    // 方法体被掏空，250 行的类只剩骨架
+}</code></pre>
+    <p>同类现象还有 <code>GameManager.RecordGameComplete()</code> 的空方法体。<strong>看到空方法不要以为这个机制不存在</strong>——它在开发版里有完整实现，只是发布版移除了。</p>
+
+    <h3>特征六：属性与字段的边界被模糊</h3>
+    <p>反编译器有时把编译器自动生成的属性后备字段（backing field）直接展开，有时保留属性。你会同时看到 <code>public static GameManager instance { get; ... }</code> 这样的完整属性和大量裸 public 字段。Unity 序列化只认字段，所以需要在 Inspector 里配置的东西一律是字段，这也是判断字段用途的线索。</p>
+
+    <h2>1.3 阅读这份源码的正确心态</h2>
+    <div class="callout callout-tip">
+        <p><strong>先读结构，再读实现。</strong>面对一个 140KB 的类（HeroController 有 4000 多行），不要从第一行开始硬啃。先看字段、再看 public 方法清单、最后挑一个具体调用链深入。本教程每一章都按这个顺序组织。</p>
+    </div>
+    <div class="callout callout-warning">
+        <p><strong>不要期待解释性文字。</strong>没有注释、没有设计文档，所有"为什么"都要靠调用关系和数据流向反推。当你发现某个布尔字段在十几个地方被读写，把这些位置串起来，它的真实语义才会浮现。</p>
+    </div>
+    <div class="callout callout-info">
+        <p><strong>信任字段名，警惕局部变量名。</strong><code>cState.dashing</code> 是可信的语义；方法体里的 <code>num</code> 是什么，需要结合它参与的表达式判断。</p>
+    </div>
+
+    <h2>1.4 全书的分析框架</h2>
+    <p>本教程对每个子系统都用同一套四问来拆解，你也可以把它用在任何一个没覆盖到的类上：</p>
+    <div class="steps">
+        <div class="step"><div class="step-number">1</div><div class="step-content"><strong>它持有什么数据？</strong>——字段和它们的序列化方式（Inspector 配置 / 运行时状态 / 存档字段）。</div></div>
+        <div class="step"><div class="step-number">2</div><div class="step-content"><strong>它的生命周期由谁驱动？</strong>——Awake/Start/Update，还是协程、事件、PlayMaker FSM。</div></div>
+        <div class="step"><div class="step-number">3</div><div class="step-content"><strong>它和谁通信？</strong>——直接引用、静态单例、FSM 事件、C# event/delegate。</div></div>
+        <div class="step"><div class="step-number">4</div><div class="step-content"><strong>数据从哪里来、到哪里去？</strong>——沿着一条真实操作（进门、受击、存档）走完整条链路。</div></div>
+    </div>
+
+    <div class="exercise">
+        <h3>思考与练习</h3>
+        <ol>
+            <li>打开 <code>CheatManager.cs</code>，列出三处能证明"发布版功能被剥离"的证据，并思考为什么反编译器还能看到类的骨架。</li>
+            <li>在 <code>GameManager.cs</code> 中找出 5 个 <code>num</code> 或 <code>flag</code> 命名的局部变量，根据它们参与的表达式给它们各起一个有意义的名字。</li>
+            <li>解释为什么反编译后类的字段名得以保留、而方法内的局部变量名丢失（提示：Unity 序列化与反射机制）。</li>
+            <li>用自己的话说明：为什么不能把反编译源码等同于开发者的原始工程？至少列出三点差异。</li>
+        </ol>
+    </div>
+</main>
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="index.html">← 返回目录</a>
+        <a href="02-程序集与工程结构.html">第 2 章：程序集与工程结构 →</a>
+    </nav>
+</footer>
+<script src="assets/script.js"></script>
+</body>
+</html>

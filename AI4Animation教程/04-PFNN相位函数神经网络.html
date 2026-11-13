@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 PFNN 相位函数神经网络 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="03-数据管线与特征工程.html">← 上一章：数据管线与特征工程</a>
+    <a href="05-MANN模式自适应神经网络.html">下一章：MANN →</a>
+</nav>
+
+<main>
+    <h1>04　PFNN：相位函数神经网络</h1>
+
+    <div class="paper-meta">
+        <dl>
+            <dt>论文</dt><dd>Phase-Functioned Neural Networks for Character Control</dd>
+            <dt>作者</dt><dd>Daniel Holden, Taku Komura, Jun Saito</dd>
+            <dt>发表</dt><dd>ACM Transactions on Graphics 36(4), Article 42, SIGGRAPH 2017</dd>
+            <dt>仓库位置</dt><dd>AI4Animation/SIGGRAPH_2017（含 Original 与 Adam 两个 Demo）</dd>
+        </dl>
+    </div>
+
+    <h2>4.1 核心思想</h2>
+    <p>PFNN 要回答一个具体问题：普通前馈网络在周期性运动上会把不同步态时刻的动作平均在一起，自回归模型（如 LSTM）
+    又会因误差累积而"逐渐熄灭"或"噪声爆炸"。它的解法是<strong>让网络权重不再固定，而是随相位周期性变化</strong>——
+    每一帧由一个"相位函数"生成当前时刻的回归网络权重，再用这套权重完成从控制参数到姿态的回归。</p>
+
+    <pre class="mermaid">
+flowchart LR
+    P["相位 p ∈ [0, 2π)"] --> TF["相位函数 Θ<br/>三次 Catmull-Rom 样条"]
+    TF --> W["当前网络权重 α"]
+    X["输入 x：轨迹+上一帧姿态+地形"] --> Net["回归网络 Φ"]
+    W --> Net
+    Net --> Y["输出 y：当前姿态+根运动+相位变化"]
+    style TF fill:#fff2dd,stroke:#f08c1a
+    style Net fill:#eaf7ed,stroke:#38a152
+    </pre>
+    <p class="mermaid-caption">图 4-1　PFNN 数据流：相位函数生成权重，回归网络执行预测</p>
+
+    <h2>4.2 相位及其标注</h2>
+    <p>相位 p 是一个表示步态周期时间位置的标量，取值 [0, 2π)。标注过程为半自动：</p>
+    <ol>
+        <li>用脚跟、脚尖关节速度幅值低于阈值自动检测足部接触时刻，再人工修正</li>
+        <li>右脚着地帧赋相位 0，左脚着地帧赋 π，下一次右脚着地赋 2π</li>
+        <li>中间帧线性插值；站立动作使用约 0.25 秒的最小周期让相位持续循环</li>
+    </ol>
+    <div class="callout callout-warning">
+        <span class="callout-title">注意</span>
+        <p>相位在 PFNN 中是<strong>外部标注量</strong>，不是网络学出来的。这正是后续 MANN（免相位标注）与 DeepPhase（无监督学相位）
+        试图消除的依赖，也是 PFNN 最主要的工程负担之一。</p>
+    </div>
+
+    <h2>4.3 回归网络结构</h2>
+    <p>回归网络 Φ 是一个简单的三层结构（两个隐藏层），每层 512 个单元，激活函数为 ELU：</p>
+    <div class="formula">
+        Φ(x; α) = W<sub>2</sub> ELU( W<sub>1</sub> ELU( W<sub>0</sub> x + b<sub>0</sub> ) + b<sub>1</sub> ) + b<sub>2</sub>
+    </div>
+    <p>真正被训练的不是单一权重，而是下一节相位函数的控制点。论文刻意保持网络简单，以满足实时性：推理只需毫秒级，
+    模型仅几 MB，即使训练数据达到 GB 级。</p>
+
+    <h2>4.4 相位函数：三次 Catmull-Rom 样条</h2>
+    <p>相位函数 Θ 以相位 p 为输入输出整套网络权重。论文发现<strong>仅 4 个控制点的循环三次样条就足以表达所需回归</strong>。
+    4 个控制点 β = {α<sub>0</sub>, α<sub>1</sub>, α<sub>2</sub>, α<sub>3</sub>} 每个都是一份完整的网络权重配置，
+    任意味相位处的权重由 Catmull-Rom 插值得到；首尾控制点相同，从而天然循环。</p>
+
+    <pre class="mermaid">
+flowchart LR
+    subgraph CP["4 个控制点（各为完整权重配置）"]
+        A0["α0"] --- A1["α1"] --- A2["α2"] --- A3["α3"]
+    end
+    P["相位 p"] --> CR["Catmull-Rom<br/>循环插值"]
+    CP --> CR
+    CR --> Alpha["该相位权重 α = Θ(p; β)"]
+    style CR fill:#e9f4ff,stroke:#007acc
+    </pre>
+    <p class="mermaid-caption">图 4-2　相位函数的 4 控制点结构</p>
+
+    <p>选择 Catmull-Rom 的理由论文给出了三点：可通过首尾重合轻松做成循环；参数量与控制点成正比；样条经过控制点，
+    权重在相位上平滑演化，避免了"为每个相位单独训练网络"导致的接缝与抖动。</p>
+
+    <h2>4.5 训练细节</h2>
+    <p>所有帧的输入 X、输出 Y、相位 P 堆叠后，优化目标为回归均方误差加一个小的权重正则（γ = 0.01）：</p>
+    <div class="formula">
+        Cost = ‖ Y − Φ(X; Θ(P; β)) ‖ + γ |β|
+    </div>
+    <table>
+        <thead><tr><th>项目</th><th>设置</th></tr></thead>
+        <tbody>
+            <tr><td>优化器</td><td>Adam（原始实现基于 Theano，自动对 β 求导）</td></tr>
+            <tr><td>Dropout</td><td>保留概率 0.7</td></tr>
+            <tr><td>Minibatch</td><td>32</td></tr>
+            <tr><td>训练轮数/耗时</td><td>20 epochs，约 30 小时（NVIDIA GTX 660）</td></tr>
+            <tr><td>数据规模</td><td>地形拟合后约 400 万样本点</td></tr>
+        </tbody>
+    </table>
+
+    <h2>4.6 运行时：相位自增与轨迹混合</h2>
+    <p>运行时相位由网络输出的相位变化量 ṗ 逐帧累加、模 2π 循环；关节状态以自回归方式滚动。需要特别处理的是
+    <strong>未来轨迹</strong>：手柄摇杆给出期望速度与朝向，PFNN 上一帧也预测了一份未来轨迹，两者按一个随未来时间
+    变化的幂函数混合：</p>
+    <div class="formula">
+        TrajectoryBlend(a<sub>0</sub>, a<sub>1</sub>, t, τ) = (1 − t<sup>τ</sup>) a<sub>0</sub> + t<sup>τ</sup> a<sub>1</sub>
+    </div>
+    <p>速度混合取 τ<sub>v</sub> = 0.5，偏向 PFNN 预测值以保证自然；朝向混合取 τ<sub>d</sub> = 2.0，偏向摇杆方向
+    以保证响应灵敏。最后把轨迹点投影到场景几何上取得高度，构成完整输入。</p>
+
+    <h2>4.7 为什么比 LSTM 稳定</h2>
+    <p>LSTM 把相位当作隐式变量，需要在隐藏状态中自己推断，错误预测的姿态被反复喂回输入后误差累积；PFNN 用相位
+    <strong>显式参数化</strong>权重，从机制上避免把不同相位的动作混合，因此不会出现自回归模型的"熄灭/爆炸"。
+    论文也指出，把相位仅作为额外输入维度喂给普通网络时，其影响会被稀释，只有让它直接决定权重才足够强。</p>
+
+    <h2>4.8 局限</h2>
+    <ul>
+        <li>依赖人工/半自动的相位标注，数据预处理成本高</li>
+        <li>单一全局相位只适合周期运动；非周期动作需要非循环相位函数，论文仅作为扩展提及</li>
+        <li>无法自然处理四足动物四条腿相位关系复杂、以及多接触异步运动——这正是接下来两年工作的切入点</li>
+    </ul>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>机制理解</h4>
+                    <p>概念上 PFNN 相当于"为每个相位训练一个专属网络"，但论文没有这样做。逐点说明 Catmull-Rom 方案相对独立网络的优势。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>参数权衡</h4>
+                    <p>τ<sub>v</sub> 与 τ<sub>d</sub> 取值不同反映了什么设计取舍？如果把 τ<sub>d</sub> 也设为 0.5，角色的实际手感会怎样变化？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>复现准备</h4>
+                    <p>若要在自己的数据上复现 PFNN，按顺序列出从接触检测到权重导出的完整步骤清单，标注哪些环节需要人工介入。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>PFNN 让网络权重随相位周期变化，用 4 控制点 Catmull-Rom 样条作为相位函数</li>
+        <li>回归网络为两隐层 512 单元 ELU；相位外部标注（右脚 0、左脚 π），是主要工程负担</li>
+        <li>运行时相位由 ṗ 自增，未来轨迹按幂函数与手柄输入混合，兼顾自然与响应</li>
+        <li>显式相位参数化使其比 LSTM 稳定，但局限于周期运动且依赖人工标注，直接引出后续工作</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://henriquetmaia.github.io/pdf/papers/holden2017.pdf">PFNN 论文原文（开放镜像）</a></li>
+            <li>本项目同级目录下另有 <code>PFNN/</code> 文件夹，含逐章论文精读与复现实战，可作为本章的深入配套</li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="03-数据管线与特征工程.html">← 上一章：数据管线与特征工程</a>
+        <a href="05-MANN模式自适应神经网络.html">下一章：MANN 模式自适应网络 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

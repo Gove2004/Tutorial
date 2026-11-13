@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 - 绪论：什么是角色动画生成 - 角色动画生成的深度学习发展史</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-传统方法-关键帧与动作捕捉.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>绪论：什么是角色动画生成</h1>
+
+        <p>在开始讲"发展史"之前，先把研究对象本身定义清楚。这一章解决三个问题：<strong>这个方向到底在做什么、它要解决什么子问题、为什么它值得你花几个月去研究</strong>。</p>
+
+        <h2>1.1 一个定义</h2>
+
+        <div class="definition">
+            <h4>角色动画生成（Character Animation Synthesis）</h4>
+            <p>给定一段"条件"（用户输入、运动控制信号、文字描述、音乐节奏……），用算法自动生成一段<strong>自然、流畅、符合物理直觉</strong>的虚拟角色动作序列。</p>
+        </div>
+
+        <p>注意关键词：</p>
+        <ul>
+            <li><strong>条件驱动</strong>：不是凭空生成，而是"你给什么，它动什么"。这个条件可以是玩家摇杆输入、一段文字"向前走然后挥拳"、或者一段音乐节拍</li>
+            <li><strong>自然流畅</strong>：生成的动作要像真人做的，不能机械、不能抖、不能脚滑</li>
+            <li><strong>符合物理直觉</strong>：动作可以夸张（游戏风格），但不能违反基本物理——腿不会穿模进地板，转身不会瞬移</li>
+        </ul>
+
+        <h2>1.2 三个子问题</h2>
+
+        <p>整个领域可以拆成三个递进的子问题，后续每一章其实都是在回答其中一个：</p>
+
+        <table>
+            <thead>
+                <tr><th>子问题</th><th>问的是什么</th><th>典型代表</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>① 动作怎么表示</strong></td>
+                    <td>一段动作在计算机里长什么样？关节旋转用欧拉角还是四元数？要不要存位置和速度？</td>
+                    <td>骨骼系统、SMPL 人体模型、AMASS 数据集</td>
+                </tr>
+                <tr>
+                    <td><strong>② 动作怎么生成</strong></td>
+                    <td>给定条件，如何输出一段新动作？是搜索拼接，还是训练一个网络直接生成？</td>
+                    <td>运动图 → 自编码器 → 相位网络 → 扩散模型/GPT</td>
+                </tr>
+                <tr>
+                    <td><strong>③ 动作怎么控制</strong></td>
+                    <td>生成的动作如何实时响应玩家输入、如何与场景交互、如何物理正确？</td>
+                    <td>PFNN → Local Motion Phases → DeepMimic/AMP</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="sidebar-note">
+            <strong>和"图像生成"做个类比（帮助你建立直觉）</strong>：图像生成是"输入一段文字/一张草图 → 输出一张像素图"；角色动画生成就是"输入一段文字/控制信号 → 输出一帧帧关节姿态"。图像是 2D 网格上的像素，动作是一串随时间变化的 3D 关节角度。你在图像领域学到的扩散模型、Transformer、CLIP 对齐，几乎都能平移过来——只是数据模态从"像素"换成了"姿态"。
+        </div>
+
+        <h2>1.3 为什么这个方向值得研究</h2>
+
+        <h3>① 游戏工业的刚需</h3>
+        <p>游戏里角色动得自不自然，直接决定游戏体验。传统做法（手 K + 动捕 + Blend Tree）的成本极高：一个 AAA 游戏的动画资产可能占整个开发预算的 20%-30%。AI 生成动画的目标就是"用更少的资产、更少的动画师，产出更丰富的动作"。</p>
+
+        <h3>② 数据模态的独特性</h3>
+        <p>动作数据不同于图像/文本：它是<strong>高维时序</strong>的（一帧几十个关节 × 每个关节 3 个旋转分量），且有<strong>强物理约束</strong>（人体骨骼的连接、平衡、惯性）。这意味着不能直接照搬图像模型——很多在图像上 work 的方法，搬到动作上会生成"鬼畜"结果。这种独特性正是学术产出的空间。</p>
+
+        <h3>③ 从"实验室"到"游戏引擎"的落地通道短</h3>
+        <p>这是最现实的一点：图像生成落地难（像素最终要进入产品管线），但动作生成可以直接在 Unity/UE 里跑。你老师推荐的 AI4Animation 就是在 Unity 里实时生成角色动画——<strong>研究成果可以直接变成游戏功能</strong>，这对读研做工程/专硕方向的学生非常友好。</p>
+
+        <div class="callout callout-warning">
+            <strong>一个诚实的提醒</strong>：这个方向也有一体两面。它既有非常工程化的一面（游戏落地），也有非常学术化的一面（发论文需要创新点）。如果你的目标是"少写论文、多做工程"，这个方向可以；但如果你想"彻底不碰深度学习理论"，那不行——<strong>这个方向的根基就是深度学习，绕不开</strong>。
+        </div>
+
+        <h2>1.4 贯穿全教程的主线地图</h2>
+
+        <p>把整个发展史浓缩成一张时间线地图，后续每一章就是地图上的一个路段：</p>
+
+        <div class="timeline">
+            <div class="timeline-item">
+                <span class="year">~2002-2015</span>
+                <h4>传统时代：拼动作</h4>
+                <p>关键帧手 K、动作捕捉、运动图（Motion Graphs）、Motion Matching。核心思路：<strong>搜索 + 拼接</strong>现有动作片段。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2015-2016</span>
+                <h4>转折点：学动作</h4>
+                <p>Holden 2016：用自编码器学习"动作流形"，第一次证明动作可以被压缩、插值、编辑。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2017-2020</span>
+                <h4>实时控制：相位函数</h4>
+                <p>PFNN → Local Motion Phases → Neural Animation Layering。深度学习真正进入实时游戏控制，AI4Animation 系列。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2021-2023</span>
+                <h4>生成时代：条件生成爆发</h4>
+                <p>文本→动作（T2M/TEMOS）、扩散模型（MDM/MotionDiffuse/MLD）、GPT 路线（T2M-GPT/MotionGPT）。"你说什么，它生成什么"。</p>
+            </div>
+            <div class="timeline-item">
+                <span class="year">2018-至今</span>
+                <h4>物理分支：强化学习</h4>
+                <p>DeepMimic、AMP：让生成的动作物理正确、可交互。与生成路线并行发展。</p>
+            </div>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>记忆口诀</strong>：<strong>"拼 → 学 → 控 → 生 → 物"</strong>。拼动作（运动图）→ 学动作（自编码器）→ 实时控制（相位网络）→ 条件生成（扩散/GPT）→ 物理正确（强化学习）。把这五个字记住，你就有了整张地图。
+        </div>
+
+        <h2>1.5 学习路径建议</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>先建"数据直觉"</h4>
+                    <p>找一段动捕数据的可视化（B 站搜"三维重建 角色动画 动捕"），知道"动作数据长什么样"再谈算法。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>读本教程第 2-3 章</h4>
+                    <p>理解传统方法的痛点——因为<strong>每一代深度学习方法的出现，都是为了解决上一代方法的具体痛点</strong>。不知道痛点，就不知道为什么论文要这么做。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>再读第 4-7 章</h4>
+                    <p>按时间线理解深度学习各阶段的代表方法，每章关注"解决了什么、引入了什么新问题"。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>最后用第 8 章查漏补缺</h4>
+                    <p>论文清单、术语表、数据集——作为你之后啃论文/看 AI4Animation 源码时的速查手册。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>角色动画生成 = 条件驱动的自然动作合成，核心是"表示、生成、控制"三个子问题</li>
+            <li>它既是游戏工业刚需，又有独特的数据模态（高维时序 + 物理约束），学术与工程空间都大</li>
+            <li>整个发展史的主线：<strong>拼 → 学 → 控 → 生 → 物</strong></li>
+        </ul>
+
+        <h2>思考题</h2>
+        <ol>
+            <li>为什么"动作数据"不能直接套用图像数据的处理方式？至少说出两个本质区别。</li>
+            <li>如果你是游戏主程，动画预算砍半，你第一时间会想到用 AI 解决哪个环节？为什么？</li>
+            <li>查一下你熟悉的游戏（任意一款），它的角色动画大概是用什么方式做的？</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="02-传统方法-关键帧与动作捕捉.html">下一章：传统方法（上）→</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

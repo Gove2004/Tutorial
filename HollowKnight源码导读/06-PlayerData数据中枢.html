@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 6 章 PlayerData 数据中枢 - 空洞骑士源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="05-场景配置与场景管理器.html">← 上一章：场景配置与场景管理器</a>
+    <a href="07-存档系统全链路.html">下一章：存档系统全链路 →</a>
+</nav>
+<main>
+    <h1>第 6 章　PlayerData 数据中枢</h1>
+    <p>如果要在整个工程里挑一个最核心的类，答案是 PlayerData。它是一个 8000 多行、1500 多个字段的纯数据类，游戏里几乎所有需要持久化的状态——主角能力、护符、收集品、场景访问、统计计数——最终都落在它身上。本章拆解它的组织方式和访问机制。</p>
+
+    <h2>6.1 定位：游戏的单一事实来源</h2>
+    <div class="definition">
+        <h4>单一事实来源（Single Source of Truth）</h4>
+        <p>PlayerData 不是 MonoBehaviour，不挂在场景物体上，而是一个 <code>[Serializable]</code> 普通类，由 GameManager 持有引用。任何系统需要判断"主角会不会冲刺""这个护符装没装""当前有多少吉欧"，都不自己存一份，而是读 PlayerData。这保证了同一个状态在全局只有一份权威数据，避免多系统各自记录导致不一致。</p>
+    </div>
+
+    <h2>6.2 规模与类型分布</h2>
+    <p>对字段做统计，1511 个 public 字段的类型分布高度集中：</p>
+    <table>
+        <thead><tr><th>类型</th><th>数量</th><th>承载内容</th></tr></thead>
+        <tbody>
+            <tr><td><code>bool</code></td><td>约 1100</td><td>绝对主力：能力开关、收集状态、条件标记</td></tr>
+            <tr><td><code>int</code></td><td>约 329</code></td><td>计数、伤害、等级、坐标分量</td></tr>
+            <tr><td>BossStatue.Completion / BossSequenceDoor.Completion</td><td>45 / 5</td><td>Boss 雕像与 Boss Rush 的完成度结构</td></tr>
+            <tr><td>string / float / Vector3 / MapZone</td><td>少量</td><td>版本号、场景名、计时、三维坐标</td></tr>
+            <tr><td>List&lt;T&gt;</td><td>16</td><td>场景访问/地图/护符装配等集合</td></tr>
+        </tbody>
+    </table>
+    <p>布尔字段占比超过七成，这解释了为什么 FSM Action 里有大量 <code>SetPlayerDataBool</code>/<code>GetPlayerDataBool</code>——游戏逻辑的大部分分支条件最终都是一个布尔字段。</p>
+
+    <h2>6.3 字段命名规律：看懂名字就看懂一半</h2>
+    <p>PlayerData 没有用字典或嵌套对象做分层，而是靠<strong>命名前缀和编号</strong>在一个平面上组织字段。掌握下面四组规律，就能快速定位字段。</p>
+
+    <h3>规律一：能力的"双字段" has / can</h3>
+<pre><code class="language-csharp">public bool canDash;      // 能力当前是否可用（可能被 Boss 场景等临时禁用）
+public bool hasDash;      // 主角是否已经获得该能力（持久事实）
+public bool canWallJump;
+public bool hasWalljump;</code></pre>
+    <p>两个字段语义不同：<code>hasXxx</code> 记录"拿到过没有"，<code>canXxx</code> 记录"此刻能不能用"。读主角逻辑时，触发条件通常查 can，而收集进度查 has。</p>
+
+    <h3>规律二：护符的编号字段三件套</h3>
+<pre><code class="language-csharp">public bool gotCharm_1;        // 是否获得 1 号护符
+public bool equippedCharm_1;   // 1 号护符当前是否装配
+public int  charmCost_1;       // 1 号护符的凹槽成本
+public List<int> equippedCharms; // 同时维护一份已装配编号列表
+public int charmSlots;
+public int charmSlotsFilled;</code></pre>
+    <p>同一个护符在"是否拥有""是否装配""成本"三个维度各有一个编号字段，外加一个 List 记录装配顺序。这种冗余是为了让不同系统（库存、装配 UI、效果判定）各取所需。</p>
+
+    <h3>规律三：收集品与场景状态</h3>
+    <ul>
+        <li><code>gotXxx</code>——单个收集品（gotCharm_N、gotKey 等），全类约 95 个 has/got 字段</li>
+        <li>List 字段按场景名记录集合状态：<code>scenesVisited</code>、<code>scenesMapped</code>、<code>scenesGrubRescued</code>、<code>scenesFlameCollected</code></li>
+        <li>地图标记 <code>placedMarkers_r/b/y/w</code>（四色，Vector3 列表）</li>
+    </ul>
+
+    <h3>规律四：坐标与阴影/重生</h3>
+<pre><code class="language-csharp">public string respawnScene;
+public string respawnMarkerName;
+public int respawnType;
+public bool respawnFacingRight;
+public string shadeScene;
+public float shadePositionX;
+public float shadePositionY;
+public Vector3 hazardRespawnLocation;</code></pre>
+    <p>注意 Vector3 能序列化，但有些坐标被拆成两个 float（shadePositionX/Y），这是早期版本或存档格式演进留下的风格，读的时候要意识到它们表达的是同一个点。</p>
+
+    <h2>6.4 反射字符串访问机制</h2>
+    <p>PlayMaker 是数据驱动的，FSM 里只能存字符串，无法在编辑时直接引用 C# 字段。PlayerData 因此提供一组按字段名反射访问的方法：</p>
+<pre><code class="language-csharp">public void SetInt(string intName, int value)
+{
+    FieldInfo field = GetType().GetField(intName);
+    if (field != null)
+    {
+        field.SetValue(instance, value);
+    }
+    else
+    {
+        Debug.Log("PlayerData: Could not find field named " + intName
+                  + ", check variable name exists and FSM variable string is correct.");
+    }
+}
+
+public int GetInt(string intName)
+{
+    FieldInfo field = GetType().GetField(intName);
+    if (field != null) return (int)field.GetValue(instance);
+    Debug.LogError("PlayerData: Could not find int named " + intName);
+    return -9999;   // 找不到时的哨兵返回值
+}</code></pre>
+    <p>调用链是：FSM Action（如 SetPlayerDataInt）→ GameManager.SetPlayerDataInt → PlayerData.SetInt → 反射。这让设计师能在 PlayMaker 编辑器里用字符串读写任意字段，无需程序员改代码。</p>
+
+    <div class="callout callout-danger">
+        <p><strong>陷阱一：拼写错误是静默的运行时故障。</strong>字段名以字符串形式散落在大量 FSM 资产里，编译期完全不检查。拼错只会在运行到该 Action 时打一条日志，字段不会被写入，且不会中断流程。这类 bug 不会崩溃，只会让某个状态悄悄失效，排查时要主动搜日志里的 "Could not find field"。</p>
+    </div>
+    <div class="callout callout callout-warning">
+        <p><strong>陷阱二：反射有性能成本，且 GetInt 失败返回 -9999。</strong>每次调用都 GetField + SetValue，虽然单次不致命，但在高频路径（每帧/每敌人）上应避免。另外 <code>-9999</code> 是失败哨兵，不是真实数据，若把它当数值参与计算会产生荒谬结果。核心 C# 代码里能直接访问字段就直接访问，反射入口主要服务 FSM。</p>
+    </div>
+
+    <h2>6.5 硬编码方法：展开式写法的解读</h2>
+    <p>CalculateNotchesUsed 计算护符凹槽占用，没有用循环，而是 40 多个连续 if：</p>
+<pre><code class="language-csharp">public void CalculateNotchesUsed()
+{
+    int num = 0;
+    if (equippedCharm_1) num += charmCost_1;
+    if (equippedCharm_2) num += charmCost_2;
+    // ... 一直到 equippedCharm_40
+    charmSlotsFilled = num;
+}</code></pre>
+    <div class="callout callout-info">
+        <p>不要把它简单看成"烂代码"。根因是字段必须平铺才能被 Unity 序列化、在 Inspector 配置、被反射按名访问；既然 equippedCharm_N 是独立字段，就没有一个数组可以循环。这是"数据平面化"约束在方法层面的直接结果。同类硬编码还出现在 CountGameCompletion、CountCharms、CountJournalEntries 等统计方法里。</p>
+    </div>
+
+    <h2>6.6 业务方法举例：蓝血与治疗</h2>
+    <p>PlayerData 不只是字段容器，也承载状态变更规则。TakeHealth 处理"蓝血（生命血）先于普通血扣除"的逻辑：</p>
+<pre><code class="language-csharp">public void TakeHealth(int amount)
+{
+    if (healthBlue > 0)
+    {
+        int remaining = amount - healthBlue;
+        damagedBlue = true;
+        healthBlue = Mathf.Max(0, healthBlue - amount);
+        if (remaining > 0) TakeHealth(remaining);  // 蓝血扣完，递归扣普通血
+    }
+    else
+    {
+        health = Mathf.Max(0, health - amount);
+    }
+}</code></pre>
+    <p>把"先扣哪种血"的规则和数据放在一起，外部系统只需要调用 TakeHealth，不需要知道蓝血机制。这是数据类承载业务规则的合理边界——但也意味着 PlayerData 会随着规则增多持续膨胀，这是该架构的固有代价。</p>
+
+    <h2>6.7 数据流向总览</h2>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+flowchart LR
+    FSM["PlayMaker FSM<br/>字符串字段名"] -->|"SetPlayerDataXxx"| GM["GameManager"]
+    GM -->|"反射 SetValue"| PD["PlayerData 字段"]
+    CSHARP["HeroController / HealthManager 等<br/>直接字段访问"] --> PD
+    PD -->|"序列化"| SAVE["SaveGameData → 磁盘"]
+    SAVE -->|"反序列化"| PD
+</div>
+    </div>
+
+    <div class="exercise">
+        <h3>思考与练习</h3>
+        <ol>
+            <li>解释 <code>hasDash</code> 与 <code>canDash</code> 的语义差异，分别给出一个应该读取它们的场景。</li>
+            <li>在 FSM 里把字段名 "hasDash" 误写成 "hassDash" 会发生什么？游戏会崩溃吗？这个错误什么时候能被发现？</li>
+            <li>说明 CalculateNotchesUsed 为什么不用循环，根因是数据结构的哪个约束？</li>
+            <li>追踪 TakeHealth(3) 在 healthBlue=2、health=5 时的完整执行过程，给出最终两个字段的值。</li>
+        </ol>
+    </div>
+</main>
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="05-场景配置与场景管理器.html">← 上一章：场景配置与场景管理器</a>
+        <a href="07-存档系统全链路.html">第 7 章：存档系统全链路 →</a>
+    </nav>
+</footer>
+<script src="assets/script.js"></script>
+</body>
+</html>

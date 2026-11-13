@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 - T1 数位运算：200 位整数相加</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="06-2024-t5-vm.html">← 上一章</a>
+    <a href="08-2025-t2-forest.html">下一章 →</a>
+</nav>
+
+<main>
+    <h1>T1 数位运算：200 位整数相加</h1>
+
+    <div class="problem">
+        <h3>题目描述</h3>
+        <div class="problem-meta">
+            <span class="src-badge src-a">A 级 · 17noi #1719 原题</span>
+            <span class="tag">第二届区域赛</span>
+            <span class="tag green">100 分（推定）</span>
+        </div>
+
+        <p>给定两个整数 <em>x</em>、<em>y</em>，求 <em>x + y</em> 的各位数字之和。</p>
+
+        <h4>输入描述</h4>
+        <p>一行两个整数 <em>x</em>、<em>y</em>，以空格分隔。</p>
+
+        <h4>输出描述</h4>
+        <p>一个整数，表示 <em>x + y</em> 的各位数字之和。</p>
+
+        <h4>样例</h4>
+        <pre><code class="language-plaintext">输入：
+58 65
+
+输出：
+6</code></pre>
+
+        <p>58 + 65 = 123，1 + 2 + 3 = 6。</p>
+
+        <p><strong>数据范围：</strong>30% 的数据 <em>x, y</em> ≤ 10<sup>9</sup>；100% 的数据 <em>x, y</em> ≤ 10<sup>200</sup>。</p>
+    </div>
+
+    <div class="callout callout-tip">
+        <strong>先自己想一想（建议 5 分钟）</strong>
+        <ul style="margin:0.5em 0 0">
+            <li><code>unsigned long long</code> 最大约 1.8×10<sup>19</sup>，10<sup>200</sup> 需要多少位？</li>
+            <li>如果只写 <code>long long</code>，能拿到多少分？</li>
+        </ul>
+    </div>
+
+    <h2>签到题，但有一半人会掉进去</h2>
+
+    <p>
+        30% 的数据 ≤ 10<sup>9</sup>，用 <code>long long</code> 直接加、再循环取数位就能过。
+        剩下 70% 的数据到 10<sup>200</sup>，<code>long long</code> 会溢出，结果是错的而不是崩溃——
+        这类错误最难发现，因为本地小样例全对。
+    </p>
+
+    <div class="callout callout-warning">
+        <strong>溢出不是崩溃，是静默给错答案</strong>
+        <p style="margin:0.5em 0 0">
+            C++ 的有符号整数溢出是未定义行为，实际常表现为回绕成一个看起来「正常」的数。你不会看到 Runtime Error，
+            只会看到 WA。所以只要题面出现「10<sup>100</sup>」这种范围，第一反应必须是字符串或高精度。
+        </p>
+    </div>
+
+    <h2>做法：模拟竖式加法，边加边求和</h2>
+
+    <p>
+        把两个数当成字符串，从最低位开始逐位相加，处理进位。因为题目只要「和的数位和」，不需要保存完整结果，
+        可以边加边累计。
+    </p>
+
+    <div class="definition">
+        <h4>核心循环</h4>
+        <span class="formula">d = carry + x[i] + y[j]</span>
+        <span class="formula">sum += d % 10;  carry = d / 10</span>
+        <p style="margin:0.4em 0 0">循环条件是 <code>i ≥ 0 || j ≥ 0 || carry</code>，最后一个 <code>carry</code> 不能漏。</p>
+    </div>
+
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    string x, y;
+    cin &gt;&gt; x &gt;&gt; y;
+
+    int i = (int)x.size() - 1;
+    int j = (int)y.size() - 1;
+    int carry = 0;
+    long long sum = 0;
+
+    while (i &gt;= 0 || j &gt;= 0 || carry) {
+        int d = carry;
+        if (i &gt;= 0) d += x[i] - '0';
+        if (j &gt;= 0) d += y[j] - '0';
+
+        sum += d % 10;
+        carry = d / 10;
+
+        --i;
+        --j;
+    }
+
+    cout &lt;&lt; sum &lt;&lt; '\n';
+    return 0;
+}</code></pre>
+
+    <p>
+        复杂度 O(max(|x|, |y|))，最多 201 次循环。即使两个数都是 200 位、每一位都产生进位，<code>sum</code> 最大也只有
+        201 × 9 ≈ 1809，<code>long long</code> 完全够用。
+    </p>
+
+    <h2>样例竖式</h2>
+
+    <table>
+        <thead><tr><th>位</th><th>x = 58</th><th>y = 65</th><th>carry 入</th><th>d</th><th>本位</th><th>carry 出</th><th>sum</th></tr></thead>
+        <tbody>
+            <tr><td>个位</td><td>8</td><td>5</td><td>0</td><td>13</td><td>3</td><td>1</td><td>3</td></tr>
+            <tr><td>十位</td><td>5</td><td>6</td><td>1</td><td>12</td><td>2</td><td>1</td><td>5</td></tr>
+            <tr><td>百位</td><td>—</td><td>—</td><td>1</td><td>1</td><td>1</td><td>0</td><td>6</td></tr>
+        </tbody>
+    </table>
+
+    <p>第三行就是「循环条件里必须带 <code>carry</code>」的原因：两个数都加完了，进位还没处理完。</p>
+
+    <h2>一个可用于自检的性质</h2>
+
+    <p>设 <code>s(n)</code> 为 n 的数位和，则每发生一次进位，数位和就减少 9：</p>
+
+    <span class="formula">s(x + y) = s(x) + s(y) − 9 × (进位次数)</span>
+
+    <p>
+        这个式子可以用来对拍：分别统计 <code>s(x) + s(y)</code> 与进位次数，与逐位累加的结果比较。
+        如果两者不等，说明进位处理有漏。
+    </p>
+
+    <p>更直接的办法是用 Python 的任意精度整数做随机对拍：</p>
+
+<pre><code class="language-python">import random
+
+def digit_sum_add(a: str, b: str) -> int:
+    i, j, carry, s = len(a) - 1, len(b) - 1, 0, 0
+    while i &gt;= 0 or j &gt;= 0 or carry:
+        d = carry
+        if i &gt;= 0: d += int(a[i]); i -= 1
+        if j &gt;= 0: d += int(b[j]); j -= 1
+        s += d % 10
+        carry = d // 10
+    return s
+
+for _ in range(2000):
+    x = random.randint(0, 10 ** 200)
+    y = random.randint(0, 10 ** 200)
+    got = digit_sum_add(str(x), str(y))
+    want = sum(int(c) for c in str(x + y))
+    assert got == want, (x, y, got, want)
+print("ok")</code></pre>
+
+    <h2>如果你用 Python 或 Java 参赛</h2>
+
+    <p>
+        Python 的 <code>int</code> 是天生的任意精度，一行就够：
+    </p>
+
+<pre><code class="language-python">x, y = input().split()
+print(sum(int(c) for c in str(int(x) + int(y))))</code></pre>
+
+    <p>
+        Java 用 <code>BigInteger</code>：<code>new BigInteger(x).add(new BigInteger(y)).toString()</code>，再逐位累加。
+        注意 <code>BigInteger</code> 的构造参数是字符串，不要先 <code>Long.parseLong</code>。
+    </p>
+
+    <div class="callout callout-info">
+        <strong>语言选择本身就是策略</strong>
+        <p style="margin:0.5em 0 0">
+            区域赛允许 C/C++/Java/Python。纯大数题用 Python 三十秒写完，用 C++ 要写 20 行字符串处理。
+            但工程题、需要卡常的数据结构题，Python 大概率超时。赛前就要决定「哪类题用哪种语言」，不要在赛场上临时切。
+        </p>
+    </div>
+
+    <h2>易错点清单</h2>
+
+    <ul class="checklist">
+        <li>用 <code>long long</code> 存输入，30% 的数据能过，剩下 70% 全 WA。</li>
+        <li>循环写成 <code>while (i &gt;= 0 &amp;&amp; j &gt;= 0)</code>，两个数长度不同时高位丢失。</li>
+        <li>循环条件漏了 <code>carry</code>，如 99 + 1 输出 0 而不是 1。</li>
+        <li>把「和的数位和」写成「两个数的数位和相加」——注意后者只有在没有进位时才相等。</li>
+        <li>读入用 <code>int</code> 或 <code>double</code>，200 位直接被截断。</li>
+        <li>输出用了 <code>int</code> 之外的格式（比如补零），评测按整数比较会 WA。</li>
+    </ul>
+
+    <h2>延伸练习</h2>
+
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>改成求 x × y 的数位和</h4>
+                <p>高精度乘法，O(n²) 的竖式乘法在 200 位下完全够用。注意进位可能累积到几千。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>求 x − y 的数位和</h4>
+                <p>需要处理借位，且结果可能为负。先判断大小，再用大减小。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+                <h4>数位和直到一位数</h4>
+                <p>反复求数位和直到只剩一位（数字根）。试着用 <code>n % 9</code> 的性质直接给出 O(1) 答案，注意 0 和 9 的边界。</p>
+            </div>
+        </div>
+    </div>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>看到 10<sup>100</sup> 级别的范围，先想字符串/高精度，不要想「long long 应该够」。</li>
+        <li>模拟竖式加法时，循环条件必须包含 <code>carry</code>。</li>
+        <li>「只要数位和」可以边加边算，不必保存完整结果。</li>
+        <li>进位让数位和减少 9，这是一个可用于自检的恒等式。</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <strong>下一章</strong>
+        <p style="margin:0.5em 0 0">
+            T2 魔法森林：网格 DP + LCG 生成数据。难点不在 DP，而在「矩阵怎么生成」和「起点怎么初始化」。
+        </p>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav bottom">
+        <a href="06-2024-t5-vm.html">← 上一章：T5 资源分配</a>
+        <a href="08-2025-t2-forest.html">下一章：T2 魔法森林 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

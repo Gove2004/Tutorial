@@ -1,0 +1,181 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+    line-height: 1.75;
+    color: #23272e;
+    background: #eef0f3;
+}
+
+main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2.5rem 3rem;
+    background: #ffffff;
+    min-height: 100vh;
+    box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
+}
+
+h1, h2, h3, h4 { margin-top: 1.6em; margin-bottom: 0.6em; line-height: 1.35; }
+h1 { font-size: 2.3rem; border-bottom: 3px solid #3b6ea5; padding-bottom: 0.35em; }
+h2 { font-size: 1.7rem; border-bottom: 1px solid #d8dde4; padding-bottom: 0.25em; }
+h3 { font-size: 1.32rem; }
+h4 { font-size: 1.1rem; }
+
+p { margin-bottom: 1em; }
+ul, ol { margin-left: 2em; margin-bottom: 1em; }
+li { margin-bottom: 0.45em; }
+
+strong { color: #1c2530; }
+
+code {
+    font-family: Consolas, "Courier New", monospace;
+    background: #eef1f5;
+    color: #8a3b2e;
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+pre { background: #1f2430; padding: 1.4em 1.5em; border-radius: 8px; overflow-x: auto; position: relative; margin-bottom: 1.5em; }
+pre code { color: #e6e8ec; background: none; padding: 0; font-size: 0.88em; line-height: 1.55; }
+pre.terminal { background: #14181f; border-left: 4px solid #5d8f4c; }
+
+.copy-button {
+    position: absolute;
+    top: 0.55em;
+    right: 0.55em;
+    background: #3b6ea5;
+    color: white;
+    border: none;
+    padding: 0.3em 0.85em;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.82em;
+    opacity: 0.85;
+}
+.copy-button:hover { background: #2d5683; opacity: 1; }
+
+.callout { padding: 1em 1.4em; margin-bottom: 1.5em; border-left: 4px solid; border-radius: 4px; }
+.callout p:last-child { margin-bottom: 0; }
+.callout-info { background: #eaf2fa; border-color: #3b6ea5; }
+.callout-warning { background: #fff5e8; border-color: #e08a2e; }
+.callout-tip { background: #e9f5ec; border-color: #4f9464; }
+.callout-danger { background: #fdeceb; border-color: #c0453c; }
+
+details { margin-bottom: 1.5em; border: 1px solid #d8dde4; border-radius: 6px; padding: 0.8em 1.2em; background: #fbfcfd; }
+summary { cursor: pointer; font-weight: bold; user-select: none; }
+details[open] summary { margin-bottom: 0.6em; }
+
+.tabs { margin-bottom: 1.5em; }
+.tab-buttons { display: flex; gap: 0.5em; border-bottom: 2px solid #d8dde4; flex-wrap: wrap; }
+.tab-buttons button {
+    padding: 0.55em 1.1em;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    font-size: 0.95em;
+}
+.tab-buttons button.active { border-bottom-color: #3b6ea5; font-weight: bold; color: #2d5683; }
+.tab-content { display: none; padding-top: 1em; }
+.tab-content.active { display: block; }
+
+table { width: 100%; border-collapse: collapse; margin-bottom: 1.5em; font-size: 0.93em; }
+th, td { padding: 0.7em 0.9em; border: 1px solid #d8dde4; text-align: left; vertical-align: top; }
+th { background: #f1f4f8; font-weight: bold; }
+.comparison .good { background: #e9f5ec; }
+.comparison .bad { background: #fdeceb; }
+
+.steps { margin-bottom: 1.5em; }
+.step { display: flex; gap: 1em; margin-bottom: 1.3em; }
+.step-number {
+    flex-shrink: 0;
+    width: 2em;
+    height: 2em;
+    background: #3b6ea5;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+}
+.step-content { flex: 1; }
+
+.definition {
+    background: #f7fafc;
+    border: 2px solid #3b6ea5;
+    border-radius: 8px;
+    padding: 1.3em 1.5em;
+    margin-bottom: 1.5em;
+}
+.definition h4 { margin-top: 0; color: #2d5683; }
+.definition p:last-child { margin-bottom: 0; }
+
+.sidebar-note {
+    background: #fffbe9;
+    border-left: 4px solid #d8b44a;
+    padding: 0.9em 1.2em;
+    margin: 1.5em 0;
+    font-size: 0.94em;
+}
+
+.chapter-nav {
+    display: flex;
+    justify-content: space-between;
+    gap: 1em;
+    padding: 0.9em 0;
+    border-bottom: 1px solid #d8dde4;
+    margin-bottom: 2em;
+    flex-wrap: wrap;
+}
+.chapter-nav a { color: #2d5683; text-decoration: none; font-weight: 500; }
+.chapter-nav a:hover { text-decoration: underline; }
+
+.chapter-footer { margin-top: 3em; padding-top: 1.5em; border-top: 2px solid #d8dde4; }
+.chapter-footer .chapter-nav { border: none; margin-bottom: 0; }
+
+.intro { font-size: 1.08em; color: #4a5563; margin-bottom: 2em; }
+.chapter-list { display: flex; flex-direction: column; gap: 1.1em; }
+.chapter-item { border: 1px solid #d8dde4; border-radius: 8px; padding: 1.2em 1.5em; background: #fbfcfd; }
+.chapter-item h3 { margin: 0.4em 0; font-size: 1.15em; }
+.chapter-item a { text-decoration: none; color: #2d5683; }
+.chapter-item a:hover { text-decoration: underline; }
+.chapter-badge { display: inline-block; padding: 0.18em 0.75em; border-radius: 12px; font-size: 0.8em; font-weight: bold; margin-right: 0.5em; }
+.chapter-badge.basic { background: #e9f5ec; color: #3d7a50; }
+.chapter-badge.intermediate { background: #fff3e0; color: #c26a1c; }
+.chapter-badge.advanced { background: #fce4ec; color: #a83258; }
+
+.version-info { background: #f1f4f8; padding: 1.1em 1.4em; border-radius: 6px; font-size: 0.92em; color: #4a5563; margin-bottom: 2em; }
+
+.filepath {
+    display: inline-block;
+    font-family: Consolas, monospace;
+    font-size: 0.85em;
+    background: #2b3240;
+    color: #9fc2e0;
+    padding: 0.25em 0.7em;
+    border-radius: 4px;
+    margin-bottom: 0.8em;
+}
+
+.mermaid-wrap { background: #fbfcfd; border: 1px solid #d8dde4; border-radius: 8px; padding: 1.4em; margin-bottom: 1.5em; text-align: center; overflow-x: auto; }
+.mermaid { display: inline-block; }
+
+.exercise { background: #f4f7fb; border: 1px dashed #7fa3c4; border-radius: 8px; padding: 1.2em 1.5em; margin-top: 2em; }
+.exercise h3 { margin-top: 0; color: #2d5683; }
+.exercise ol { margin-bottom: 0; }
+
+@media (max-width: 768px) {
+    main { padding: 1.2rem; margin: 0; }
+    h1 { font-size: 1.7rem; }
+    h2 { font-size: 1.4rem; }
+    pre { padding: 1em; font-size: 0.85em; }
+    .chapter-nav { flex-direction: column; gap: 0.4em; }
+}

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 问题定义与运动数据基础 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="01-AI4Animation全景与技术定位.html">← 上一章：全景与定位</a>
+    <a href="03-数据管线与特征工程.html">下一章：数据管线与特征工程 →</a>
+</nav>
+
+<main>
+    <h1>02　问题定义与运动数据基础</h1>
+    <p>本章把"让角色动起来"翻译成精确的数学语言：骨骼如何表示、旋转如何参数化、一个运动数据集在内存里长什么样，
+    以及"用神经网络做控制"在形式上到底是在解什么问题。这些是后面所有论文章节的公共词汇。</p>
+
+    <h2>2.1 骨骼层级与姿态</h2>
+    <p>角色的身体被建模为一棵<strong>骨骼树（skeleton hierarchy）</strong>：每个关节（joint）是树上的一个节点，
+    拥有相对父节点的局部变换，根节点（root）描述整个身体在世界中的位置与朝向。一个姿态（pose）就是某一时刻所有关节
+    局部变换的集合。</p>
+
+    <pre class="mermaid">
+flowchart TD
+    Hips["Hips 根节点（髋部）"]
+    Hips --> Spine["Spine 脊柱"]
+    Spine --> Chest["Chest 胸"]
+    Chest --> Neck["Neck / Head"]
+    Chest --> LArm["左肩 → 肘 → 腕"]
+    Chest --> RArm["右肩 → 肘 → 腕"]
+    Hips --> LUp["左大腿 → 膝 → 踝 → 脚趾"]
+    Hips --> RUp["右大腿 → 膝 → 踝 → 脚趾"]
+    style Hips fill:#e9f4ff,stroke:#007acc
+    </pre>
+    <p class="mermaid-caption">图 2-1　典型人形骨骼树（仓库不同项目关节数不同，如 23/27/31）</p>
+
+    <p>注意不同论文使用的骨骼规模并不相同：PFNN 沿用 CMU 动捕格式的 30 个旋转关节加一个地面根节点（共 31），
+    MANN 为 27 个关节，NSM 为 23 个关节。<strong>关节数是特征维度的直接来源，引用论文数字时必须对应到具体项目。</strong></p>
+
+    <h2>2.2 根节点、世界坐标与局部坐标</h2>
+    <p>角色运动同时发生在两个空间里：</p>
+    <ul>
+        <li><strong>世界空间（world space）</strong>：根节点的位置与朝向，决定角色在场景中何处、面向何方</li>
+        <li><strong>局部/根空间（local / root space）</strong>：其余关节相对根节点的位置、旋转与速度，描述身体的姿态本身</li>
+    </ul>
+    <div class="definition">
+        <h4>为什么要做这种切分</h4>
+        <p>网络的输入特征几乎都定义在根空间中——把全局平移与朝向剥离后，"向前走"和"原地踏步"在根空间里是相似的姿态，
+        网络只需学习身体姿态的规律；而根节点在世界中的位移与转角（root velocity、angular velocity）单独预测。
+        这一设计从 PFNN 开始被所有后续工作沿用。</p>
+    </div>
+
+    <h2>2.3 旋转的参数化</h2>
+    <p>三维旋转是角色动画中最容易出错的表示。仓库各项目根据年代采用了不同方案，演进本身就是一条重要线索：</p>
+    <table>
+        <thead>
+            <tr><th>表示</th><th>维度</th><th>特点与在仓库中的角色</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>欧拉角 Euler</td><td>3</td><td>存在万向节锁（gimbal lock），不适合作为网络学习目标</td></tr>
+            <tr><td>指数映射/轴角 Exponential Map</td><td>3</td><td>PFNN 输出的关节角度使用指数映射，无奇异点、便于插值</td></tr>
+            <tr><td>四元数 Quaternion</td><td>4</td><td>内部运动格式 NPZ 以"位置 3 + 四元数 4"存储每关节；需满足单位约束</td></tr>
+            <tr><td>6D 旋转（两个正交轴）</td><td>6</td><td>MANN 起在输入中引入，NAL 沿用，连续性更好、对网络更友好</td></tr>
+        </tbody>
+    </table>
+
+    <div class="callout callout-warning">
+        <span class="callout-title">6D 旋转表示的来源</span>
+        <p>Zhou 等人 2019 年提出用旋转矩阵的前两列（两个共正交轴）作为连续旋转表示，再在使用时 Gram-Schmidt 正交化重建。
+        MANN 论文明确说明：在输入中加入关节旋转（6D 形式）后，四足动作立刻变得更锐利。这是相对 PFNN 只用位置/速度的
+        一个关键改进。</p>
+    </div>
+
+    <h2>2.4 运动数据的形式化</h2>
+    <p>一段运动（motion）在数据结构上是一个按时间采样的张量。以 AI4AnimationPy 的内部格式为例，每帧保存每个关节的
+    3D 位置与 4D 四元数（共 7 维），整体可写为：</p>
+    <div class="formula">
+        M ∈ ℝ<sup>N × J × 7</sup>
+        <span class="formula-label">N：帧数　J：关节数　7 = 位置(3) + 四元数(4)</span>
+    </div>
+    <p>完整的骨骼变换矩阵形式则是每关节一个 4×4 变换矩阵，即 <code>[N, J, 4, 4]</code>。原始动捕常以 60 Hz 采样，
+    特征窗口也按帧率换算成时间——例如"60 帧窗口"在 60 Hz 下正好是 1 秒。</p>
+
+    <h3>BVH：最常见的动捕交换格式</h3>
+    <p>BVH（Biovision Hierarchy）文件分两部分：头部用层级文本描述骨骼结构与初始偏移，数据部分逐帧记录根节点位置与
+    各关节旋转。它的一个工程陷阱是<strong>单位通常为厘米</strong>，导入以米为单位的框架时需要缩放（AI4AnimationPy
+    对 BVH 默认 <code>scale=0.01</code>）。FBX、GLB 则是更现代的二进制/容器格式。</p>
+
+    <h2>2.5 控制问题的形式化</h2>
+    <p>现在可以精确表述"神经运动控制器"在做什么。给定角色上一帧的状态与用户控制信号，预测当前帧的状态：</p>
+    <div class="formula">
+        y<sub>i</sub> = f(x<sub>i</sub>; θ)，其中 x<sub>i</sub> 含上一帧姿态、控制信号与环境信息
+    </div>
+    <p>运行时这是一个<strong>自回归（autoregressive）循环</strong>：网络输出的姿态又被拼回下一帧的输入，
+    逐帧滚动生成连续运动。</p>
+
+    <pre class="mermaid">
+flowchart LR
+    Ctrl["用户控制<br/>手柄/键盘/VR"] --> Net["神经网络 f"]
+    Prev["上一帧姿态<br/>位置/旋转/速度"] --> Net
+    Env["环境信息<br/>地形/几何"] --> Net
+    Net --> Out["当前帧姿态 y"]
+    Out -->|"反馈为下一帧输入"| Prev
+    style Net fill:#eaf7ed,stroke:#38a152
+    </pre>
+    <p class="mermaid-caption">图 2-2　自回归控制循环</p>
+
+    <h2>2.6 核心难点：一对多歧义</h2>
+    <p>同一个控制输入往往对应多种合理的未来动作。例如同样的"向前轨迹"，角色可以先迈左脚，也可以先迈右脚。
+    这是理解整个仓库架构演进的钥匙：</p>
+    <div class="definition">
+        <h4>歧义（ambiguity）问题</h4>
+        <p>若用普通前馈网络做均方误差回归，面对一对多映射，网络会输出多个正确答案的<strong>平均值</strong>——
+        对应到关节上就是模糊、滑步、僵硬的"平均姿态"。后续每一篇论文几乎都在回应这个问题：PFNN 用相位把不同时刻的
+        回归分开，MANN/NSM 用专家权重混合，2024 年的码本匹配则直接把"预测动作"改写成"预测动作出现的概率"。</p>
+    </div>
+
+    <pre class="mermaid">
+flowchart TD
+    X["相同控制输入 x"] --> A["合理未来 A：先迈左脚"]
+    X --> B["合理未来 B：先迈右脚"]
+    A --> M["普通 MLP 回归均值<br/>→ 模糊/滑步姿态"]
+    B --> M
+    style M fill:#fdeeee,stroke:#d9534f
+    style A fill:#eaf7ed,stroke:#38a152
+    style B fill:#eaf7ed,stroke:#38a152
+    </pre>
+    <p class="mermaid-caption">图 2-3　一对多映射与均值回归问题</p>
+
+    <h2>2.7 数据从哪里来</h2>
+    <ul>
+        <li><strong>光学动捕</strong>：演员穿戴反光标记点，由多摄像机系统重建关节轨迹，是仓库主线数据的来源</li>
+        <li><strong>公开数据集</strong>：仓库提供 NSM、MANN 等项目的动捕数据下载，Python 版还兼容 LaFan、100Style、
+        ZeroEggs、Motorica 等公开数据集（详见第 14 章）</li>
+        <li><strong>数据增广</strong>：镜像（mirroring）几乎是标配，PFNN 还会把动捕拟合到大量人工地形上以扩充环境多样性</li>
+    </ul>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>表示选择</h4>
+                    <p>为什么直接让网络回归欧拉角或未约束的四元数会有问题？6D 表示相比 3D 轴角在网络训练上有什么实际优势？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>维度计算</h4>
+                    <p>一个 23 关节、6000 帧的运动，以 NPZ（位置+四元数）存储时张量形状是什么？若某帧只取关节局部位置（3 维），该帧姿态向量多长？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>歧义直觉</h4>
+                    <p>结合图 2-3，预判一下：把"预测动作"换成"预测离散动作码的概率"为什么能绕开均值回归？在第 10 章验证你的想法。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>角色是一棵骨骼树，姿态=所有关节相对根节点的变换集合；根节点单独处理世界空间的位置与朝向</li>
+        <li>旋转表示沿"指数映射 → 四元数 → 6D"演进，6D 更适合网络学习，内部存储以位置+四元数为主</li>
+        <li>运动是按帧采样的时间序列，控制器形式上是自回归函数 y = f(x)，输出反馈为下一帧输入</li>
+        <li>一对多歧义导致普通回归输出均值姿态，这是驱动整个仓库架构演进的核心矛盾</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li>Zhou et al., <em>On the Continuity of Rotation Representations in Neural Networks</em>, CVPR 2019（6D 旋转）</li>
+            <li><a href="https://facebookresearch.github.io/ai4animationpy/getting-started/quickstart/">AI4AnimationPy：运动数据格式与导入</a></li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="01-AI4Animation全景与技术定位.html">← 上一章：全景与定位</a>
+        <a href="03-数据管线与特征工程.html">下一章：数据管线与特征工程 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

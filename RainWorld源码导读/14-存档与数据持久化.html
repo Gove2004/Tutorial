@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>14 存档与数据持久化 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="13-音频系统.html">← 上一章</a>
+        <a href="15-模组生态与逆向实战.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>14 存档与数据持久化</h1>
+        <p>Rain World 没有用二进制或 JSON 序列化，而是用一套自定义的带标签分隔文本，把世界状态、抽象对象、跨死亡数据和长期进度分别持久化，并通过 unrecognized 字段实现向前兼容。本章讲清这套持久化体系的分层、格式、文件 IO 与备份机制。</p>
+
+        <h2>14.1 持久化的四个层级</h2>
+<pre class="mermaid">
+flowchart TD
+    A["PlayerProgression（长期进度/文件）"] --> B["SaveState（单次世界状态）"]
+    B --> C["DeathPersistentSaveData（跨死亡）"]
+    B --> D["AbstractPhysicalObject/Creature（对象字符串）"]
+    A --> E["backup 目录（自动备份）"]
+</pre>
+        <table>
+            <thead><tr><th>层级</th><th>生命周期</th><th>典型内容</th></tr></thead>
+            <tbody>
+                <tr><td>SaveState</td><td>一个世界/周期</td><td>食物、巢穴、区域状态、胃中物品、种子</td></tr>
+                <tr><td>DeathPersistentSaveData</td><td>跨死亡保留</td><td>业力、教程标记、会话记录</td></tr>
+                <tr><td>PlayerProgression</td><td>整个存档槽</td><td>长期进度、文件读写、备份</td></tr>
+            </tbody>
+        </table>
+
+        <h2>14.2 SaveState 字段总览</h2>
+<pre><code class="language-csharp">public PlayerProgression progression;
+public int food;
+public bool malnourished;
+public string denPosition;
+public int cycleNumber;
+public int nextIssuedID;
+public SlugcatStats.Name saveStateNumber;
+public RegionState[] regionStates;
+public string[] swallowedItems;
+public string[] playerGrasps;
+public int seed;
+public int gameVersion;
+public MiscWorldSaveData miscWorldSaveData;
+public DeathPersistentSaveData deathPersistentSaveData;
+public DreamsState dreamsState;
+// 大量 unrecognized* 字段...</code></pre>
+        <p>注意 nextIssuedID 与 seed 一起保存：EntityID 靠它保证恢复后新对象不与旧对象冲突，seed 保证随机世界可复现。</p>
+
+        <h2>14.3 自定义文本序列化格式</h2>
+        <p>SaveToString 用“字段名 + 标签”的方式拼接，每个值用 <code>&lt;svB&gt;</code>（begin）与 <code>&lt;svA&gt;</code>（after/end）包裹：</p>
+<pre><code class="language-csharp">public string SaveToString()
+{
+    string text = "";
+    text += string.Format(CultureInfo.InvariantCulture,
+        "SAV STATE NUMBER<svB>{0}<svA>", saveStateNumber);
+    text += string.Format(CultureInfo.InvariantCulture,
+        "SEED<svB>{0}<svA>", seed);
+    text += string.Format(CultureInfo.InvariantCulture,
+        "CYCLENUM<svB>{0}<svA>", cycleNumber);
+    text += string.Format(CultureInfo.InvariantCulture,
+        "FOOD<svB>{0}<svA>", food);
+    if (theGlow) text += "HASTHEGLOW<svA>";   // 布尔用独立标记
+    text += "REGIONSTATE<svB>" + regionStates[k].SaveToString() + "<svA>";
+    return text;
+}</code></pre>
+        <p>格式约定：</p>
+        <ul>
+            <li><strong>成对标签</strong>：svB 开始、svA 结束，嵌套对象（RegionState、DeathPersistentSaveData）用各自的 SaveToString 放进同一对标签，解析时用 Regex 按标签切分。</li>
+            <li><strong>InvariantCulture</strong>：所有数字按固定区域性格式化，避免在不同语言/地区的机器上小数点符号不同导致解析错误。</li>
+            <li><strong>列表与布尔</strong>：列表用点号分隔，布尔值用独立标记的存在与否表示。</li>
+        </ul>
+
+        <h2>14.4 反序列化与向前兼容</h2>
+        <p>FromString 按标签名分派解析，遇到不认识的标签不会报错，而是收进对应的 unrecognized 列表：</p>
+<pre><code class="language-csharp">switch (list[j][0])
+{
+case "MISCWORLDSAVEDATA":
+    miscWorldSaveData.FromString(list[j][1]);
+    break;
+case "DEATHPERSISTENTSAVEDATA":
+    deathPersistentSaveData.FromString(list[j][1]);
+    break;
+case "DREAMSSTATE":
+    dreamsState.FromString(list[j][1]);
+    break;
+default:
+    unrecognizedSaveStrings.Add(list[j][0] + "<svB>" + list[j][1] + "<svA>");
+    break;
+}</code></pre>
+        <div class="callout callout-info">
+            <p><strong>unrecognized 机制是模组兼容的关键</strong>：高版本或模组写入的额外字段，在低版本/无模组环境下被原样保留，再次保存时写回，数据不会丢失。这与 CreatureState 的 <code>&lt;cB&gt;/&lt;cC&gt;</code> + unrecognizedSaveStrings 是同一套思路。</p>
+        </div>
+
+        <h2>14.5 DeathPersistentSaveData</h2>
+        <p>它保存死亡后仍要保留的东西，业力与教程进度是核心：</p>
+<pre><code class="language-csharp">public class Tutorial : ExtEnum<Tutorial>
+{
+    public static readonly Tutorial GoExplore = new Tutorial("GoExplore", register: true);
+    public static readonly Tutorial ScavToll = new Tutorial("ScavToll", register: true);
+    public static readonly Tutorial KarmaFlower = new Tutorial("KarmaFlower", register: true);
+}
+public class SessionRecord
+{
+    public bool survived;
+    public bool travelled;
+    public string unrecognizedRecord = "";
+}</code></pre>
+        <p>教程触发记录、歌曲播放记录、会话记录、业力上限都在这里，保证玩家的长期成长不会因一次死亡清零。</p>
+
+        <h2>14.6 PlayerProgression 与文件 IO</h2>
+        <p>文件落在 Unity 的标准持久化目录，加载结果用枚举显式表达，覆盖各种失败情况：</p>
+<pre><code class="language-csharp">public enum ProgressionLoadResult
+{
+    PENDING_LOAD,
+    SUCCESS_LOAD_EXISTING_FILE,
+    SUCCESS_CREATE_NEW_FILE,
+    ERROR_NEW_FILE_NO_DISK_SPACE,
+    ERROR_NEW_FILE_CREATE_FAILED,
+    ERROR_SAVE_DATA_MISSING,
+    ERROR_MOUNT_FAILED,
+    ERROR_READ_FAILED,
+    ERROR_CORRUPTED_FILE
+}</code></pre>
+        <p>文件路径与目录管理：</p>
+<pre><code class="language-csharp">string backupDir = Application.persistentDataPath
+    + Path.DirectorySeparatorChar + "backup";
+if (!Directory.Exists(backupDir))
+    Directory.CreateDirectory(backupDir);</code></pre>
+        <p>把“磁盘空间不足、挂载失败、读取失败、文件损坏”分别建模，加载流程能据此给用户明确提示并尝试恢复，而不是直接崩溃。</p>
+
+        <h2>14.7 备份系统</h2>
+        <p>PlayerProgression 会把存档复制到 backup 目录，按时间戳命名并定期清理旧备份：</p>
+<pre><code class="language-csharp">string stamp = backupDir + Path.DirectorySeparatorChar
+    + (long)totalSeconds + "_" + DateTime.Now.ToString("yyyy-MM-dd_HH-mm");
+Directory.CreateDirectory(stamp);
+CopySaveFile(fileName, stamp);
+// 遍历备份目录，删除超出数量的最旧备份</code></pre>
+        <p>当主存档损坏（ERROR_CORRUPTED_FILE）时，可从 BackupManager 的备份恢复，这是防止玩家数百小时进度因一次写入异常而丢失的最后防线。</p>
+
+        <h2>14.8 抽象对象的字符串化</h2>
+        <p>世界里的每个对象都能转成字符串并从字符串重建，这是房间状态可保存的基础：</p>
+<pre><code class="language-csharp">// 保存
+string s = abstractPhysicalObject.ToString();
+// 恢复
+AbstractPhysicalObject obj = SaveState.AbstractPhysicalObjectFromString(world, s);
+AbstractCreature crit = SaveState.AbstractCreatureFromString(world, s,
+    onlyInCurrentRegion: false);</code></pre>
+        <p>对象字符串内含类型标签与 EntityID，配合 nextIssuedID 保证恢复后引用关系一致。胃中物品（swallowedItems 用 <code>&lt;oA&gt;</code>/<code>&lt;cA&gt;</code> 标记物体或生物）也走这套机制。</p>
+
+        <h2>14.9 完整保存/加载流程</h2>
+<pre class="mermaid">
+sequenceDiagram
+    participant S as 游戏
+    participant SS as SaveState
+    participant PP as PlayerProgression
+    participant Disk as persistentDataPath
+    S->>SS: 收集世界/对象状态
+    SS->>SS: SaveToString（svB/svA 标签）
+    SS->>PP: 提交存档文本
+    PP->>Disk: 写入主存档
+    PP->>Disk: 复制到 backup
+    Note over Disk: 加载时读取并校验
+    Disk-->>PP: ProgressionLoadResult
+    PP->>SS: FromString（未知字段进 unrecognized）
+</pre>
+
+        <h2>14.10 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：数字不用 InvariantCulture</summary>
+            <div class="details-content"><p>用当前文化格式化浮点，在逗号作小数点的地区会解析失败。所有存档数字必须用 CultureInfo.InvariantCulture。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：遇到未知标签就报错</summary>
+            <div class="details-content"><p>严格解析会让模组/高版本数据在旧环境加载失败。应把未知字段收进 unrecognized 并原样写回。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：恢复后不更新 nextIssuedID</summary>
+            <div class="details-content"><p>不从存档恢复 ID 计数，新对象可能与已存在对象的 EntityID 冲突，破坏引用与确定性。</p></div>
+        </details>
+
+        <h2>14.11 练习与思考</h2>
+        <ol>
+            <li>手写一个带两个字段（一个整数、一个布尔）的最小存档片段，正确使用 svB/svA 标签与布尔标记，并写出对应的解析判断。</li>
+            <li>结合 unrecognized 机制，解释一个模组字段如何在“装模组→卸载模组→再装回”的过程中不丢失数据。</li>
+            <li>思考：游戏为什么选择自定义分隔文本而不是 JSON/二进制？这种选择在可读性、版本兼容和性能上各有什么取舍？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>持久化分 SaveState、DeathPersistentSaveData、PlayerProgression 与备份四层，对象可单独字符串化。</li>
+            <li>序列化用 svB/svA 成对标签的自定义文本，强制 InvariantCulture，未知字段进 unrecognized 实现向前兼容。</li>
+            <li>文件存于 persistentDataPath，加载结果枚举覆盖各类错误，备份系统支持损坏恢复，EntityID 与 seed 保证一致性与可复现。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="13-音频系统.html">← 上一章：音频系统</a>
+            <a href="15-模组生态与逆向实战.html">下一章：模组生态与逆向实战 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

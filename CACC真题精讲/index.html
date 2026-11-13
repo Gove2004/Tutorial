@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CACC 真题精讲 - 第一届与第二届区域赛、总决赛题目解析</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<main>
+    <h1>CACC 真题精讲</h1>
+    <p class="intro">
+        第一届与第二届 CCF 算法能力大赛（CACC）的区域赛、总决赛题目还原与解析。
+        以「题面来源可核查」为前提：原题照录、回忆版明确标注、未公开的题目绝不臆造。
+    </p>
+
+    <div class="version-info">
+        教程版本：v1.0 ｜ 整理时间：2026-11 ｜ 主题风格：技术蓝（算法竞赛，代码密度高，需要长时间阅读）
+    </div>
+
+    <div class="callout callout-warning">
+        <strong>先说清楚资料边界</strong>
+        <p style="margin:0.5em 0 0">
+            CACC 官方并不整体公开赛题：区域赛题面由选手与第三方题库零星流出，总决赛题面基本只在选手游记里出现。
+            因此本教程对每一道题都标注了来源等级：
+        </p>
+        <ul style="margin:0.6em 0 0">
+            <li><span class="src-badge src-a">A 级</span> 官方或题库原题，题面、样例、数据范围可直接核对（如 17noi 收录的区域赛题、CCF 官方通知）。</li>
+            <li><span class="src-badge src-b">B 级</span> 参赛选手赛后回忆，题面结构与数据范围可信，个别措辞可能与原题有差异。</li>
+            <li><span class="src-badge src-c">C 级</span> 官方未公开，仅有赛事报道或赛制描述。此类内容只讲赛制与命题方向，并配套「同型训练题」，不冒充真题。</li>
+        </ul>
+        <p style="margin:0.6em 0 0">
+            <strong>2025 第二届区域赛的 T3、T4，以及第一届总决赛的具体题面，目前没有任何公开版本。</strong>
+            网上能查到的只有零散描述，本教程不会为了「凑齐两届四场」而编题。
+        </p>
+    </div>
+
+    <h2>两届赛事时间线</h2>
+
+    <div class="timeline">
+        <div class="timeline-item">
+            <strong>2024-12-01 ｜ 第一届区域赛</strong>
+            <p>全国多赛点、8 小时、5 题（4 道标准算法 + 1 道开放式工程题），约 1.16 万人参加，500 人晋级。</p>
+        </div>
+        <div class="timeline-item">
+            <strong>2025-04-18 ~ 04-19 ｜ 第一届总决赛（宁波海曙）</strong>
+            <p>16 小时、6–7 题，分「人工智能」与「区块链安全」两个赛道，另有技术答辩与 CCF 算法大会。</p>
+        </div>
+        <div class="timeline-item">
+            <strong>2025-12-06 ｜ 第二届区域赛</strong>
+            <p>沿用 8 小时 5 题结构，前 4 题算法、第 5 题工程应用，赛点覆盖更广，免报名费。</p>
+        </div>
+        <div class="timeline-item">
+            <strong>2026-04 ｜ 第二届总决赛（宁波海曙）</strong>
+            <p>360 名选手、142 所高校；两天 16 小时上机。第一天纯算法（700 分），第二天安全赛道与 AI 赛道（安全 500 分），并新增游戏交互、Vibe Coding 方向。</p>
+        </div>
+    </div>
+
+    <h2>课程目录</h2>
+
+    <h3 style="margin-top:1.8em">第一部分 · 赛事与赛制</h3>
+    <div class="chapter-list">
+        <div class="chapter-item">
+            <span class="chapter-badge basic">基础</span>
+            <h3><a href="01-overview.html">01 - CACC 是什么：赛制、命题结构与评分逻辑</a></h3>
+            <p>区域赛 4+1 的题面结构、8 小时分配、工程题评分、两届总决赛的赛道差异，以及「算法 + 工程」双轨命题对备赛意味着什么。</p>
+        </div>
+    </div>
+
+    <h3 style="margin-top:1.8em">第二部分 · 第一届区域赛（2024-12-01）</h3>
+    <div class="chapter-list">
+        <div class="chapter-item">
+            <span class="chapter-badge basic">基础</span>
+            <h3><a href="02-2024-t1-josephus.html">02 - T1 报数游戏：约瑟夫环</a></h3>
+            <p><span class="src-badge src-a">A 级</span> 从 O(nm) 模拟到 O(n) 递推，n,m &lt; 2000 的数据范围为什么仍值得写递推。</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge basic">基础</span>
+            <h3><a href="03-2024-t2-treasure.html">03 - T2 宝藏探险：前后缀极值</a></h3>
+            <p><span class="src-badge src-a">A 级</span> 「中间挖掉 k 个位置」的区间极值问题，正反两遍预处理把 O(n²) 降到 O(n)。</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge advanced">高级</span>
+            <h3><a href="04-2024-t3-parity.html">04 - T3 心智能力：按值的奇偶做区间操作</a></h3>
+            <p><span class="src-badge src-b">B 级</span> 本题的核心不是线段树模板，而是「奇偶性单向坍缩」这一观察；给出可 AC 的分块实现与完整对拍方法。</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge advanced">高级</span>
+            <h3><a href="05-2024-t4-poker.html">05 - T4 牌型分组：搜索、枚举与剪枝</a></h3>
+            <p><span class="src-badge src-b">B 级</span> 题面只有选手回忆，规则细节未公开；本章讲如何从「组顺子/三条/对子、最小化剩余单张」抽象出可解的搜索模型。</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge engineering">工程</span>
+            <h3><a href="06-2024-t5-vm.html">06 - T5 资源分配：物理机装箱工程题</a></h3>
+            <p><span class="src-badge src-b">B 级</span> CPU/内存双约束、支持删除、与 baseline 比较主机数、仅 3 次提交——工程题的真实得分逻辑。</p>
+        </div>
+    </div>
+
+    <h3 style="margin-top:1.8em">第三部分 · 第二届区域赛（2025-12-06）</h3>
+    <div class="chapter-list">
+        <div class="chapter-item">
+            <span class="chapter-badge basic">基础</span>
+            <h3><a href="07-2025-t1-bignum.html">07 - T1 数位运算：200 位整数相加</a></h3>
+            <p><span class="src-badge src-a">A 级</span> 200 位整数相加再求数位和；看似签到，实则在考「不要用浮点、不要用 int」。</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge basic">基础</span>
+            <h3><a href="08-2025-t2-forest.html">08 - T2 魔法森林：网格 DP 与 LCG 数据生成</a></h3>
+            <p><span class="src-badge src-a">A 级</span> 左下到右上的最大路径和；真正的坑是起点初始化与 LCG 造数据。</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge intermediate">进阶</span>
+            <h3><a href="09-2025-t3t4-gap.html">09 - 第二届 T3/T4：没有题面时怎么练</a></h3>
+            <p><span class="src-badge src-c">C 级</span> 第二届 T3、T4 无公开题面；本章说明证据链，并给出两道可练的同型题（区间赋值 + 最大子段和、折半搜索），以及 T5 工程题方向。</p>
+        </div>
+    </div>
+
+    <h3 style="margin-top:1.8em">第四部分 · 第二届总决赛（2026-04）</h3>
+    <div class="chapter-list">
+        <div class="chapter-item">
+            <span class="chapter-badge advanced">高级</span>
+            <h3><a href="10-2025-final-algo.html">10 - 第二届总决赛算法日：A–E 五题</a></h3>
+            <p><span class="src-badge src-b">B 级</span> 区间乘积计数、数轴半径、子树并集统计、抽卡期望、Satlike-w 局部搜索优化。含 A、B 两题的完整可验证代码。</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge advanced">高级</span>
+            <h3><a href="11-2025-final-security.html">11 - 第二届总决赛安全赛道：分布式广播 Q1–Q5</a></h3>
+            <p><span class="src-badge src-b">B 级</span> Best-Effort / Authenticated Echo / Byzantine Reliable Broadcast，以及纠删码与 Merkle Tree 两层优化。</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge engineering">工程</span>
+            <h3><a href="12-2025-final-ai-roadmap.html">12 - AI 赛道、首届总决赛与 8 周备赛路线</a></h3>
+            <p><span class="src-badge src-b">B 级 / C 级</span> 模型轻量化赛题的工程流程；首届总决赛「双赛道」的公开信息；一份 8 周备赛清单。</p>
+        </div>
+    </div>
+
+    <h2>怎么用这套教程</h2>
+
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>先读第 01 章，建立赛制直觉</h4>
+                <p>区域赛前 4 题建议总耗时 3 小时、第 5 题 5 小时。很多人不是不会做题，而是把 5 小时全花在了 4 道算法题上。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>按「第一届 → 第二届」顺序做题，但不要只抄代码</h4>
+                <p>每章都有「先自己想 15 分钟，再看解析」的提示。第 04、05 章的题面本身就有信息缺口，练习的是「在不完整题面下建模」。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+                <h4>总决赛章节按赛道选读</h4>
+                <p>算法日 A–E 适合所有人；安全日 Q1–Q5 需要一点分布式系统基础；AI 日更偏工程落地。</p>
+            </div>
+        </div>
+    </div>
+
+    <h2>主要资料来源</h2>
+    <ul>
+        <li>CCF 官方：<a href="https://www.ccf.org.cn/Focus/2025-04-18/841619.shtml" target="_blank">首届总决赛开赛报道</a>、<a href="https://www.ccf.org.cn/Focus/2024-12-27/836579.shtml" target="_blank">首届区域赛获奖与晋级公示</a>。</li>
+        <li>题库原题：17noi 的 <a href="https://www.17noi.cn/p/1717" target="_blank">CACC2024 T1</a>、<a href="https://www.17noi.cn/p/1718" target="_blank">T2</a>，以及 <a href="https://www.17noi.cn/p/1719" target="_blank">CACC2025 T1</a>、<a href="https://www.17noi.cn/p/1720" target="_blank">T2</a>。</li>
+        <li>选手记录：CSDN《CCF 第一届算法竞赛 CACC 区域赛回忆版题解》、博客园《CACC 2025 Final》与《CACC 2025 Final 游记》、silent-sure 的《首届 CACC 游记》。</li>
+        <li>赛制通知：西北农林科技大学《第二届 CCF 算法能力大赛报名通知》（赛点、时长、题量、评分方式）。</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <strong>关于代码</strong>
+        <p style="margin:0.5em 0 0">
+            教程中的算法代码均用 C++17 书写，核心逻辑已在本地用 Python 对拍验证
+            （约瑟夫环、宝藏探险、心智能力分块 300 组、牌型分组 DFS 300 组、资源分配的主机计数、
+            总决赛 A 题 2000 组、B 题样例、折半搜索样例）。
+            本机没有 C++ 编译器，因此代码未做 GCC 实测；每章都给了对拍脚本或验证方法，建议在本地 OJ 上再过一遍。
+        </p>
+    </div>
+</main>
+<script src="assets/script.js"></script>
+</body>
+</html>

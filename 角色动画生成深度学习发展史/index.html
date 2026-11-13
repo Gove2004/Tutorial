@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>角色动画生成的深度学习发展史 - 完整教程</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <h1>角色动画生成的深度学习发展史</h1>
+        <p class="intro">从动画师手 K 关键帧，到 AI 读懂一句话就生成一段自然动作——完整梳理"让虚拟角色动起来"这条技术线 20 年的演进脉络。</p>
+
+        <div class="callout callout-info">
+            <strong>关于本教程</strong>：
+            <ul>
+                <li><strong>前置知识</strong>：有编程/游戏开发基础即可；本教程会从零解释每个关键概念，不需要深度学习的背景</li>
+                <li><strong>学习深度</strong>：系统掌握——不止列论文，还讲"为什么这样演进"和"每代方法的致命缺陷"</li>
+                <li><strong>主题风格</strong>：技术蓝（tech），适合计算机视觉/游戏开发方向的系统学习</li>
+                <li><strong>目标读者</strong>：准备进入"角色动画生成/三维重建"研究方向的学生、游戏开发者</li>
+            </ul>
+        </div>
+
+        <div class="callout callout-tip">
+            <strong>学习建议</strong>：本教程建议按顺序阅读。前 3 章讲"AI 之前的世界"，第 4-7 章是深度学习演进的主线，第 8 章帮你把所有碎片拼成一张地图。每章末尾都有思考题，建议动手写一遍答案再继续。
+        </div>
+
+        <h2>课程目录</h2>
+
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-绪论-什么是角色动画生成.html">01 - 绪论：什么是角色动画生成</a></h3>
+                <p>一个定义、三个子问题、为什么这个方向值得研究，以及贯穿全教程的"主线地图"</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-传统方法-关键帧与动作捕捉.html">02 - 传统方法（上）：关键帧与动作捕捉</a></h3>
+                <p>AI 之前，动画是怎么做出来的：关键帧、动捕、重定向，以及它们的成本痛点</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-传统方法-运动图与运动匹配.html">03 - 传统方法（下）：运动图与运动匹配</a></h3>
+                <p>从"搜索拼接"到 Motion Matching：为什么动作库再大也绕不开泛化难题</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-深度学习入场-动作流形学习.html">04 - 深度学习入场：动作流形学习</a></h3>
+                <p>Holden 2016 的里程碑工作：如何用自编码器把动作"压缩"进一个可计算、可编辑的空间</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-实时控制-相位函数网络.html">05 - 实时控制：相位函数网络</a></h3>
+                <p>PFNN、Local Motion Phases、Neural Animation Layering——AI4Animation 系列的核心思想</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-生成模型时代-文本到动作.html">06 - 生成模型时代：文本到动作</a></h3>
+                <p>扩散模型与 GPT 路线如何统治动作生成：T2M、MDM、MotionDiffuse、T2M-GPT、MotionGPT</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="07-物理与学习-强化学习路线.html">07 - 物理与学习：强化学习路线</a></h3>
+                <p>动作好看但违反物理怎么办：DeepMimic、AMP 与物理正确的角色控制</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="08-脉络总结-论文清单与学习路径.html">08 - 脉络总结：论文清单与学习路径</a></h3>
+                <p>全教程时间线总览、关键论文速查表、数据集/术语表，以及给新人的行动路线</p>
+            </div>
+        </div>
+
+        <h2>学习资源</h2>
+        <ul>
+            <li><a href="https://github.com/sebastianstarke/AI4Animation" target="_blank">AI4Animation：Bringing Characters to Life with Computer Brains in Unity</a></li>
+            <li><a href="https://github.com/humanmotion" target="_blank">Human Motion Diffusion Model (MDM) 官方仓库</a></li>
+            <li><a href="https://theorangeduck.com/" target="_blank">Daniel Holden（动作学习领域核心作者）个人主页</a></li>
+        </ul>
+
+        <h2>本教程主线（先记住这一句）</h2>
+        <div class="definition">
+            <h4>一句话看懂 20 年演进</h4>
+            <p><strong>数据越来越大、条件越来越多、生成越来越自然</strong>——从"拼动作"（运动图/运动匹配）进化到"学动作"（自编码器/相位网络），再到"生成动作"（扩散模型/GPT），最后到"物理正确地生成动作"（强化学习）。</p>
+        </div>
+    </main>
+</body>
+</html>

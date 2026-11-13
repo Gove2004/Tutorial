@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第5章 结果部分 只报事实 - 研究报告写作教程</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-humanities.css">
+</head>
+<body data-chapter="05">
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-方法部分-可重复性.html">← 上一章</a>
+        <a href="06-讨论部分-从结果到知识.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <p class="chapter-meta">第 5 章</p>
+        <h1>结果部分：只报事实，把解释留给讨论</h1>
+
+        <p class="lead">结果部分最难的地方不是算统计，而是忍住不说。你必须把「发现了什么」和「这意味着什么」彻底拆开，前者留在这里，后者走向讨论。</p>
+
+        <div class="objectives">
+            <h3>读完本章你应该能</h3>
+            <ul>
+                <li>一眼识别结果段落里越权的「评论句」，并准确迁移到讨论；</li>
+                <li>按数据类型选择合适的描述统计（<em>M</em> ± <em>SD</em> 还是百分数 + 频次）；</li>
+                <li>完整报告推论统计：方法、精确值、自由度、显著水平、效应量；</li>
+                <li>按六条规范安排图表，并写对符号、小数位与单位。</li>
+            </ul>
+        </div>
+
+        <h2>5.1 一条分界线：事实与评论</h2>
+
+        <p>首先要区分<strong>「事实」</strong>与<strong>「评论」</strong>。结果部分要客观、如实报告自己发现了哪些事实，不做评论。写作基本原则可以压成六个字：<strong>如实汇报，不加解释和评论</strong>。</p>
+
+        <div class="example bad">
+            <span class="example-label">反面 · 混入评论</span>
+            <p>经过分析发现，实验组的成绩明显好于对照组，说明本实验的干预措施非常有效。另外，男生的得分普遍比女生高，这可能是因为男生的空间能力天生更强。相关分析显示两者存在关系，因此可以确定假设成立。</p>
+            <p class="note">三句评论藏在一段事实里：<strong>「说明干预非常有效」</strong>是解释，「<strong>因为男生空间能力天生更强」</strong>是机制猜测，「<strong>假设成立」</strong>是结论。三者都属于讨论，甚至其中第二句属于既无数据也无文献支撑的臆断。</p>
+        </div>
+
+        <p>下面把同一批结果按规范重写。注意它只说「有差异、差多少、差异有多显著」，不说「为什么」。它还额外补了一个原段落根本没报的东西：<strong>统计量</strong>。</p>
+
+        <div class="example good">
+            <span class="example-label">正面 · 规范报告</span>
+            <p>独立样本 <em>t</em> 检验显示，实验组后测得分显著高于对照组，<em>t</em>(118) = 4.31，<em>p</em> &lt; 0.001，<em>d</em> = 0.79（见表 5-1）。性别差异方面，男生得分（<em>M</em> = 41.02，<em>SD</em> = 7.15）高于女生（<em>M</em> = 38.44，<em>SD</em> = 6.88），<em>t</em>(118) = 1.98，<em>p</em> = 0.050。空间能力与后测得分的 Pearson 相关为 <em>r</em>(116) = 0.34，<em>p</em> &lt; 0.001。</p>
+            <p class="note">对照原段落：原段落三句话里只有第一句是事实，而且没有统计量；改写后每句都给出了方法、精确值、自由度与显著水平，把「评论」全部留在原处没搬过来。</p>
+        </div>
+
+        <h2>5.2 描述统计：先让读者看见数据的形状</h2>
+
+        <p>对实证研究，通常要报告数据结果，包括描述统计与推论统计。描述统计负责让人看见「数据长什么样」。</p>
+
+        <p>要提供数据<strong>集中趋势</strong>（平均数、众数、中数等）与<strong>离散趋势</strong>（方差、标准差、全距等）的统计量。但不需要把所有指标都堆上去，按数据类型选择：</p>
+
+        <table>
+            <thead>
+                <tr><th style="width:30%">数据情形</th><th style="width:34%">报告什么</th><th style="width:36%">理由</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>连续变量且近似正态分布</td>
+                    <td>平均数 + 标准差</td>
+                    <td>两个数就够刻画位置与离散；四分位距是分布明显偏斜时的替代</td>
+                </tr>
+                <tr>
+                    <td>计数数据</td>
+                    <td>百分数 + 相应频次</td>
+                    <td>只有百分数，读者无法还原样本量；只有频次，读者无法比较不同子样本</td>
+                </tr>
+                <tr>
+                    <td>分布形态可疑（偏态、峰态明显）</td>
+                    <td>补报偏度、峰度，或改用中数 + 四分位距</td>
+                    <td>此时均值的代表性下降，只报 <em>M</em> ± <em>SD</em> 会误导</td>
+                </tr>
+                <tr>
+                    <td>两变量关系</td>
+                    <td>相关矩阵，或散点图</td>
+                    <td>散点图能显示线性假设是否成立——相关系数看不见这一点</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>样本量是必报项</strong>
+            包括每种实验条件下的被试数量。理由有两层：一是读者要判断检验力，二是<strong>条件间的 <em>n</em> 不等会让均值比较的可靠性下降</strong>（尤其在被试间设计中）。只报总数 <em>N</em> = 120，读者不知道六个格子各有多少人，这是常见硬伤。
+        </div>
+
+        <h3>三线表示范</h3>
+
+        <p>结果表格要用三线表：只有顶线、栏目线、底线，无竖线。下表同时示范了「表标题在上方」与「均值 ± 标准差」的写法。</p>
+
+        <p class="fig-title">表 5-1　两组后测得分与空间能力的描述统计</p>
+        <table class="three-line">
+            <thead>
+                <tr><th>组别</th><th><em>n</em></th><th>后测得分（<em>M</em> ± <em>SD</em>）</th><th>空间能力（<em>M</em> ± <em>SD</em>）</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>实验组</td><td>60</td><td>42.18 ± 6.43</td><td>31.05 ± 5.12</td></tr>
+                <tr><td>对照组</td><td>60</td><td>36.75 ± 7.02</td><td>30.48 ± 5.34</td></tr>
+            </tbody>
+        </table>
+        <p style="font-size:.86rem;color:#5b5147;text-align:left;">注：得分范围 20～60 分，分数越高表示表现越好。<em>n</em> 为该条件下的有效被试数。</p>
+
+        <h2>5.3 推论统计：让读者相信差异不是巧合</h2>
+
+        <p>推论统计比描述统计更重要。它用于判断观测到的差异是否达到统计显著水平——只有差异「足够大」、不太可能由随机因素导致时，才能说明样本所代表的总体确有差异，结果才可能有科学意义。</p>
+
+        <p>无论用哪种统计方法，都要<strong>完整报告推论统计的方法和结果</strong>，让读者明白研究者如何分析数据、获得什么结果、结果含义是什么。四个要点：</p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>准确介绍统计方法，并与设计对应</h4>
+                    <p><em>t</em> 检验有相关样本检验与独立样本检验之分：单因素被试内设计用「相关样本 <em>t</em> 检验」，考察被试间差异用「独立样本 <em>t</em> 检验」。同时说明自变量、因变量分别是什么。</p>
+                    <p>这一步常错在「方法与设计不匹配」：被试内设计却报了独立样本 <em>t</em>，或反过来。审稿人核对设计后一眼就能发现。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>报告统计量的精确值及附加信息</h4>
+                    <p><em>t</em> 值、<em>F</em> 值、χ² 值等（非希腊字母表示的统计量需<strong>斜体</strong>）。<em>F</em> 值还需报告分子自由度与分母自由度（<em>df</em>₁, <em>df</em>₂）。</p>
+                    <p>「<em>F</em> 值显著」这种写法不可接受：没有自由度，读者无法复核，也无法判断检验力的量级。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>报告显著水平，并附效应量</h4>
+                    <p><em>p</em> &lt; 0.001 时写 <em>p</em> &lt; 0.001；<em>p</em> ≥ 0.001 时直接写精确概率值（如 <em>p</em> = 0.032）。并说明是单尾还是双尾检验。</p>
+                    <p>同时报告反映得分差异程度与变量关系强度的<strong>效应量</strong>（如 <em>d</em>、<em>r</em>²、η²）。</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h4>把「统计含义」与「专业含义」分开说</h4>
+                    <p>统计含义只回答「是否达到显著水平」；专业含义回答「这在心理学上意味着什么」。例如「实验组空间认知能力后测得分显著高于对照组」说明差异存在及方向——这只是统计结果；若补一句「这表明某实验干预措施能有效提高空间认知能力」，读者更易理解其心理学含义。</p>
+                    <p class="note" style="margin-top:.6em;padding-top:.5em;border-top:1px dashed #e5dccb;font-size:.88rem;color:#5b5147;">注意：这一句本身已经<strong>滑向讨论</strong>了。在严格意义上的结果部分，只写「显著高于」即可；是否加这句专业含义，取决于期刊风格与你所在专业的惯例。稳妥做法是：结果部分只点方向，把因果性说法留给讨论。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="callout callout-danger">
+            <strong>为什么效应量不能省</strong>
+            <p>显著性同时受效应大小与样本量影响。<em>d</em> = 0.10 这种几乎无实际意义的差异，在每组 1000 人的样本里也能得到 <em>p</em> &lt; 0.05。反过来，健康行为研究里真实有用的效应，可能因为样本只有 40 人而「不显著」。</p>
+            <p>只报 <em>p</em> 值，读者无法区分「效应小但样本大」与「效应大但样本小」。效应量正是用来区分这两者的唯一信息。</p>
+        </div>
+
+        <h3>一份完整的结果段落模板</h3>
+
+        <p>把上面四点合起来，一段合格的结果陈述包含六个要素：<strong>检验名称 → 比较对象 → 均值与标准差 → 统计量与自由度 → 显著性 → 效应量</strong>。</p>
+
+        <div class="example">
+            <span class="example-label">模板（可作为写作支架）</span>
+            <p>「［检验名称］显示，［组别 A］（<em>M</em> = ［ ］，<em>SD</em> = ［ ］）在［因变量］上的得分［高于／低于］［组别 B］（<em>M</em> = ［ ］，<em>SD</em> = ［ ］），［统计量］(［<em>df</em>］) = ［ ］，<em>p</em> = ［ ］，［效应量］ = ［ ］（见表 X）。」</p>
+            <p>方差分析版本需补充分子／分母自由度与偏 η²：「<em>F</em>(2, 117) = 5.82，<em>p</em> = 0.004，η² = 0.09」。相关版本：「<em>r</em>(116) = −0.34，<em>p</em> = 0.002」。</p>
+            <p class="note">括号里留空的每一格，都是一个必须给出具体数字的位置。留空的模板比不写模板更有威慑力。</p>
+        </div>
+
+        <h2>5.4 结果之间的顺序</h2>
+
+        <p>结果呈现不是罗列，要重点突出、层次分明、组织清晰。三条排序原则：</p>
+
+        <ul>
+            <li><strong>按重要性排列</strong>：最先呈现与核心假设直接相关的结果，人口学变量的差异放在后面或作为前置背景。</li>
+            <li><strong>按逻辑关系排列</strong>：描述统计在推论统计之前；相关分析在回归分析之前；单变量描述统计在多变量关系描述统计之前。</li>
+            <li><strong>与问题提出和讨论的顺序相协调</strong>：读者读结果时期待的是「你承诺的那几条假设逐条接受审判」。如果你的假设是 H1、H2、H3，结果最好也按 H1、H2、H3 排，讨论再按同一顺序展开。</li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>一个低成本的对齐检查</strong>
+            把假设编号写在引言旁，把结果小标题按顺序列出来。两列并排放，如果对不上号，说明你的结果组织是「按 SPSS 输出顺序」而不是「按论证顺序」。
+        </div>
+
+        <h2>5.5 图表规范</h2>
+
+        <p>六条，每条都有明确的错误对应：</p>
+
+        <table>
+            <thead>
+                <tr><th style="width:6%">#</th><th style="width:36%">规范</th><th style="width:58%">违反时的样子</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>1</td>
+                    <td><strong>呈现顺序</strong>：先文字后数字或图表；每段行文尽量不要以统计数据开头；图表紧跟第一次提及相应结果的段落之后</td>
+                    <td>段落第一句就是「<em>F</em>(2, 117) = 5.82，<em>p</em> = 0.004」，读者在不知比较对象前先看到一串符号</td>
+                </tr>
+                <tr>
+                    <td>2</td>
+                    <td><strong>内容</strong>：图表内容不要与正文完全重复；图表不能单独使用而不在正文做文字叙述</td>
+                    <td>正文复制整张表的内容，或正文只有一句「结果见表 X」，读者要自己读表下结论</td>
+                </tr>
+                <tr>
+                    <td>3</td>
+                    <td><strong>经济节省</strong>：凡能正文说明的问题，尽量不要表和图；表能说明问题就不用图</td>
+                    <td>只有两个均值也画柱状图；或一张表只有两行数据</td>
+                </tr>
+                <tr>
+                    <td>4</td>
+                    <td><strong>编号</strong>：图、表分别编号；表格标题在表格<strong>上方</strong>，图标题一般在其<strong>下方</strong></td>
+                    <td>表标题放在表下、图标题放在图上，或全文图与表共用一套编号</td>
+                </tr>
+                <tr>
+                    <td>5</td>
+                    <td><strong>形式</strong>：简洁美观，使用<strong>三线表</strong></td>
+                    <td>从 SPSS／Excel 直接截一张满屏网格线的表贴进去</td>
+                </tr>
+                <tr>
+                    <td>6</td>
+                    <td><strong>类型</strong>：注意不同类型图表的要求（柱状图用于分类比较、折线图用于趋势、散点图用于关系）</td>
+                    <td>用饼图表示连续变量的分布，或用品类图表示交互作用</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>补充一条硬性要求</strong>
+            不要直接使用统计软件生成的图。软件默认的字体、配色、图例位置与期刊排版规范几乎不可能一致，且常带默认标题与网格线。自己重新绘制，或至少重设样式后再导出。
+        </div>
+
+        <p>关于第 4 条的记忆口诀：<strong>表上图下</strong>。原因很实际——读者看表的顺序是先知道「这张表是什么」，再看内容，所以标题在上；看图时先看到图形，再需要解释，所以标题在下。</p>
+
+        <h2>5.6 符号、数据与术语的规范</h2>
+
+        <ul>
+            <li>严格使用法定计量单位、符号，以及标准化、规范化的名词术语。</li>
+            <li>统计符号按下表统一书写；注意大小写（<em>t</em>、<em>p</em> 为小写）。</li>
+            <li>数据一般保留到小数点后两位；小数点前、点后的 0 均不可随意省略。</li>
+            <li><em>p</em> 值等特殊情况保留 3 位小数，或按期刊要求安排。</li>
+            <li>注意标注必要的数据单位（如「毫秒」「次／分钟」「分」）。</li>
+        </ul>
+
+        <table>
+            <thead>
+                <tr><th style="width:26%">符号</th><th style="width:36%">含义</th><th style="width:38%">书写要点</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><em>N</em></td><td>样本总数</td><td>大写，斜体</td></tr>
+                <tr><td><em>n</em></td><td>样本数（子组、条件内）</td><td>小写，斜体；不要与 <em>N</em> 混用</td></tr>
+                <tr><td><em>M</em></td><td>平均数</td><td>大写，斜体（有的期刊用 <em>Mean</em>，按目标期刊统一）</td></tr>
+                <tr><td><em>SD</em></td><td>标准差</td><td>两个字母均为斜体</td></tr>
+                <tr><td><em>t</em></td><td><em>t</em> 检验统计量</td><td>小写，斜体</td></tr>
+                <tr><td><em>F</em></td><td><em>F</em> 检验统计量</td><td>大写，斜体；附（<em>df</em>₁, <em>df</em>₂）</td></tr>
+                <tr><td>χ²</td><td>卡方检验统计量</td><td>希腊字母，通常<strong>不</strong>斜体</td></tr>
+                <tr><td><em>r</em></td><td>相关系数</td><td>小写，斜体</td></tr>
+                <tr><td><em>p</em></td><td>显著性概率</td><td>小写，斜体；<em>p</em> &lt; 0.001 时不写具体值</td></tr>
+            </tbody>
+        </table>
+
+        <div class="sidebar-note">
+            排版惯例说明：课程讲义里把上述符号统称为「均用斜体」。严格按 APA 的排版惯例，<strong>拉丁字母统计符号斜体，希腊字母（χ²、η²、β、α）本身即符号，不斜体</strong>。两者在小数位、大小写上不冲突，差异只在希腊字母。投稿时以目标期刊的模板为准；课程作业按老师要求执行即可。
+        </div>
+
+        <h3>小数位与前导零</h3>
+
+        <p>规则是「两位小数，零不可省」，但有一个例外：APA 格式下，<strong>理论取值小于 1 的统计量（如 <em>p</em> 值、相关系数）可省略小数点前的 0</strong>，写成 <em>p</em> = .03、<em>r</em> = −.34。而<strong>不可能超过 1 的量（如描述性均值、标准差）必须保留前导零</strong>，写成 0.79，不能写 .79。</p>
+
+        <p>这条规则的意义在于避免歧义：一个既可能是 0.5 也可能是 1.5 的数，写成 .5 会让读者误判量级；而 <em>p</em> 永远在 0 与 1 之间，省略后不会引起误解。</p>
+
+        <table>
+            <thead>
+                <tr><th style="width:50%">不规范的写法</th><th style="width:50%">规范写法</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>α=0.05水平上显著</td><td>在 α = .05 水平上显著（或写作 0.05，全文统一）</td></tr>
+                <tr><td>P&lt;0.05</td><td><em>p</em> &lt; .05</td></tr>
+                <tr><td>t=4.31,p&lt;0.001</td><td><em>t</em>(118) = 4.31，<em>p</em> &lt; .001（逗号后有空格，符号斜体）</td></tr>
+                <tr><td>平均分为42.2分</td><td><em>M</em> = 42.20（保留两位小数）</td></tr>
+                <tr><td>F值显著</td><td><em>F</em>(2, 117) = 5.82，<em>p</em> = .004</td></tr>
+                <tr><td>相关系数0.3</td><td><em>r</em>(116) = .30</td></tr>
+            </tbody>
+        </table>
+
+        <h2>5.7 常见错误清单</h2>
+
+        <div>
+            <div class="checklist">
+                <label class="check-item"><input type="checkbox" data-ck="res1">结果段落里没有「说明」「表明这意味着」「因为……所以」这类解释性句子</label>
+                <label class="check-item"><input type="checkbox" data-ck="res2">每组／每个条件的 <em>n</em> 都已报告，且各条件之和等于总数</label>
+                <label class="check-item"><input type="checkbox" data-ck="res3">计数数据同时给了百分数与频次，不是只给百分数</label>
+                <label class="check-item"><input type="checkbox" data-ck="res4">检验方法与设计匹配（被试内用相关样本、被试间用独立样本）</label>
+                <label class="check-item"><input type="checkbox" data-ck="res5">每个统计量都带自由度，不是只写「显著」</label>
+                <label class="check-item"><input type="checkbox" data-ck="res6">已报告效应量，并说明其量级含义</label>
+                <label class="check-item"><input type="checkbox" data-ck="res7">非显著的检验也如实报告，没有只挑显著的写</label>
+                <label class="check-item"><input type="checkbox" data-ck="res8">图表均为三线表，标题位置正确（表上图下），未被软件截图直接贴入</label>
+                <label class="check-item"><input type="checkbox" data-ck="res9">结果顺序与假设编号一致，不是按软件输出顺序</label>
+                <label class="check-item"><input type="checkbox" data-ck="res10">全文符号斜体、大小写、小数位、单位统一</label>
+            </div>
+            <p class="checklist-progress">已完成 0 / 10 项</p>
+        </div>
+
+        <section class="exercise">
+            <h2>练习与思考</h2>
+            <ol>
+                <li><strong>揪评论。</strong>拿你自己的结果段落，把每一句标成「事实」或「评论」。所有「评论」句移到讨论草稿里，不要删——它们往往是你讨论的第一段。</li>
+                <li><strong>补全统计。</strong>找出本章 5.1 的反例，把它需要的统计量补全（检验名称、<em>df</em>、<em>p</em>、效应量），并说明你为什么选这个检验。</li>
+                <li><strong>格式校对。</strong>把自己的一张结果表按三线表重排，标题移到表上方，并检查 <em>M</em>、<em>SD</em>、<em>n</em> 是否斜体、小数位是否一致。</li>
+                <li><strong>算一算。</strong>若 <em>d</em> = 0.10、每组 <em>n</em> = 1000，独立样本 <em>t</em> 检验大约会得到什么 <em>p</em> 值？这个结果说明「显著」等于「有效」吗？</li>
+                <li><strong>思考题。</strong>如果一项研究只报告了显著的结果，未报告不显著的结果，读者对它的结论应该打几折？这与「如实汇报」是什么关系？</li>
+            </ol>
+        </section>
+
+        <div class="summary-box">
+            <h2>本章小结</h2>
+            <ul>
+                <li>结果部分只报事实，不做解释与评论；解释属于讨论。</li>
+                <li>描述统计按数据类型选：连续正态用 <em>M</em> ± <em>SD</em>，计数用百分数 + 频次；样本量与各条件 <em>n</em> 必报。</li>
+                <li>推论统计四要点：方法要与设计匹配、给精确值与自由度、给显著水平与效应量、区分统计含义与专业含义。</li>
+                <li>效应量是区分「效应小样本大」与「效应大样本小」的唯一信息，不可省。</li>
+                <li>结果顺序按重要性、逻辑关系，并与假设及讨论的顺序对齐。</li>
+                <li>图表六条规范，核心是「表上图下、三线表、先文字后图表、不重复不缺席」。</li>
+                <li>符号斜体、大小写、两位小数、前导零与单位，都要统一。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-方法部分-可重复性.html">← 上一章：方法部分</a>
+            <a href="06-讨论部分-从结果到知识.html">下一章：讨论部分 →</a>
+        </nav>
+    </footer>
+
+    <script src="assets/script.js"></script>
+</body>
+</html>

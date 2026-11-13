@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hopfield 网络与能量生成模型教程</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-math.css">
+</head>
+<body>
+    <main>
+        <h1>从 Hopfield 网络到能量生成模型</h1>
+        <p class="intro">一条贯穿 1982 年至今的主线：用一个标量「能量函数」描述神经网络的全部行为——记忆是能量地形中的吸引子，学习是改变地形的形状，生成是从能量分布中采样。本教程沿这条主线梳理四十余年发展史，并完整推导每一步原理。</p>
+
+        <div class="version-info">
+            教程版本 v1.0 ｜ 共 13 章 ｜ 主题风格：theme-math（学术纸感）｜ 公式由 MathJax 渲染，代码高亮由 Prism 提供，二者均需联网加载 CDN
+        </div>
+
+        <div class="callout callout-info">
+            <strong>关于本教程</strong>
+            <ul>
+                <li><strong>前置知识</strong>：本科水平的线性代数与概率论（特征值、条件概率、贝叶斯公式）；多元微积分基础；了解 PyTorch 基本张量操作；知道 sigmoid、softmax 等常见激活函数。不要求事先接触过统计力学，所需物理概念会在第 6 章从零建立。</li>
+                <li><strong>学习深度</strong>：系统掌握级。不停留在「能量函数长什么样」，而是逐步推导能量为什么单调下降、容量为什么是 0.14N、最大似然梯度为什么恰好是正负相位之差，以及 Transformer 的注意力为什么就是一次现代 Hopfield 检索。</li>
+                <li><strong>风格选择理由</strong>：本主题的核心是数学推导与学术发展史而非工程工具链，因此选用 math 主题——衬线字体、纸张质感、深棕学术配色，适合长时间阅读公式与文献。</li>
+            </ul>
+        </div>
+
+        <h2>主线脉络</h2>
+        <div class="path-map">
+            <span class="path-node">Hopfield 网络 1982</span>
+            <span class="path-arrow">→</span>
+            <span class="path-node">能量函数与吸引子</span>
+            <span class="path-arrow">→</span>
+            <span class="path-node">玻尔兹曼机 1985</span>
+            <span class="path-arrow">→</span>
+            <span class="path-node">RBM / DBN 2006</span>
+            <span class="path-arrow">→</span>
+            <span class="path-node">EBM 通用框架</span>
+            <span class="path-arrow">→</span>
+            <span class="path-node">现代 Hopfield = 注意力</span>
+            <span class="path-arrow">→</span>
+            <span class="path-node">分数匹配与扩散模型</span>
+        </div>
+
+        <h2>课程目录</h2>
+
+        <div class="part-divider">第一部分　起点：Hopfield 网络与确定性能量（第 1–5 章）</div>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-导读-能量视角的神经网络.html">01 ｜ 导读：能量视角的神经网络</a></h3>
+                <p>本教程要回答的三个问题；能量视角的统一图景；符号约定与前置知识自查；阅读路线建议。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-历史背景与Hopfield网络的诞生.html">02 ｜ 历史背景与 Hopfield 网络的诞生</a></h3>
+                <p>感知机与 Minsky 的批判、第一次 AI 寒冬；1982 年 PNAS 论文的历史语境；Hopfield 引入的两个新思想：集体计算与能量函数。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-离散Hopfield网络与能量函数.html">03 ｜ 离散 Hopfield 网络：动力学与能量函数</a></h3>
+                <p>二值神经元与网络拓扑；同步与异步更新规则；能量函数的构造动机；逐行推导异步更新下能量单调不增，证明网络必收敛于不动点。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-Hebbian学习与吸引子记忆.html">04 ｜ Hebbian 学习与吸引子记忆</a></h3>
+                <p>Hebb 突触假说与外积存储规则；模式如何被写进权重；联想记忆的检索过程；能量地形、吸引子盆地与伪状态；自联想与异联想。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-容量分析与连续Hopfield网络.html">05 ｜ 容量分析与连续 Hopfield 网络</a></h3>
+                <p>串扰项的随机游走分析与 0.14N 容量极限的由来；1984 年连续状态模型；Lyapunov 能量推导；Hopfield–Tank 求解组合优化的思路与争议。</p>
+            </div>
+        </div>
+
+        <div class="part-divider">第二部分　统计力学转向：玻尔兹曼机（第 6–8 章）</div>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-统计力学桥梁-Ising模型与玻尔兹曼分布.html">06 ｜ 统计力学桥梁：Ising 模型与玻尔兹曼分布</a></h3>
+                <p>从磁性系统到神经元网络；配分函数、玻尔兹曼分布与自由能；温度与随机翻转；模拟退火；为什么确定性的局部极小问题要交给随机系统。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="07-玻尔兹曼机-隐变量与随机学习.html">07 ｜ 玻尔兹曼机：隐变量与随机学习</a></h3>
+                <p>可见单元与隐单元；Gibbs 采样与平衡分布；最大似然梯度的正负相位推导；醒–眠算法；结构上的代价与训练困难的根源。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="08-受限玻尔兹曼机与深度信念网络.html">08 ｜ 受限玻尔兹曼机与深度信念网络</a></h3>
+                <p>二分图结构与条件独立；自由能表达式；对比散度 CD-k 的完整算法与偏差分析；堆叠 RBM、DBN 与 2006 年深度学习的复兴。</p>
+            </div>
+        </div>
+
+        <div class="part-divider">第三部分　通用框架与现代复兴（第 9–13 章）</div>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="09-能量模型通用框架.html">09 ｜ 能量模型通用框架：LeCun 的能量学习纲领</a></h3>
+                <p>EBM 的形式化定义；推断即能量最小化；能量损失与正则项的设计；NLL、hinge、log-sum-exp 等损失的统一视角；EBM 家族图谱。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="10-现代Hopfield网络与注意力机制.html">10 ｜ 现代 Hopfield 网络与注意力机制</a></h3>
+                <p>Krotov–Hopfield 2016 稠密联想记忆；Ramsauer 2020 的连续现代 Hopfield；指数级存储容量；检索更新规则与 Transformer 注意力的逐项对应。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="11-能量模型的当代版图.html">11 ｜ 能量模型的当代版图：分数匹配与扩散模型</a></h3>
+                <p>配分函数难题的四条出路；分数函数与能量梯度的关系；噪声对比估计；扩散模型作为 EBM 的离散化；EBM 与 GAN、流模型的系统对比。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">实战</span>
+                <h3><a href="12-PyTorch实战-Hopfield与RBM.html">12 ｜ PyTorch 实战：从零实现 Hopfield 网络与 RBM</a></h3>
+                <p>离散 Hopfield 的完整实现与容量复现实验；RBM 在 MNIST 上的 CD-k 训练、去噪与生成；常见报错信号与排查清单；可直接运行的生产级代码。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">总结</span>
+                <h3><a href="13-结语-知识图谱与深入路径.html">13 ｜ 结语：知识图谱与深入学习路径</a></h3>
+                <p>四十余年发展的三条逻辑主线；核心概念关系图；分层阅读清单（原始论文、教材、综述）；开放问题与研究前沿。</p>
+            </div>
+        </div>
+
+        <h2>核心原始文献（随章节详细引用）</h2>
+        <ul class="refs">
+            <li>Hopfield, J. J. (1982). Neural networks and physical systems with emergent collective computational abilities. <em>PNAS</em>, 79(8), 2554–2558.</li>
+            <li>Hopfield, J. J. (1984). Neurons with graded response have collective computational properties like those of two-state neurons. <em>PNAS</em>, 81(10), 3088–3092.</li>
+            <li>Ackley, D. H., Hinton, G. E., &amp; Sejnowski, T. J. (1985). A learning algorithm for Boltzmann machines. <em>Cognitive Science</em>, 9(1), 147–169.</li>
+            <li>Hinton, G. E. (2002). Training products of experts by minimizing contrastive divergence. <em>Neural Computation</em>, 14(8), 1771–1800.</li>
+            <li>Hinton, G. E., Osindero, S., &amp; Teh, Y. W. (2006). A fast learning algorithm for deep belief nets. <em>Neural Computation</em>, 18(7), 1527–1554.</li>
+            <li>LeCun, Y., Chopra, S., Hadsell, R., Ranzato, M., &amp; Huang, F. (2006). A tutorial on energy-based learning. In <em>Predicting Structured Data</em>.</li>
+            <li>Krotov, D., &amp; Hopfield, J. J. (2016). Dense associative memory for pattern recognition. <em>NeurIPS</em> 29.</li>
+            <li>Ramsauer, H. et al. (2020). Hopfield networks is all you need. <em>NeurIPS</em> 33.</li>
+        </ul>
+
+        <h2>使用说明</h2>
+        <ul>
+            <li>双击本文件即可在浏览器中开始学习，无需安装任何工具链；每章顶部和底部均有上一章 / 下一章导航。</li>
+            <li>所有代码块右上角提供「复制」按钮；标注「进阶」的折叠内容可按需展开，不影响主线理解。</li>
+            <li>若公式或代码高亮未显示，说明 CDN 被网络拦截，联网后刷新即可；教程正文不依赖任何本地安装。</li>
+        </ul>
+    </main>
+</body>
+</html>

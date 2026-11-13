@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 数据管线与特征工程 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="02-问题定义与运动数据基础.html">← 上一章：问题定义与数据基础</a>
+    <a href="04-PFNN相位函数神经网络.html">下一章：PFNN →</a>
+</nav>
+
+<main>
+    <h1>03　数据管线与特征工程</h1>
+    <p>神经网络的输入不是原始 BVH 文件，而是一套经过精心设计的特征向量。本章以 PFNN 建立、后续工作沿用的参数化为主线，
+    逐维度拆解输入输出，并讲清归一化与数据增强。<strong>这套特征设计本身就是仓库的核心贡献之一，重要性不亚于网络结构。</strong></p>
+
+    <h2>3.1 端到端管线总览</h2>
+    <pre class="mermaid">
+flowchart LR
+    A["原始动捕<br/>BVH/FBX/GLB"] --> B["导入解析<br/>骨骼重定向"]
+    B --> C["内部格式<br/>NPZ 位置+四元数"]
+    C --> D["特征提取<br/>轨迹/关节/相位/接触"]
+    D --> E["归一化<br/>均值方差+维度权重"]
+    E --> F["训练<br/>minibatch"]
+    F --> G["权重导出<br/>ONNX"]
+    G --> H["运行时推理<br/>+ IK 后处理"]
+    style D fill:#e9f4ff,stroke:#007acc
+    style E fill:#fff2dd,stroke:#f08c1a
+    </pre>
+    <p class="mermaid-caption">图 3-1　从原始文件到运行时的完整管线</p>
+
+    <h2>3.2 时间窗口与轨迹采样</h2>
+    <p>用户控制通过一个<strong>以当前帧为中心的时间窗口</strong>表达。PFNN 的具体设置是：在窗口内每隔 10 帧取一个采样点，
+    共 t = 12 个点，覆盖过去 1 秒、未来 0.9 秒。每个采样点提取轨迹在水平面（2D）上相对当前帧根坐标的位置与方向。</p>
+    <div class="callout callout-info">
+        <span class="callout-title">不同项目的窗口参数</span>
+        <p>PFNN：t=12，约 1.9 秒窗口；NSM：t=13，覆盖 −1s 到 +1s 的 2 秒窗口；DeepPhase 训练 PAE 时使用 60 Hz 下
+        前后各 60 帧、共 N=121 个采样点。窗口长度直接决定特征维度，迁移代码时不能混用。</p>
+    </div>
+
+    <h2>3.3 输入特征向量逐维拆解</h2>
+    <p>PFNN 单帧输入为 <code>x = { t<sup>p</sup>, t<sup>d</sup>, t<sup>h</sup>, t<sup>g</sup>, j<sup>p</sup>, j<sup>v</sup> }</code>，
+    各部分维度如下（t=12，j=31）：</p>
+    <table>
+        <thead>
+            <tr><th>符号</th><th>含义</th><th>维度</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>t<sup>p</sup></td><td>轨迹位置</td><td>2t = 24</td><td>采样点在水平面相对根坐标的位置</td></tr>
+            <tr><td>t<sup>d</sup></td><td>轨迹方向</td><td>2t = 24</td><td>采样点朝向相对根坐标的方向（2D）</td></tr>
+            <tr><td>t<sup>h</sup></td><td>轨迹高度</td><td>3t = 36</td><td>中心线及左右各 25 cm 处三个点的地形高度</td></tr>
+            <tr><td>t<sup>g</sup></td><td>语义/步态变量</td><td>5t = 60</td><td>5 维二值向量，见 3.5</td></tr>
+            <tr><td>j<sup>p</sup></td><td>上一帧关节位置</td><td>3j = 93</td><td>相对根坐标的关节局部位置</td></tr>
+            <tr><td>j<sup>v</sup></td><td>上一帧关节速度</td><td>3j = 93</td><td>相对根坐标的关节局部速度</td></tr>
+        </tbody>
+    </table>
+    <p>按 PFNN 的 t=12、j=31 计算，输入向量合计 24+24+36+60+93+93 = <strong>330 维</strong>。</p>
+
+    <h2>3.4 输出特征向量逐维拆解</h2>
+    <p>单帧输出 <code>y</code> 同时包含当前姿态、根运动、相位变化与接触标签：</p>
+    <table>
+        <thead>
+            <tr><th>符号</th><th>含义</th><th>维度</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>t<sub>i+1</sub><sup>p</sup>, t<sub>i+1</sub><sup>d</sup></td><td>下一帧轨迹位置/方向</td><td>各 2t</td><td>网络对未来轨迹的预测，运行时与手柄输入混合</td></tr>
+            <tr><td>j<sup>p</sup>, j<sup>v</sup></td><td>关节位置、速度</td><td>各 3j</td><td>当前帧相对根坐标的局部量</td></tr>
+            <tr><td>j<sup>a</sup></td><td>关节角度</td><td>3j</td><td>指数映射表示，用于重建关节旋转</td></tr>
+            <tr><td>r<sup>x</sup>, r<sup>z</sup></td><td>根平移速度</td><td>各 1</td><td>相对朝向的前后/侧向速度</td></tr>
+            <tr><td>r<sup>a</sup></td><td>根角速度</td><td>1</td><td>绕向上轴的转角速度</td></tr>
+            <tr><td>ṗ</td><td>相位变化量</td><td>1</td><td>运行时累加到相位，自增循环</td></tr>
+            <tr><td>c</td><td>足部接触标签</td><td>4</td><td>左右脚跟、脚尖是否着地，供 IK 使用</td></tr>
+        </tbody>
+    </table>
+
+    <h2>3.5 语义步态变量</h2>
+    <p>t<sup>g</sup> 的 5 个二值分量分别在以下情形激活：<strong>① 站立 ② 行走 ③ 慢跑 ④ 跳跃 ⑤ 蹲伏</strong>
+    （第 5 维同时用于表达天花板高度）。它承担两个作用：消除"快走与慢跑轨迹相同"的歧义；让开发者能强制指定步态。
+    NSM 把动作类型扩展为 7 类（idle/walk/run/sit/open/carry/climb），并使用连续的 0→1 标签而非硬二值。</p>
+
+    <h2>3.6 接触标签</h2>
+    <p>接触通过脚关节（脚跟、脚尖）速度幅值低于阈值自动判定，再人工校验。接触标签有两个下游用途：运行时作为 IK
+    后处理的触发条件（着地时把脚固定到地面），以及在局部相位/码本工作中作为相位提取的原始信号。</p>
+
+    <h2>3.7 归一化：均值、方差与维度权重</h2>
+    <p>数据先按全量均值与标准差做标准化，再乘以维度权重 <code>x<sub>w</sub>, y<sub>w</sub></code> 调整各维相对重要性。
+    PFNN 的一个经验性设置是：<strong>所有与关节相关的输入维度统一乘以 0.1</strong>，压低关节项的影响、抬高轨迹项的权重，
+    从而让角色对控制更灵敏。</p>
+    <div class="formula">
+        x̃ = x<sub>w</sub> · (x − x<sub>μ</sub>) / x<sub>σ</sub>
+    </div>
+    <p>AI4AnimationPy 用 <code>RunningStats</code> 实现在线归一化，训练过程中边统计均值方差边标准化，无需预先扫描全量数据：</p>
+<pre><code class="language-python">from ai4animation.AI.Stats import RunningStats
+
+input_stats = RunningStats(dim=input_dim)
+input_stats.update(x_batch)
+x_norm = input_stats.normalize(x_batch)
+
+y_pred = network(x_norm)
+y_out = output_stats.denormalize(y_pred)
+</code></pre>
+
+    <h2>3.8 镜像增强</h2>
+    <p>所有动捕都会生成左右镜像版本，数据量直接翻倍，同时保证角色左右动作对称、避免偏向。PFNN 还有一层更重的增强：
+    把每个运动周期暴力匹配到独立地形数据库中的 10 个最佳地形块，再用 RBF 网格编辑让脚部在接触时精确贴合地面——
+    这使最终数据集达到约 <strong>400 万</strong>个样本点。</p>
+
+    <h2>3.9 Python 版的特征模块体系</h2>
+    <p>AI4AnimationPy 把特征提取封装成可挂载到 <code>Motion</code> 上的模块，构建 <code>Dataset</code> 时按需组装：</p>
+    <table>
+        <thead><tr><th>模块</th><th>职责</th></tr></thead>
+        <tbody>
+            <tr><td>RootModule</td><td>根轨迹：位置、方向、速度</td></tr>
+            <tr><td>ContactModule</td><td>足部接触，按关节与速度阈值配置</td></tr>
+            <tr><td>MotionModule</td><td>全身轨迹特征</td></tr>
+            <tr><td>GuidanceModule</td><td>姿态引导特征</td></tr>
+            <tr><td>TrackingModule</td><td>三点 VR 追踪特征</td></tr>
+        </tbody>
+    </table>
+<pre><code class="language-python">Dataset(npz_path, [
+    lambda x: RootModule(x, hip_name, left_hip_name, right_hip_name,
+                         left_shoulder_name, right_shoulder_name),
+    lambda x: MotionModule(x),
+    lambda x: ContactModule(x, [
+        (left_ankle_name, 0.1, 0.25),
+        (left_ball_name, 0.05, 0.25),
+        (right_ankle_name, 0.1, 0.25),
+        (right_ball_name, 0.05, 0.25),
+    ]),
+    lambda x: GuidanceModule(x),
+])
+</code></pre>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>维度核对</h4>
+                    <p>若把 PFNN 的关节数从 31 改为 23、窗口保持 t=12，输入向量中 j<sup>p</sup>、j<sup>v</sup> 各变为多少维？新的输入总维度是多少？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>设计动机</h4>
+                    <p>为什么把关节输入维度乘以 0.1 会让角色更"灵敏"？这同时可能牺牲什么？结合轨迹与关节在回归中的作用解释。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>工程实践</h4>
+                    <p>用 RunningStats 在线归一化相比"先全量扫描再归一化"有什么好处？在自回归部署时需要额外保存哪些统计量？</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>输入由轨迹窗口（位置/方向/高度/语义）与上一帧关节状态构成，PFNN 单帧输入 330 维</li>
+        <li>输出同时含当前姿态、根速度、相位变化与 4 个接触标签，接触标签驱动 IK 后处理</li>
+        <li>归一化含均值方差与维度权重，关节项乘 0.1 以提升轨迹主导性；Python 版用 RunningStats 在线统计</li>
+        <li>镜像翻倍是标配，PFNN 还通过地形拟合把样本扩到约 400 万；特征模块在 Python 版中可插拔组装</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li>PFNN 论文 §4.3 System Input/Output Parameters（本章维度的原始出处）</li>
+            <li><a href="https://facebookresearch.github.io/ai4animationpy/tutorials/training-network/">AI4AnimationPy：训练管线与归一化</a></li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="02-问题定义与运动数据基础.html">← 上一章：问题定义与数据基础</a>
+        <a href="04-PFNN相位函数神经网络.html">下一章：PFNN 相位函数神经网络 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 结构变更与系统调度 - Unity DOTS 与 NGO 入门教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-数据组织与访问进阶.html">← 上一章</a>
+        <a href="08-NGO网络入门.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>07　结构变更与系统调度</h1>
+
+        <p>第二章讲过，增删组件、创建销毁实体属于结构变更，会引发 Chunk 重排和同步点，不能在并行 Job 里直接做。这一章讲 ECS 的标准解法 EntityCommandBuffer，以及如何控制系统的更新顺序——这是 DOTS 部分最后一块拼图。</p>
+
+        <h2>7.1 为什么必须用命令缓冲</h2>
+
+        <p>并行 Job 跑在多个 Worker 线程上，如果每个线程都能立刻创建实体、销毁实体，Chunk 内存会被并发修改，数据完整性无法保证。ECS 的设计是：Job 只<strong>记录意图</strong>，把“对哪个实体做什么”写进一个命令缓冲，等所有 Job 完成、到达安全时机，再由主线程按顺序统一回放。</p>
+
+        <div class="mermaid-wrapper">
+            <pre class="mermaid">
+flowchart LR
+    A["并行 Job 记录命令"] --> B["ECB（命令序列）"]
+    B --> C["Job 全部完成，安全点"]
+    C --> D["主线程 Playback 一次性执行"]
+            </pre>
+        </div>
+
+        <h2>7.2 EntityCommandBuffer 的常用命令</h2>
+
+        <p>ECB 提供与 EntityManager 对应的一组记录方法，区别是它们不立即生效：</p>
+        <ul>
+            <li><code>CreateEntity()</code> / <code>Instantiate(prefab)</code>：创建实体；</li>
+            <li><code>AddComponent</code> / <code>RemoveComponent</code>：修改组件组合；</li>
+            <li><code>SetComponent</code>：写入组件数据；</li>
+            <li><code>DestroyEntity(entity)</code>：销毁实体；</li>
+            <li><code>AppendToBuffer</code>：向 DynamicBuffer 追加元素。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>6.6 的一个变化</strong>：ECB 的 <code>CreateEntity</code> 和 <code>Instantiate</code>（含 ParallelWriter）在<strong>记录时就返回有效的 Entity 引用</strong>，可以保存并传给后续命令，回放前后都保持有效；但在回放完成前，这些实体还没有组件，无法通过 EntityManager 或查询访问。旧版本依赖“占位实体（Index 为负）”的检测逻辑需要移除。
+        </div>
+
+        <p>另外，旧的 <code>PlaybackPolicy</code>（SinglePlayback/MultiPlayback）已在 6.6 移除，<strong>ECB 只支持单次回放</strong>。需要多次应用同一批命令，就重新记录到新的 ECB。</p>
+
+        <h2>7.3 ECBSystem：让缓冲在正确的时机回放</h2>
+
+        <p>你不需要自己管理回放时机，引擎内置了专用的 ECB 系统，最常用的两个：</p>
+        <ul>
+            <li><code>BeginSimulationEntityCommandBufferSystem</code>：模拟阶段开始时回放；</li>
+            <li><code>EndSimulationEntityCommandBufferSystem</code>：模拟阶段结束时回放。</li>
+        </ul>
+
+        <p>从这些系统的 Singleton 创建命令缓冲：</p>
+
+<pre><code class="language-csharp">using Unity.Burst;
+using Unity.Entities;
+
+public partial struct CleanupSystem : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        // 取得 EndSimulation ECB 系统的 Singleton
+        var ecbSystem = SystemAPI.GetSingleton&lt;EndSimulationEntityCommandBufferSystem.Singleton&gt;();
+
+        // 在当前 World 上创建命令缓冲
+        var ecb = ecbSystem.CreateCommandBuffer(state.WorldUnmanaged);
+
+        foreach (var (entity, health) in
+            SystemAPI.Query&lt;Entity, RefRO&lt;Health&gt;&gt;())
+        {
+            if (health.ValueRO.Current &lt;= 0f)
+                ecb.DestroyEntity(entity); // 记录销毁，不立即执行
+        }
+    }
+}
+</code></pre>
+
+        <h2>7.4 ParallelWriter：在并行 Job 里安全记录</h2>
+
+        <p>并行 Job 里要写入 ECB，使用 <code>ParallelWriter</code>，并且每条命令必须带一个 <code>sortIndex</code>，回放时按它排序，保证多线程记录的命令顺序确定。IJobEntity 里通过 <code>[ChunkIndexInQuery]</code> 参数拿到这个索引：</p>
+
+<pre><code class="language-csharp">using Unity.Burst;
+using Unity.Entities;
+using Unity.Transforms;
+
+[BurstCompile]
+public partial struct DeathJob : IJobEntity
+{
+    public EntityCommandBuffer.ParallelWriter ECB;
+
+    // ChunkIndexInQuery 提供排序索引
+    void Execute([ChunkIndexInQuery] int chunkIndex, Entity entity, in Health health)
+    {
+        if (health.Current &lt;= 0f)
+        {
+            ECB.DestroyEntity(chunkIndex, entity);
+        }
+    }
+}
+
+public partial struct DeathSystem : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        var ecbSystem = SystemAPI.GetSingleton&lt;EndSimulationEntityCommandBufferSystem.Singleton&gt;();
+        var ecb = ecbSystem.CreateCommandBuffer(state.WorldUnmanaged);
+
+        state.Dependency = new DeathJob
+        {
+            ECB = ecb.AsParallelWriter()
+        }.ScheduleParallel(state.Dependency);
+    }
+}
+</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>易错点</strong>：ParallelWriter 的所有方法第一个参数都是 sortIndex，漏写会编译失败；不要自己用循环计数器当 sortIndex，用引擎提供的 ChunkIndex，它保证回放顺序与 Chunk 处理顺序一致。
+        </div>
+
+        <h2>7.5 实战：在 Job 里生成子弹</h2>
+
+<pre><code class="language-csharp">using Unity.Burst;
+using Unity.Entities;
+using Unity.Mathematics;
+using Unity.Transforms;
+
+[BurstCompile]
+public partial struct FireJob : IJobEntity
+{
+    public EntityCommandBuffer.ParallelWriter ECB;
+    public Entity BulletPrefab;
+    public float DeltaTime;
+
+    void Execute([ChunkIndexInQuery] int chunkIndex, Entity entity,
+        ref FireCooldown cooldown, in LocalTransform transform)
+    {
+        cooldown.Remaining -= DeltaTime;
+        if (cooldown.Remaining &gt; 0f) return;
+
+        // 记录实例化，返回的实体在回放后有效
+        var bullet = ECB.Instantiate(chunkIndex, BulletPrefab);
+        ECB.SetComponent(chunkIndex, bullet, new LocalTransform
+        {
+            Position = transform.Position,
+            Rotation = transform.Rotation,
+            Scale = 1f
+        });
+
+        cooldown.Remaining = cooldown.Interval;
+    }
+}
+</code></pre>
+
+        <h2>7.6 系统组与更新顺序</h2>
+
+        <p>默认 World 里的系统分属三个顶层组，按固定顺序更新：</p>
+
+        <div class="mermaid-wrapper">
+            <pre class="mermaid">
+flowchart LR
+    I["InitializationSystemGroup<br/>初始化、输入、Begin ECB"] --> S["SimulationSystemGroup<br/>核心玩法逻辑、End ECB"]
+    S --> P["PresentationSystemGroup<br/>渲染相关、动画"]
+            </pre>
+        </div>
+
+        <p>你写的系统默认进入 SimulationSystemGroup。需要显式指定位置或顺序时用特性：</p>
+
+<pre><code class="language-csharp">using Unity.Entities;
+
+[UpdateInGroup(typeof(SimulationSystemGroup))]
+[UpdateBefore(typeof(EnemyMoveSystem))]
+public partial struct InputSystem : ISystem { /* ... */ }
+
+[UpdateAfter(typeof(InputSystem))]
+public partial struct EnemyMoveSystem : ISystem { /* ... */ }
+</code></pre>
+
+        <ul>
+            <li><code>[UpdateInGroup(typeof(XGroup))]</code>：放进指定组；</li>
+            <li><code>[UpdateBefore(typeof(Y))]</code> / <code>[UpdateAfter(typeof(Y))]</code>：相对顺序；</li>
+            <li>组可以嵌套，复杂项目可自定义 ComponentSystemGroup 分层组织。</li>
+        </ul>
+
+        <div class="callout callout-danger">
+            <strong>顺序依赖要克制</strong>：UpdateBefore/After 是强耦合，系统间关系多了会变成一张难维护的网。更干净的做法是通过数据解耦——上游系统写入组件/缓冲，下游系统读取，靠系统组的天然阶段推进，而不是指定每两个系统的先后。
+        </div>
+
+        <h2>7.7 选择 Begin 还是 End ECB</h2>
+
+        <table>
+            <thead>
+                <tr><th>场景</th><th>选择</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>本帧创建的实体希望本帧后续逻辑就能查到并处理</td><td>BeginSimulation（在逻辑开始前回放）</td></tr>
+                <tr><td>基于本帧计算结果做清理、销毁、生成</td><td>EndSimulation（本帧逻辑结束后回放）</td></tr>
+                <tr><td>需要在渲染前完成变换更新</td><td>Presentation 相关时机</td></tr>
+            </tbody>
+        </table>
+
+        <p>选错时机最典型的症状是“新生成的实体晚一帧才动”或“销毁的实体本帧还被处理一次”。出现这类时序问题，先检查 ECB 挂在哪个系统。</p>
+
+        <h2>7.8 故障排查清单</h2>
+
+        <details>
+            <summary>命令记录了但没生效</summary>
+            <div class="details-content"><p>确认 ECB 是从 ECBSystem 的 Singleton 创建、而不是自己 new 了一个却从不 Playback；确认对应 ECBSystem 在当前 World 中启用。</p></div>
+        </details>
+
+        <details>
+            <summary>报错：ECB 已被回放 / 多次回放</summary>
+            <div class="details-content"><p>同一个 ECB 只能回放一次。需要在多处使用时，分别从 Singleton 创建独立缓冲，或重新记录。</p></div>
+        </details>
+
+        <details>
+            <summary>并行 Job 回放顺序异常</summary>
+            <div class="details-content"><p>确认所有 ParallelWriter 命令都带了正确的 ChunkIndex；没有混入自定义的不稳定索引。</p></div>
+        </details>
+
+        <div class="exercise">
+            <h3>思考与练习</h3>
+            <ol>
+                <li>实现一个完整的“子弹命中”流程：碰撞检测 Job 用 ParallelWriter 记录命中，ECB 同时销毁子弹、对敌人加伤害、生成命中特效实体。</li>
+                <li>把两个系统的 UpdateBefore 依赖改写成通过 DynamicBuffer 传递事件的数据解耦版本，体会两种方式的差异。</li>
+                <li>实验 Begin 与 End ECB：让生成系统在本帧创建实体，观察下游系统在哪种情况下能立即查到。</li>
+                <li>解释为什么 ECB 在 6.6 之后记录时即可返回有效 Entity，但回放前仍无法通过查询访问。</li>
+            </ol>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>结构变更通过 ECB 记录、在安全点由主线程回放，并行 Job 使用带 ChunkIndex 的 ParallelWriter。</li>
+                <li>ECB 由内置 ECBSystem 的 Singleton 创建，按 Begin/End 等时机回放；6.6 起只支持单次回放，创建命令即时返回有效实体。</li>
+                <li>系统按 Initialization → Simulation → Presentation 三个组推进，用 UpdateInGroup/Before/After 控制顺序。</li>
+                <li>优先用数据解耦而非系统间强顺序依赖；时序问题先查 ECB 挂载时机。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav">
+            <a href="06-数据组织与访问进阶.html">← 上一章：数据组织与访问进阶</a>
+            <a href="08-NGO网络入门.html">下一章：NGO 网络入门 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

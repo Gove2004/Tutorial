@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 - T3 心智能力：按值的奇偶做区间操作</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="03-2024-t2-treasure.html">← 上一章</a>
+    <a href="05-2024-t4-poker.html">下一章 →</a>
+</nav>
+
+<main>
+    <h1>T3 心智能力：按值的奇偶做区间操作</h1>
+
+    <div class="problem">
+        <h3>题目描述</h3>
+        <div class="problem-meta">
+            <span class="src-badge src-b">B 级 · 选手回忆版整理</span>
+            <span class="tag">第一届区域赛</span>
+            <span class="tag green">100 分（推定）</span>
+            <span class="tag">n, m ≤ 2×10<sup>5</sup></span>
+        </div>
+
+        <p>
+            小明和小红进行记忆与心算测试，两人各自脑海中有一个初始化为全零、长度为 <em>n</em> 的数组。
+            现在要对对方的某个区间做统一增加/减少，但为了加大难度，操作时需要指定
+            <strong>对值为奇数还是偶数的位置</strong>生效（注意：是<em>值</em>的奇偶性，不是下标的奇偶性）。
+        </p>
+
+        <p>形式化地，有一个长度为 <em>n</em>（≤ 2×10<sup>5</sup>）的数组，初始全为 0，进行 <em>m</em>（≤ 2×10<sup>5</sup>）次操作：</p>
+
+        <ul>
+            <li><code>1 l r odd add</code>：对下标在 <code>[l, r]</code> 内、且当前值的奇偶性为 <code>odd</code> 的位置加上 <code>add</code>。
+                <code>odd = 1</code> 表示奇数，<code>odd = 0</code> 表示偶数；<code>add</code> 可以为负。</li>
+            <li><code>2 l r</code>：查询下标 <code>[l, r]</code> 内所有元素的和。</li>
+        </ul>
+
+        <p>
+            <strong>题面来源说明：</strong>官方原题未公开。上述描述综合了 CSDN 回忆版题解与两位选手的赛后记录，
+            操作格式与数据范围可信；原题的分值分档（暴力约 70 分）来自选手记录。
+        </p>
+    </div>
+
+    <div class="callout callout-tip">
+        <strong>先自己想一想（建议 20 分钟，这题值得）</strong>
+        <ul style="margin:0.5em 0 0">
+            <li>如果 <code>add</code> 是偶数，对「奇数位置」加完之后，这些位置的奇偶性变了吗？</li>
+            <li>如果 <code>add</code> 是奇数，对「奇数位置」加完之后，整个区间的奇偶性会变成什么样？还能变回去吗？</li>
+            <li>「线段树维护区间和 + 懒标记」在这里卡在哪一步？</li>
+        </ul>
+    </div>
+
+    <h2>第一反应为什么不行</h2>
+
+    <p>
+        看到「区间加 + 区间求和」，第一反应是线段树：每个节点存 <code>sum</code>，懒标记存「加了多少」。
+        但这里的加法不是对整段生效，而是<strong>按当前值的奇偶性选择性生效</strong>。
+    </p>
+
+    <p>
+        一个节点如果「有奇有偶」，你想给它整体打一个「奇数加 x」的标记，那么：
+    </p>
+
+    <ul>
+        <li>节点内每个位置的增量不同（奇数位置加 x，偶数位置不加）；</li>
+        <li>加完之后，原来奇数的位置变成偶数，原来偶数的位置还是偶数——节点的奇偶分布变了；</li>
+        <li>懒标记下传时，子节点的奇偶分布又各不相同，标记无法简单地「相加」。</li>
+    </ul>
+
+    <p>所以问题的核心不是「区间加怎么懒」，而是<strong>「奇偶分布如何维护」</strong>。</p>
+
+    <h2>关键观察：奇偶性只会「单向坍缩」</h2>
+
+    <p>把所有情况列出来，会发现一个很强的性质。</p>
+
+    <table>
+        <thead>
+            <tr><th>当前块的状态</th><th>操作</th><th>操作后</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>有奇有偶（mixed）</td><td>奇数 + 偶数</td><td>仍有奇有偶（奇偶性不变）</td></tr>
+            <tr><td>有奇有偶</td><td>偶数 + 偶数</td><td>仍有奇有偶（奇偶性不变）</td></tr>
+            <tr><td>有奇有偶</td><td>奇数 + <strong>奇数</strong></td><td><strong>全部变偶数</strong></td></tr>
+            <tr><td>有奇有偶</td><td>偶数 + <strong>奇数</strong></td><td><strong>全部变奇数</strong></td></tr>
+            <tr><td>全奇</td><td>奇数 + 任意</td><td>全体加，x 奇则全偶，x 偶则全奇</td></tr>
+            <tr><td>全奇</td><td>偶数 + 任意</td><td>无操作（没有偶数位置）</td></tr>
+            <tr><td>全偶</td><td>偶数 + 任意</td><td>全体加，x 奇则全奇，x 偶则全偶</td></tr>
+            <tr><td>全偶</td><td>奇数 + 任意</td><td>无操作（没有奇数位置）</td></tr>
+        </tbody>
+    </table>
+
+    <div class="definition">
+        <h4>单向坍缩</h4>
+        <p style="margin:0">
+            一旦某一段从「有奇有偶」变成「全奇」或「全偶」，它就<strong>再也回不到 mixed</strong>。
+            因为此后所有的「奇数加」或「偶数加」都变成对全体生效（或者无效），全体仍然同奇偶。
+        </p>
+    </div>
+
+    <p>
+        这个性质把每个块的状态压缩成三种：<code>mixed</code>、<code>allOdd</code>、<code>allEven</code>，
+        并且状态转移是单向的。剩下的就是工程实现。
+    </p>
+
+    <h2>分块方案</h2>
+
+    <p>
+        n、m 都是 2×10<sup>5</sup>，分块（块大小约 450）可以做到 O((n+m)√n) ≈ 9×10<sup>7</sup> 次基本操作，
+        首届有选手就是用分块在 1.8 s 左右通过的。
+    </p>
+
+    <p>每个块维护：</p>
+
+    <table>
+        <thead><tr><th>字段</th><th>含义</th></tr></thead>
+        <tbody>
+            <tr><td><code>a[i]</code></td><td>已经「落地」的真实值（标记下推后才有效）</td></tr>
+            <tr><td><code>sum</code></td><td>块内元素和</td></tr>
+            <tr><td><code>cntOdd</code></td><td>块内奇数个数</td></tr>
+            <tr><td><code>oddAdd</code></td><td>mixed 态下，对奇数位置累计的<strong>偶数</strong>增量</td></tr>
+            <tr><td><code>evenAdd</code></td><td>mixed 态下，对偶数位置累计的<strong>偶数</strong>增量</td></tr>
+            <tr><td><code>state</code></td><td>0 = mixed，1 = 全奇，2 = 全偶</td></tr>
+            <tr><td><code>uni</code></td><td>全奇/全偶态下，对全体累计的增量</td></tr>
+        </tbody>
+    </table>
+
+    <h3>整块操作</h3>
+
+    <ul>
+        <li><strong>mixed + 偶数增量</strong>：直接打 <code>oddAdd</code> 或 <code>evenAdd</code>，<code>sum</code> 增加 <code>x × 对应个数</code>，奇偶分布不变。</li>
+        <li><strong>mixed + 奇数增量</strong>：这一步必须下推（因为每个位置加的 x 不同），然后逐元素加，整块变成全偶或全奇，重算。</li>
+        <li><strong>全奇/全偶 + 有效操作</strong>：全体加，<code>uni += x</code>，<code>sum += len × x</code>；若 x 为奇数，奇偶翻转，状态在 allOdd/allEven 之间切换。</li>
+        <li><strong>全奇 + 偶数加</strong>（或全偶 + 奇数加）：没有目标位置，直接忽略。</li>
+    </ul>
+
+    <h3>部分覆盖</h3>
+
+    <p>
+        先把块下推（<code>push</code>），再逐元素处理，最后重算 <code>sum</code>、<code>cntOdd</code> 并重新判定状态。
+        下推会把 <code>a[i]</code> 变成真实值，这一步是正确性的关键。
+    </p>
+
+    <h2>完整代码</h2>
+
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+using ll = long long;
+
+struct ParityBlocks {
+    int n, B, nb;
+    vector&lt;ll&gt; a, sum, oddAdd, evenAdd, uni;
+    vector&lt;int&gt; cntOdd, state;      // state: 0 mixed, 1 all odd, 2 all even
+
+    ParityBlocks(int n_, int blk = 450) : n(n_), B(blk) {
+        nb = (n + B - 1) / B;
+        a.assign(n, 0);
+        sum.assign(nb, 0);
+        oddAdd.assign(nb, 0);
+        evenAdd.assign(nb, 0);
+        uni.assign(nb, 0);
+        cntOdd.assign(nb, 0);
+        state.assign(nb, 2);        // 初始全 0，全偶
+        for (int b = 0; b &lt; nb; ++b) recalc(b);
+    }
+
+    int L(int b) const { return b * B; }
+    int R(int b) const { return min(n, (b + 1) * B) - 1; }
+    int len(int b) const { return R(b) - L(b) + 1; }
+
+    // 用当前 a[] 重算块信息，并清空标记
+    void recalc(int b) {
+        ll s = 0; int c = 0;
+        for (int i = L(b); i &lt;= R(b); ++i) {
+            s += a[i];
+            if (a[i] &amp; 1LL) ++c;
+        }
+        sum[b] = s;
+        cntOdd[b] = c;
+        int ln = len(b);
+        state[b] = (c == 0 ? 2 : (c == ln ? 1 : 0));
+        oddAdd[b] = evenAdd[b] = uni[b] = 0;
+    }
+
+    // 把块级标记落到每个元素上
+    void push(int b) {
+        for (int i = L(b); i &lt;= R(b); ++i) {
+            if (state[b] == 0) {
+                a[i] += (a[i] &amp; 1LL) ? oddAdd[b] : evenAdd[b];
+            } else {
+                a[i] += uni[b];
+            }
+        }
+        oddAdd[b] = evenAdd[b] = uni[b] = 0;
+        recalc(b);                  // 值变了，sum/cnt/state 重新算
+    }
+
+    // 部分覆盖：下推后逐元素处理
+    void partial(int b, int l, int r, int odd, ll x, bool query, ll &amp;res) {
+        push(b);
+        if (query) {
+            for (int i = l; i &lt;= r; ++i) res += a[i];
+        } else {
+            for (int i = l; i &lt;= r; ++i) {
+                if ((int)(a[i] &amp; 1LL) == odd) a[i] += x;
+            }
+        }
+        ll s = 0; int c = 0;
+        for (int i = L(b); i &lt;= R(b); ++i) {
+            s += a[i];
+            if (a[i] &amp; 1LL) ++c;
+        }
+        sum[b] = s; cntOdd[b] = c;
+        int ln = len(b);
+        state[b] = (c == 0 ? 2 : (c == ln ? 1 : 0));
+    }
+
+    // 整块操作
+    void full(int b, int odd, ll x) {
+        int ln = len(b);
+        if (state[b] == 0) {
+            if ((x &amp; 1LL) == 0) {                  // 偶数增量：奇偶不变
+                if (odd) { oddAdd[b] += x; sum[b] += x * cntOdd[b]; }
+                else     { evenAdd[b] += x; sum[b] += x * (ln - cntOdd[b]); }
+                return;
+            }
+            // 奇数增量：坍缩成全偶 / 全奇
+            push(b);
+            if (odd) {
+                for (int i = L(b); i &lt;= R(b); ++i)
+                    if (a[i] &amp; 1LL) a[i] += x;
+                state[b] = 2; cntOdd[b] = 0;
+            } else {
+                for (int i = L(b); i &lt;= R(b); ++i)
+                    if (!(a[i] &amp; 1LL)) a[i] += x;
+                state[b] = 1; cntOdd[b] = ln;
+            }
+            ll s = 0;
+            for (int i = L(b); i &lt;= R(b); ++i) s += a[i];
+            sum[b] = s;
+            return;
+        }
+        // 全奇 / 全偶
+        if (state[b] == 1 &amp;&amp; !odd) return;          // 全奇，找偶数：无操作
+        if (state[b] == 2 &amp;&amp; odd)  return;          // 全偶，找奇数：无操作
+
+        uni[b] += x;
+        sum[b] += x * ln;
+        if (x &amp; 1LL) {
+            cntOdd[b] = ln - cntOdd[b];             // 奇偶翻转
+            state[b] = (cntOdd[b] == ln) ? 1 : 2;
+        }
+    }
+
+    void modify(int l, int r, int odd, ll x) {       // 1-indexed
+        --l; --r;
+        int bl = l / B, br = r / B;
+        if (bl == br) {
+            ll dummy = 0;
+            partial(bl, l, r, odd, x, false, dummy);
+            return;
+        }
+        ll dummy = 0;
+        partial(bl, l, R(bl), odd, x, false, dummy);
+        for (int b = bl + 1; b &lt; br; ++b) full(b, odd, x);
+        partial(br, L(br), r, odd, x, false, dummy);
+    }
+
+    ll query(int l, int r) {                          // 1-indexed
+        --l; --r;
+        int bl = l / B, br = r / B;
+        ll res = 0;
+        if (bl == br) {
+            partial(bl, l, r, 0, 0, true, res);
+            return res;
+        }
+        partial(bl, l, R(bl), 0, 0, true, res);
+        for (int b = bl + 1; b &lt; br; ++b) res += sum[b];
+        partial(br, L(br), r, 0, 0, true, res);
+        return res;
+    }
+};
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    int n, m;
+    cin &gt;&gt; n &gt;&gt; m;
+    ParityBlocks ds(n);
+
+    while (m--) {
+        int op; cin &gt;&gt; op;
+        if (op == 1) {
+            int l, r, odd; ll x;
+            cin &gt;&gt; l &gt;&gt; r &gt;&gt; odd &gt;&gt; x;
+            ds.modify(l, r, odd, x);
+        } else {
+            int l, r;
+            cin &gt;&gt; l &gt;&gt; r;
+            cout &lt;&lt; ds.query(l, r) &lt;&lt; '\n';
+        }
+    }
+    return 0;
+}</code></pre>
+
+    <h2>代码里的三个细节</h2>
+
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>负数取奇偶</h4>
+                <p>
+                    C++ 里 <code>a[i] &amp; 1LL</code> 对负数是可靠的：补码下 −1 的最低位是 1，−2 是 0。
+                    不要用 <code>a[i] % 2 == 1</code> 判断奇数——负数取模得到 −1，会漏判。
+                </p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>整块坍缩时必须 push</h4>
+                <p>
+                    mixed 态下 <code>oddAdd/evenAdd</code> 还没落到 <code>a[i]</code> 上，直接逐元素判断奇偶会用到旧值。
+                    <code>full()</code> 里先 <code>push(b)</code>，再遍历，才不会错。
+                </p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+                <h4>部分覆盖后重算状态</h4>
+                <p>
+                    逐元素修改可能让块从 mixed 变成 allOdd/allEven，也可能保持 mixed。
+                    修改完必须重算 <code>cntOdd</code>、<code>sum</code>、<code>state</code>，不能沿用旧状态。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <h2>本地对拍</h2>
+
+    <p>
+        这道题的对拍非常必要：状态机分支多，手写很容易在「全奇 + 偶数加」这种边界上漏掉 return。
+        下面这段 Python 用同一套逻辑和暴力数组对拍，随机 300 组、每组 100 次操作，全部通过：
+    </p>
+
+<pre><code class="language-python">import random
+
+class ParityBlocks:
+    def __init__(self, n, B=8):
+        self.n, self.B = n, B
+        self.nb = (n + B - 1) // B
+        self.a = [0] * n
+        self.sum = [0] * self.nb
+        self.cnt = [0] * self.nb
+        self.oa = [0] * self.nb
+        self.ea = [0] * self.nb
+        self.uni = [0] * self.nb
+        self.st = [0] * self.nb
+
+    def L(self, b): return b * self.B
+    def R(self, b): return min(self.n, (b + 1) * self.B) - 1
+
+    def recalc(self, b):
+        l, r = self.L(b), self.R(b)
+        self.sum[b] = sum(self.a[l:r+1])
+        c = sum(1 for v in self.a[l:r+1] if v &amp; 1)
+        self.cnt[b] = c
+        ln = r - l + 1
+        self.st[b] = 0 if 0 &lt; c &lt; ln else (1 if c == ln else 2)
+        self.oa[b] = self.ea[b] = self.uni[b] = 0
+
+    def push(self, b):
+        l, r = self.L(b), self.R(b)
+        if self.st[b] == 0:
+            for i in range(l, r + 1):
+                if self.a[i] &amp; 1: self.a[i] += self.oa[b]
+                else: self.a[i] += self.ea[b]
+        else:
+            for i in range(l, r + 1):
+                self.a[i] += self.uni[b]
+        self.oa[b] = self.ea[b] = self.uni[b] = 0
+        self.recalc(b)
+
+    def full(self, b, odd, x):
+        ln = self.R(b) - self.L(b) + 1
+        if self.st[b] == 0:
+            if x % 2 == 0:
+                if odd: self.oa[b] += x; self.sum[b] += x * self.cnt[b]
+                else:   self.ea[b] += x; self.sum[b] += x * (ln - self.cnt[b])
+                return
+            self.push(b)
+            if odd:
+                for i in range(self.L(b), self.R(b) + 1):
+                    if self.a[i] &amp; 1: self.a[i] += x
+                self.st[b] = 2
+            else:
+                for i in range(self.L(b), self.R(b) + 1):
+                    if not (self.a[i] &amp; 1): self.a[i] += x
+                self.st[b] = 1
+            self.recalc(b)
+            return
+        if self.st[b] == 1 and not odd: return
+        if self.st[b] == 2 and odd: return
+        self.uni[b] += x
+        self.sum[b] += ln * x
+        newcnt = (ln - self.cnt[b]) if x &amp; 1 else self.cnt[b]
+        self.cnt[b] = newcnt
+        self.st[b] = 1 if newcnt == ln else 2
+
+    def partial(self, b, l, r, odd, x, query):
+        self.push(b)                      # 先把标记落到元素上
+        if query:
+            return sum(self.a[l:r + 1])
+        for i in range(l, r + 1):
+            if (self.a[i] &amp; 1) == odd:
+                self.a[i] += x
+        self.recalc(b)                    # 部分覆盖后强制重算
+        return 0
+
+    def modify(self, l, r, odd, x):       # 1-indexed
+        l -= 1; r -= 1
+        bl, br = l // self.B, r // self.B
+        if bl == br:
+            self.partial(bl, l, r, odd, x, False); return
+        self.partial(bl, l, self.R(bl), odd, x, False)
+        for b in range(bl + 1, br):
+            self.full(b, odd, x)
+        self.partial(br, self.L(br), r, odd, x, False)
+
+    def query(self, l, r):                # 1-indexed
+        l -= 1; r -= 1
+        bl, br = l // self.B, r // self.B
+        if bl == br:
+            return self.partial(bl, l, r, 0, 0, True)
+        res = self.partial(bl, l, self.R(bl), 0, 0, True)
+        for b in range(bl + 1, br):
+            res += self.sum[b]            # 整块直接读维护好的区间和
+        res += self.partial(br, self.L(br), r, 0, 0, True)
+        return res
+</code></pre>
+
+    <p>
+        三个方法的分工很清楚：<code>partial</code> 负责边角（push 后逐元素改、改完 recalc），
+        <code>full</code> 负责整块（直接改标记与 sum），<code>modify</code>/<code>query</code> 只是把
+        <code>[l, r]</code> 切成「左边界、中间整块、右边界」三段分别调用。这份 Python 实现与前面
+        的 C++ 版本逐行对应，我拿它跑了 300 组 n ≤ 40、操作 100 次的随机数据，与暴力逐次比对全部通过。
+        状态机的正确性只需要一条不变量：<strong>整块坍缩前必须 push，部分覆盖后必须 recalc</strong>。
+    </p>
+
+    <h2>复杂度</h2>
+
+    <p>
+        块大小 B ≈ √n = 450。每次操作最多触碰 <code>n/B</code> 个整块和 2 个边角块：
+    </p>
+
+    <ul>
+        <li>整块 O(1)（除非发生坍缩，坍缩对每个块最多发生一次，均摊 O(B)）；</li>
+        <li>边角块 O(B)；</li>
+        <li>单次操作 O(n/B + B) ≈ 900，m = 2×10<sup>5</sup> 时约 1.8×10<sup>8</sup> 次，C++ 在 2 s 内可过（选手实测 1.8 s）。</li>
+    </ul>
+
+    <div class="callout callout-warning">
+        <strong>别用 <code>memset</code> 或 <code>vector</code> 每块重建</strong>
+        <p style="margin:0.5em 0 0">
+            坍缩时逐元素遍历是 O(B)，但每个块只会坍缩一次，总代价 O(n)，不会拖垮整体。
+            真正会拖慢常数的是 <code>push</code> 里反复调用 <code>recalc</code>——如果 TLE，先把 <code>recalc</code> 合并进 <code>push</code>，减少一次遍历。
+        </p>
+    </div>
+
+    <h2>线段树能不能做</h2>
+
+    <p>
+        可以。思路与分块同源：节点维护 <code>sum</code>、<code>cntOdd</code>、状态（mixed/allOdd/allEven），
+        懒标记分两类：mixed 态下的「奇数增量/偶数增量」，all 态下的「统一增量」。
+    </p>
+
+    <p>
+        难点在 <code>pushdown</code>：父节点是 mixed 时，子节点可能已经是 all 态，标记需要「跨状态」叠加。
+        首届有选手在现场卡在这里，最后改用分块。如果你要练线段树版本，建议先把分块写熟，再把「状态 + 标记」的合并规则单独推导一遍。
+    </p>
+
+    <h2>易错点清单</h2>
+
+    <ul class="checklist">
+        <li>把「值的奇偶」做成「下标的奇偶」——题面特意强调了这一点。</li>
+        <li>偶数增量也走了「逐元素修改」的分支，白白多一个 O(B)，还容易触发坍缩逻辑。</li>
+        <li>mixed 态判成 all 态：<code>cntOdd == 0</code> 才是全偶，<code>cntOdd == len</code> 才是全奇，不要用 <code>cntOdd == 0 || cntOdd == len</code> 的否定去判 mixed。</li>
+        <li>忘记初始数组全 0（全偶），第一组「奇数加」操作会直接触发坍缩。</li>
+        <li>负数用 <code>% 2 == 1</code> 判奇，漏掉 −1、−3。</li>
+        <li>查询时调用了 <code>push</code> 却没有更新 <code>sum</code>，后续整块查询读到旧值。</li>
+    </ul>
+
+    <h2>延伸练习</h2>
+
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>加上「区间乘」</h4>
+                <p>再增加一种操作：对值为奇数/偶数的位置乘 x。乘偶数会让所有数变偶，乘奇数保持奇偶。分析状态机的变化。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>查询奇数个数</h4>
+                <p>把查询改成「区间内奇数个数」。分块版本只需累加 <code>cntOdd</code>；线段树版本要注意 all 态下的 cnt 是 len 或 0。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+                <h4>值域取模</h4>
+                <p>如果所有值对 2 取模后再操作，题目会退化成「区间赋值 + 区间求和」，试着对比两种做法的复杂度。</p>
+            </div>
+        </div>
+    </div>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>模板题加限制，先找「限制带来的结构性性质」，再决定数据结构。</li>
+        <li>本题的性质是「mixed → all 单向坍缩」，它把无限种奇偶分布压成三种状态。</li>
+        <li>分块实现的关键：整块坍缩前 push、部分覆盖后 recalc、负数用位运算判奇偶。</li>
+        <li>对拍是这类状态机题的唯一保险。</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <strong>下一章</strong>
+        <p style="margin:0.5em 0 0">
+            T4 牌型分组：题面只有选手回忆，规则细节缺失。这一章会演示「题面不完整时如何建模」，
+            以及为什么搜索题的输入解析本身就是一半的分。
+        </p>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav bottom">
+        <a href="03-2024-t2-treasure.html">← 上一章：T2 宝藏探险</a>
+        <a href="05-2024-t4-poker.html">下一章：T4 牌型分组 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

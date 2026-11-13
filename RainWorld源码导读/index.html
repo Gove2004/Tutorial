@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rain World 反编译源码深度导读</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <h1>Rain World 反编译源码深度导读</h1>
+        <p class="intro">面向 Unity / C# 开发者与模组作者，系统拆解 Rain World（v1.11.6）的双层世界、自研物理、效用 AI、Futile 渲染与模组生态。所有结论均来自反编译源码的真实代码。</p>
+
+        <div class="version-info">
+            <strong>源码版本：</strong>Rain World v1.11.6（含 Downpour / More Slugcats 与 The Watcher 两大 DLC，及 Expedition、Jolly Coop 模式）<br>
+            <strong>技术底座：</strong>Unity 引擎，C#，目标框架 .NET Framework 4.0，允许 unsafe 代码，输入采用 Rewired，钩子采用 MonoMod RuntimeDetour<br>
+            <strong>工程规模：</strong>Assembly-CSharp 主程序约 1100+ 个 C# 文件，Assembly-CSharp-firstpass 86 个文件
+        </div>
+
+        <div class="callout callout-info">
+            <strong>关于本教程</strong>
+            <ul>
+                <li><strong>读者画像</strong>：具备 C# 与 Unity 基础，想读懂大型商业游戏源码、制作 Rain World 模组，或学习其架构设计的开发者</li>
+                <li><strong>学习深度</strong>：系统掌握级，覆盖核心机制、调用链、边界情况、生产陷阱与逆向方法</li>
+                <li><strong>视觉风格</strong>：tech 技术蓝——源码导读属工程类内容，需要清晰的类层次、调用链与代码高亮</li>
+                <li><strong>使用方式</strong>：双击本文件即可在浏览器离线学习，架构图使用 Mermaid 渲染，代码块支持一键复制</li>
+            </ul>
+        </div>
+
+        <h2>学习路径</h2>
+        <p>本教程遵循「先全局、后分层、再专题」的递进路径：第 1–2 章建立认知与全局观；第 3–9 章自顶向下拆解主循环、双层世界、物理、生物骨架与 AI；第 10–14 章进入玩家、渲染、界面、音频与存档专题；第 15 章收束于模组生态与逆向实战。</p>
+
+        <h2>课程目录</h2>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-导论与源码阅读环境.html">01 - 导论与源码阅读环境</a></h3>
+                <p>Rain World 是什么、反编译产物结构、解决方案与依赖、如何编译、反编译代码的特征与阅读方法论</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-总体架构鸟瞰.html">02 - 总体架构鸟瞰</a></h3>
+                <p>分层架构、核心子系统、类继承树、一帧的生命周期、贯穿全局的设计哲学</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="03-主循环与进程系统.html">03 - 主循环与进程系统</a></h3>
+                <p>RainWorld、ProcessManager、MainLoopProcess、固定 40 FPS 时间步长、进程切换与旁支进程</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-抽象世界层.html">04 - 抽象世界层</a></h3>
+                <p>AbstractWorldEntity / AbstractPhysicalObject / AbstractCreature / AbstractRoom、WorldCoordinate、序列化与轮转更新</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-世界加载与房间系统.html">05 - 世界加载与房间系统</a></h3>
+                <p>World / Region / StaticWorld、RoomRealizer、RoomPreparer、Room 地形与快捷通道、Realize / Abstractize 双向流</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-自研物理引擎.html">06 - 自研物理引擎</a></h3>
+                <p>BodyChunk 刚体、瓦片扫描碰撞、弹簧质点连接、程序化附属肢体、对象碰撞与多边形碰撞</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="07-生物骨架与模板系统.html">07 - 生物骨架与模板系统</a></h3>
+                <p>PhysicalObject / Creature、Grasp、CreatureState、CreatureTemplate 模板树、品种参数与人格系统</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="08-AI感知与效用决策.html">08 - AI 感知与效用决策</a></h3>
+                <p>ArtificialIntelligence、AIModule、效用 AI、Tracker 感知、视觉听觉、关系与行为状态</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="09-寻路系统.html">09 - 寻路系统</a></h3>
+                <p>AImap / AItile、分帧 A* PathFinder、PathCost、StandardPather、寻路预算分配与离屏 AI</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="10-玩家蛞蝓猫深度导读.html">10 - 玩家蛞蝓猫深度导读</a></h3>
+                <p>Player 巨型状态机、InputPackage / PlayerController、BodyMode、舌头、SlugcatStats 与 PlayerGraphics</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="11-渲染层与Futile框架.html">11 - 渲染层与 Futile 框架</a></h3>
+                <p>Futile、FStage / FNode 场景图、FContainer / FSprite / FAtlas、IDrawable、调色板、灯光与特效</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="12-HUD菜单与界面系统.html">12 - HUD、菜单与界面系统</a></h3>
+                <p>Menu 框架、页面与按钮、HUD 各仪表、对话框、地图、Remix 配置界面与 MixedUI</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="13-音频系统.html">13 - 音频系统</a></h3>
+                <p>FSoundManager、SoundID、SoundLoader、动态声音循环、MusicPlayer 与威胁音乐机制</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="14-存档与数据持久化.html">14 - 存档与数据持久化</a></h3>
+                <p>SaveState、DeathPersistentSaveData、PlayerProgression、PersistentData、版本兼容与未识别字段机制</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="15-模组生态与逆向实战.html">15 - 模组生态、DLC 导读与逆向实战</a></h3>
+                <p>ModManager、MonoMod 钩子、ExtEnum 深入、DLC 即模组、各 DLC 目录地图、逆向方法与动手任务</p>
+            </div>
+        </div>
+
+        <h2>权威参考资源</h2>
+        <ul>
+            <li><a href="https://rainworldmods.miraheze.org/" target="_blank">Rain World Modding Wiki（模组开发知识库）</a></li>
+            <li><a href="https://reworks.rainworldmodding.com/" target="_blank">Rain World 官方文档（Reworks）</a></li>
+            <li><a href="https://github.com/RainWorldWorldModding" target="_blank">Rain World Modding 官方 GitHub 组织</a></li>
+            <li><a href="https://monomod.dev/" target="_blank">MonoMod 官方文档（RuntimeDetour 钩子机制）</a></li>
+        </ul>
+
+        <div class="sidebar-note">
+            <strong>阅读约定</strong>：本教程引用的类名、方法名、字段名与行号均基于当前这份反编译工程；因反编译工具不同，重新生成的工程在变量命名、空行与行号上可能有差异，但类型与方法签名一致。
+        </div>
+    </main>
+</body>
+</html>

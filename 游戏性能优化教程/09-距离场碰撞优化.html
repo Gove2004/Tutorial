@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>距离场碰撞优化 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-寻路优化.html">← 上一章</a>
+        <a href="10-场景加载纹理与内存优化.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>距离场碰撞优化</h1>
+        <p class="chapter-meta">模块二 · 优化策略实战 ｜ 对应原文策略 6（Distance Field）</p>
+
+        <p>上一章的寻路解决“怎么走”，本章解决“走到哪会撞上”。角色在移动过程中要持续做碰撞检测，若完全依赖实时物理引擎，大量角色同屏时 CPU 会被碰撞计算占满。距离场（Distance Field）是“成本离线化”这条逻辑的典型代表：<strong>把场景里每个位置到最近碰撞体的距离提前算好，运行时只做一次查表</strong>。</p>
+
+        <h2>9.1 核心思想</h2>
+
+        <p>实时物理之所以贵，是因为每帧都要让角色与周围碰撞体做几何求交。但场景中的静态碰撞体（墙壁、地形）在运行时并不变化，那么“某个点离最近的墙有多远”这个答案也是不变的，完全可以预先计算。</p>
+
+        <div class="definition">
+            <h4>距离场</h4>
+            <p>把空间离散成网格，每个格子存储该位置到最近碰撞点的距离值，这张二维（或三维）查找表就是距离场。运行时用角色当前位置采样，一次读取即可得到离障碍的距离。</p>
+        </div>
+
+        <h2>9.2 离线生成流程</h2>
+        <ol>
+            <li>分析场景碰撞信息，把碰撞体投影到离散网格，标记障碍格。</li>
+            <li>计算每个可通行格到最近障碍格的距离。</li>
+            <li>把距离场作为场景数据保存，随场景加载。</li>
+        </ol>
+
+        <h2>9.3 运行时查询流程</h2>
+        <div class="mermaid">
+flowchart LR
+            A["获取角色当前位置"] --> B["换算网格坐标并采样距离"]
+            B --> C["距离与角色半径比较"]
+            C --> D{"距离 ≤ 半径?"}
+            D -->|是| E["判定碰撞"]
+            D -->|否| F["自由移动"]
+            E --> G["根据相邻格距离梯度判断碰撞方向"]
+            style D fill:#fff6e8,stroke:#e65100,color:#14395a
+            style G fill:#e7f3ff,stroke:#007acc,color:#14395a
+        </div>
+
+        <p>碰撞方向不需要额外计算：<strong>距离场的梯度（距离值增长最快的方向）就是远离障碍的方向</strong>，采样当前格与相邻格的距离差即可得到推出方向，让角色沿墙滑动而不是卡死。</p>
+
+        <h2>9.4 生成算法：多源 BFS</h2>
+
+        <p>最容易理解的生成方式是多源广度优先搜索：把所有障碍格同时作为距离 0 的源点入队，BFS 向外扩散，每扩展一层距离加一。一次遍历就能得到所有格子到最近障碍的距离。下面是二维网格的完整简化实现：</p>
+
+<pre><code class="language-csharp">using System.Collections.Generic;
+using UnityEngine;
+
+public class DistanceFieldBuilder
+{
+    public float[] Build(bool[] obstacles, int width, int height, float cellSize)
+    {
+        int[] dist = new int[width * height];
+        Queue<int> queue = new Queue<int>();
+
+        for (int i = 0; i < obstacles.Length; i++)
+        {
+            if (obstacles[i])
+            {
+                dist[i] = 0;
+                queue.Enqueue(i);
+            }
+            else
+            {
+                dist[i] = -1;
+            }
+        }
+
+        int[] neighbors = { 1, -1, width, -width };
+
+        while (queue.Count > 0)
+        {
+            int current = queue.Dequeue();
+            int x = current % width;
+
+            foreach (int offset in neighbors)
+            {
+                int next = current + offset;
+                if (next < 0 || next >= dist.Length) continue;
+                if (offset == 1 && x == width - 1) continue;
+                if (offset == -1 && x == 0) continue;
+                if (dist[next] != -1) continue;
+
+                dist[next] = dist[current] + 1;
+                queue.Enqueue(next);
+            }
+        }
+
+        float[] field = new float[dist.Length];
+        for (int i = 0; i < dist.Length; i++)
+        {
+            field[i] = dist[i] * cellSize;
+        }
+        return field;
+    }
+
+    public float Sample(float[] field, int width, int height, Vector3 world,
+                        Vector3 origin, float cellSize)
+    {
+        int gx = Mathf.Clamp((int)((world.x - origin.x) / cellSize), 0, width - 1);
+        int gy = Mathf.Clamp((int)((world.z - origin.z) / cellSize), 0, height - 1);
+        return field[gy * width + gx];
+    }
+}
+</code></pre>
+
+        <div class="callout callout-info">
+            <strong>进一步精度</strong>：多源 BFS 得到的是网格步进距离，适合理解原理。生产中常用 <strong>8SSS（8 点顺序扫描）</strong>等算法计算更精确的欧几里得距离；若需要区分障碍内部与外部，可使用带符号距离场（SDF），距离值在墙内为负、墙外为正。原文按“到最近碰撞点的距离”描述，本质是无符号距离场配合半径判定。
+        </div>
+
+        <h2>9.5 适用边界与权衡</h2>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>权衡</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>网格分辨率</td><td>分辨率越高碰撞越精确，但内存按格子数平方增长；需在角色尺寸与精度间取平衡，通常 cell 大小明显小于角色半径</td></tr>
+                <tr><td>静态 / 动态</td><td>距离场只对静态障碍有效，动态障碍（可破坏墙、其他角色）仍需实时检测或对局部场做增量更新</td></tr>
+                <tr><td>离散误差</td><td>查表结果是格子近似，高速移动时要配合连续检测，避免单帧穿过薄墙（穿透问题）</td></tr>
+                <tr><td>内存占用</td><td>大场景应分块生成、按需加载，而不是整张常驻内存</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>不要神化距离场</strong>：它替代的是“角色与静态场景”的碰撞，无法处理角色之间的动态交互，也不能替代物理引擎的刚体响应。正确定位是把静态、可预处理的那部分成本剥离出去。
+        </div>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">基础练习</span>生成并采样</h3>
+            <p>用示例代码为一张含若干障碍的小地图生成距离场，写一个测试角色在移动中采样，验证接近墙壁时距离值递减并能正确触发碰撞。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>梯度方向</h3>
+            <p>说明如何仅用当前格与四个相邻格的距离值求出“沿墙滑动”的方向，并分析为什么沿距离梯度反方向推出能避免角色卡进墙里。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">进阶挑战</span>分块加载</h3>
+            <p>把大地图距离场拆成多个区块，实现随角色位置动态加载/卸载区块，并保证跨区块边界采样不出现空隙。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>距离场把静态碰撞的几何求交变成离线一次计算、运行时一次查表。</li>
+            <li>离线标记障碍并计算最近距离，运行时用半径判定碰撞、用距离梯度求推出方向。</li>
+            <li>多源 BFS 是基础生成法，生产可用 8SSS 与带符号 SDF 提升精度。</li>
+            <li>分辨率、静态/动态、离散误差与内存是四项核心权衡，动态障碍仍需实时处理。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章</strong>：进入资源与内存领域，讲场景异步加载、Mipmap 纹理治理、Model 延迟加载与对象池。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="08-寻路优化.html">← 上一章：寻路优化</a>
+            <a href="10-场景加载纹理与内存优化.html">下一章：场景加载、纹理与内存优化 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

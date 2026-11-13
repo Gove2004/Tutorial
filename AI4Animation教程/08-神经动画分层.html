@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>08 神经动画分层 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="07-局部运动相位.html">← 上一章：局部运动相位</a>
+    <a href="09-DeepPhase周期自编码器.html">下一章：DeepPhase →</a>
+</nav>
+
+<main>
+    <h1>08　神经动画分层 NAL</h1>
+
+    <div class="paper-meta">
+        <dl>
+            <dt>论文</dt><dd>Neural Animation Layering for Synthesizing Martial Arts Movements</dd>
+            <dt>作者</dt><dd>Sebastian Starke, He Zhang, Taku Komura, Jun Saito</dd>
+            <dt>发表</dt><dd>ACM Transactions on Graphics 40(4), Article 92, SIGGRAPH 2021</dd>
+            <dt>仓库位置</dt><dd>AI4Animation/SIGGRAPH_2021</dd>
+        </dl>
+    </div>
+
+    <h2>8.1 武术合成的挑战</h2>
+    <p>武术包含快速、强力的组合技，出拳踢腿可任意串联，还要求鲜明的格斗风格。此前的端到端模型把控制映射与运动生成
+    耦合在一起：<strong>任何控制输入的调整都要重新训练整个网络</strong>，而每次训练耗时数小时，迭代成本极高。
+    论文的核心回应是一个工程化架构——把系统拆成两层。</p>
+
+    <h2>8.2 两层解耦架构</h2>
+    <pre class="mermaid">
+flowchart TD
+    subgraph 控制层
+        C1["控制模块 A<br/>NN/片段/启发式/物理"]
+        C2["控制模块 B"]
+        C3["控制模块 C"]
+    end
+    C1 & C2 & C3 --> IF["控制接口<br/>覆盖/叠加/混合算子"]
+    IF --> Traj["未来关键关节轨迹<br/>位置+方向"]
+    Traj --> Gen["运动生成器<br/>MoE 网络 · 运动流形"]
+    Gen --> Body["全身姿态（24 段）<br/>含手指/接触/根更新"]
+    style Gen fill:#eaf7ed,stroke:#38a152
+    style IF fill:#fff2dd,stroke:#f08c1a
+    </pre>
+    <p class="mermaid-caption">图 8-1　运动生成器与控制模块解耦</p>
+
+    <h2>8.3 运动生成器：任务无关的运动流形</h2>
+    <p>运动生成器是一个 MoE 网络，被训练为<strong>任务无关（task-agnostic）</strong>：它只学习"给定关键关节的
+    未来轨迹，生成符合数据分布的全身姿态"，不关心这些轨迹来自手柄、AI 还是动画片段。网络输入是关键关节的未来轨迹
+    （位置 3D + 方向），输出为完整角色姿态。</p>
+    <ul>
+        <li>覆盖 24 个身体段，包含手指的完整变换</li>
+        <li>输出 5 个关键关节的接触开关</li>
+        <li>自动计算根位置与朝向更新</li>
+    </ul>
+    <div class="callout callout-info">
+        <span class="callout-title">为什么任务无关是关键</span>
+        <p>由于生成器只依赖运动流形、与具体控制逻辑无关，它可以一次性训练好、之后保持固定。新增动作或修改控制时，
+        只需改动控制层，生成器无需重训——这正是针对上一章结尾"重训成本"问题的直接设计。</p>
+    </div>
+
+    <h2>8.4 控制模块：异构来源并行开发</h2>
+    <p>控制模块可以由任意方式实现，论文明确列出四类：神经网络、动画片段、启发式规则、物理仿真。每个模块独立生成
+    未来关节轨迹，开发者可并行迭代，再通过控制接口组合。</p>
+
+    <h2>8.5 控制接口：三种分层算子</h2>
+    <p>多个控制模块的轨迹通过三种算子组合，这是论文的形式化贡献：</p>
+    <table>
+        <thead><tr><th>算子</th><th>符号</th><th>语义</th></tr></thead>
+        <tbody>
+            <tr><td>覆盖 Override</td><td>L<sub>O</sub></td><td>一个模块的轨迹完全替换另一模块，用于强制接管某些关节</td></tr>
+            <tr><td>叠加 Additive</td><td>L<sub>A</sub></td><td>多个模块的轨迹增量相加，用于在上层动作上叠加细节</td></tr>
+            <tr><td>混合 Blending</td><td>L<sub>B</sub></td><td>按权重平滑插值，用于模块间过渡</td></tr>
+        </tbody>
+    </table>
+
+    <pre class="mermaid">
+flowchart LR
+        A["模块 A 轨迹"] --> Ops["L_O / L_A / L_B"]
+        B["模块 B 轨迹"] --> Ops
+        Ops --> Out["合成轨迹"]
+        style Ops fill:#e9f4ff,stroke:#007acc
+    </pre>
+    <p class="mermaid-caption">图 8-2　三种分层算子</p>
+
+    <h2>8.6 重定向控制模块</h2>
+    <p>为让攻击精确指向对手，系统提供一个<strong>重定向控制模块</strong>：根据目标与当前关节的距离、朝向，对未来轨迹
+    做实时重定向，使出拳踢腿在对手位置变化时仍能命中。它的输出与其他控制模块一样进入控制接口，因此可与其他模块自由组合。</p>
+
+    <h2>8.7 门控输入与旋转表示</h2>
+    <p>MoE 生成器的门控网络输入是<strong>未来关节轨迹的速度幅值</strong>（取 7 个采样点），从而让门控直接感知
+    即将发生的动作强度。关节旋转使用两个共正交轴的 6D 表示，与 MANN 以来的路线一致。</p>
+
+    <h2>8.8 迭代效率的量化收益</h2>
+    <p>论文明确给出工作流对比：端到端时代每次修改控制后需重新训练，周期以小时计；解耦后，控制模块的调整可在
+    <strong>分钟级</strong>完成验证，运动生成器保持不动。这使快速试验大量组合技与风格变体成为可能。</p>
+
+    <pre class="mermaid">
+flowchart LR
+        subgraph 旧流程
+        A1["修改控制输入"] --> A2["重训整个网络<br/>数小时"] --> A3["验证"]
+        end
+        subgraph 新流程
+        B1["修改控制模块"] --> B2["分钟级验证<br/>生成器固定"] --> B3["满意后再训练新模块"]
+        end
+    </pre>
+    <p class="mermaid-caption">图 8-3　解耦前后的迭代流程</p>
+
+    <h2>8.9 局限</h2>
+    <ul>
+        <li>运动生成器的质量仍受限于训练数据的动作覆盖，数据外的组合技可能产生不自然姿态</li>
+        <li>控制模块增多后，算子组合与权重调试本身成为新的工程负担</li>
+        <li>相位仍依赖前面的接触/人工方案，尚未实现无监督自动提取——这是下一章 DeepPhase 的目标</li>
+    </ul>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>架构判断</h4>
+                    <p>解释"任务无关"为什么能让运动生成器一次训练、长期复用；它对输入接口提出了什么约束？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>算子选择</h4>
+                    <p>若要实现"下半身保持站立移动、上半身做新增出拳动作"，应选择哪种算子？说明理由。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>工程权衡</h4>
+                    <p>解耦降低了重训成本，但引入了哪些新问题？结合控制模块数量增长后的维护分析。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>NAL 把系统拆成任务无关的运动生成器（MoE 运动流形）与可异构实现的控制模块，解耦后生成器无需重训</li>
+        <li>控制接口提供覆盖、叠加、混合三种算子，重定向模块保证攻击指向对手</li>
+        <li>门控以未来关节速度幅值为输入，旋转沿用 6D 双正交轴</li>
+        <li>迭代周期从小时级降到分钟级；代价是模块组合的工程复杂度上升</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://www.ipab.inf.ed.ac.uk/cgvu/starke2021.pdf">NAL 论文原文</a></li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="07-局部运动相位.html">← 上一章：局部运动相位</a>
+        <a href="09-DeepPhase周期自编码器.html">下一章：DeepPhase →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>09 - 第二届 T3/T4：没有题面时怎么练</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="08-2025-t2-forest.html">← 上一章</a>
+    <a href="10-2025-final-algo.html">下一章 →</a>
+</nav>
+
+<main>
+    <h1>第二届 T3/T4：没有题面时怎么练</h1>
+
+    <div class="callout callout-danger">
+        <strong>先说结论：这两题的原题没有公开版本</strong>
+        <p style="margin:0.5em 0 0">
+            CACC 官方不整体公开赛题。第二届区域赛结束后，能在公开网络上找到的只有 T1、T2 的原题（17noi 题库收录），
+            以及 T5 的标题级线索（「AI 算力中心调度」，未经核实）。T3、T4 连题面标题都没有稳定来源。
+        </p>
+        <p style="margin:0.5em 0 0">
+            本教程<strong>不编题</strong>。这一章做两件事：把证据链讲清楚（让你知道「查不到」不是没查），
+            再给两道同型训练题，把该练的能力练到。
+        </p>
+    </div>
+
+    <h2>证据链：查到了什么，没查到什么</h2>
+
+    <table>
+        <thead><tr><th>来源</th><th>能确认的内容</th><th>不能确认的内容</th></tr></thead>
+        <tbody>
+            <tr>
+                <td>17noi 题库</td>
+                <td>#1719、#1720 是第二届区域赛 T1、T2 的原题，含完整题面、样例、数据范围</td>
+                <td>没有 T3、T4、T5</td>
+            </tr>
+            <tr>
+                <td>赛事报名通知（西北农林科技大学转发）</td>
+                <td>5 题、8 小时、前 4 题建议 3 小时、第 5 题建议 5 小时、语言与评分方式</td>
+                <td>没有题目内容</td>
+            </tr>
+            <tr>
+                <td>赛后媒体报道</td>
+                <td>总决赛规模、赛道方向（AI 与游戏交互、大模型与 Vibe Coding、区块链与信息安全）</td>
+                <td>没有区域赛题目</td>
+            </tr>
+            <tr>
+                <td>选手博客 / 社区讨论</td>
+                <td>第二届区域赛的参赛体验、部分题型印象</td>
+                <td>没有可复现的题面、样例、数据范围</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p>
+        结论：T3、T4 只能按 <strong>C 级（未公开，仅有赛制）</strong>处理。
+        任何声称「第二届 T3 是 XXX」的题面，如果没有样例和数据范围，都不可信——包括本教程。
+    </p>
+
+    <div class="callout callout-warning">
+        <strong>为什么「编一道像的题」是有害的</strong>
+        <p style="margin:0.5em 0 0">
+            编出来的题会给你错误的难度预期和错误的题型分布。你练了「树上差分」，结果真题考的是「计算几何 + 扫描线」，
+            时间就白花了。缺题时正确的做法是<strong>练能力，不押题</strong>。
+        </p>
+    </div>
+
+    <h2>从已公开的两题，反推 T3/T4 可能考什么</h2>
+
+    <p>T1、T2 的定位很清晰：签到 + 基础 DP。按区域赛常见的梯度，T3、T4 大概率落在下面几类里：</p>
+
+    <table>
+        <thead><tr><th>位置</th><th>常见题型</th><th>对应能力</th></tr></thead>
+        <tbody>
+            <tr><td>T3</td><td>数据结构（线段树/树状数组/分块）+ 一个观察</td><td>把「模板 + 限制」拆成可维护的信息</td></tr>
+            <tr><td>T3 备选</td><td>树上问题（LCA、子树统计、启发式合并）</td><td>把树上操作转成区间/合并</td></tr>
+            <tr><td>T4</td><td>搜索 + 剪枝 / 折半搜索 / 状态压缩 DP</td><td>在指数级空间里做有效裁剪</td></tr>
+            <tr><td>T4 备选</td><td>贪心 + 证明 / 构造</td><td>先猜后证，或用对拍反推</td></tr>
+        </tbody>
+    </table>
+
+    <p>下面两道训练题就按这个分布设计。它们<strong>不是原题</strong>，是「同型训练」。</p>
+
+    <h2>训练题 A：区间赋值 + 区间最大子段和</h2>
+
+    <div class="problem">
+        <h3>题目描述（训练题，非 CACC 原题）</h3>
+        <div class="problem-meta">
+            <span class="src-badge src-c">C 级 · 本教程自编训练题</span>
+            <span class="tag">对应 T3 题型</span>
+        </div>
+
+        <p>
+            给定长度为 <em>n</em> 的序列 <em>a</em>，支持两种操作：
+        </p>
+        <ul>
+            <li><code>1 l r v</code>：把区间 <code>[l, r]</code> 的所有元素赋值为 <em>v</em>；</li>
+            <li><code>2 l r</code>：查询区间 <code>[l, r]</code> 的<strong>最大子段和</strong>（子段不能为空）。</li>
+        </ul>
+
+        <p><strong>数据范围：</strong>1 ≤ n, m ≤ 10<sup>5</sup>，−10<sup>9</sup> ≤ a<sub>i</sub>, v ≤ 10<sup>9</sup>。</p>
+
+        <h4>样例</h4>
+<pre><code class="language-plaintext">输入：
+5 3
+1 -2 3 -1 2
+
+2 1 5
+1 2 4 5
+2 1 5
+
+输出：
+4
+18</code></pre>
+
+        <p>第一次查询：子段 <code>[3,5]</code> 的和为 3 + (−1) + 2 = 4。赋值后序列为 <code>1 5 5 5 2</code>，整个区间和为 18，最大子段是 <code>[1,5]</code>，和为 18。</p>
+    </div>
+
+    <div class="callout callout-info">
+        <strong>造样例也要用程序验算</strong>
+        <p style="margin:0.5em 0 0">
+            这段样例的第一版把 1+5+5+5+2 手算成了 12。造题、写解析时手算错误非常常见，
+            任何写进题面的样例都应该先用一段暴力程序跑一遍。
+        </p>
+    </div>
+
+    <h3>线段树维护四个量</h3>
+
+    <p>每个节点维护：</p>
+
+    <table>
+        <thead><tr><th>字段</th><th>含义</th></tr></thead>
+        <tbody>
+            <tr><td><code>sum</code></td><td>区间和</td></tr>
+            <tr><td><code>pre</code></td><td>必须包含左端点的最大子段和</td></tr>
+            <tr><td><code>suf</code></td><td>必须包含右端点的最大子段和</td></tr>
+            <tr><td><code>best</code></td><td>区间内最大子段和（不能为空）</td></tr>
+        </tbody>
+    </table>
+
+    <div class="definition">
+        <h4>合并公式</h4>
+        <span class="formula">sum = L.sum + R.sum</span>
+        <span class="formula">pre = max(L.pre, L.sum + R.pre)</span>
+        <span class="formula">suf = max(R.suf, R.sum + L.suf)</span>
+        <span class="formula">best = max(L.best, R.best, L.suf + R.pre)</span>
+    </div>
+
+    <p>
+        <strong>区间赋值</strong>的懒标记处理是这题的关键：一整段都变成 <em>v</em> 后，
+        <code>sum = pre = suf = len × v</code>，而 <code>best = max(v, len × v)</code>——
+        当 <em>v</em> 为负数时，最优子段只取一个元素，不能取整段。
+    </p>
+
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+using ll = long long;
+
+const ll NEG = LLONG_MIN / 4;
+
+struct Node {
+    ll sum, pre, suf, best;
+};
+
+Node mergeNode(const Node&amp; L, const Node&amp; R) {
+    Node res;
+    res.sum  = L.sum + R.sum;
+    res.pre  = max(L.pre, L.sum + R.pre);
+    res.suf  = max(R.suf, R.sum + L.suf);
+    res.best = max({L.best, R.best, L.suf + R.pre});
+    return res;
+}
+
+struct SegTree {
+    int n;
+    vector&lt;Node&gt; t;
+    vector&lt;ll&gt; lazy;          // 是否有待下推的赋值
+    vector&lt;bool&gt; has;
+
+    SegTree(const vector&lt;ll&gt;&amp; a) {
+        n = (int)a.size() - 1;            // 1-indexed
+        t.assign(4 * n + 4, {0, 0, 0, 0});
+        lazy.assign(4 * n + 4, 0);
+        has.assign(4 * n + 4, false);
+        build(1, 1, n, a);
+    }
+
+    void apply(int p, int l, int r, ll v) {
+        int len = r - l + 1;
+        t[p].sum  = (ll)len * v;
+        t[p].pre  = t[p].sum;
+        t[p].suf  = t[p].sum;
+        t[p].best = max(v, t[p].sum);     // v 为负时只取一个元素
+        lazy[p] = v;
+        has[p] = true;
+    }
+
+    void push(int p, int l, int r) {
+        if (!has[p]) return;
+        int mid = (l + r) &gt;&gt; 1;
+        apply(p &lt;&lt; 1, l, mid, lazy[p]);
+        apply(p &lt;&lt; 1 | 1, mid + 1, r, lazy[p]);
+        has[p] = false;
+    }
+
+    void build(int p, int l, int r, const vector&lt;ll&gt;&amp; a) {
+        if (l == r) {
+            t[p] = {a[l], a[l], a[l], a[l]};
+            return;
+        }
+        int mid = (l + r) &gt;&gt; 1;
+        build(p &lt;&lt; 1, l, mid, a);
+        build(p &lt;&lt; 1 | 1, mid + 1, r, a);
+        t[p] = mergeNode(t[p &lt;&lt; 1], t[p &lt;&lt; 1 | 1]);
+    }
+
+    void assignRange(int p, int l, int r, int ql, int qr, ll v) {
+        if (ql &lt;= l &amp;&amp; r &lt;= qr) { apply(p, l, r, v); return; }
+        push(p, l, r);
+        int mid = (l + r) &gt;&gt; 1;
+        if (ql &lt;= mid) assignRange(p &lt;&lt; 1, l, mid, ql, qr, v);
+        if (qr &gt; mid)  assignRange(p &lt;&lt; 1 | 1, mid + 1, r, ql, qr, v);
+        t[p] = mergeNode(t[p &lt;&lt; 1], t[p &lt;&lt; 1 | 1]);
+    }
+
+    Node query(int p, int l, int r, int ql, int qr) {
+        if (ql &lt;= l &amp;&amp; r &lt;= qr) return t[p];
+        push(p, l, r);
+        int mid = (l + r) &gt;&gt; 1;
+        if (qr &lt;= mid) return query(p &lt;&lt; 1, l, mid, ql, qr);
+        if (ql &gt; mid)  return query(p &lt;&lt; 1 | 1, mid + 1, r, ql, qr);
+        Node L = query(p &lt;&lt; 1, l, mid, ql, qr);
+        Node R = query(p &lt;&lt; 1 | 1, mid + 1, r, ql, qr);
+        return mergeNode(L, R);
+    }
+};
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    int n, m;
+    cin &gt;&gt; n &gt;&gt; m;
+    vector&lt;ll&gt; a(n + 1);
+    for (int i = 1; i &lt;= n; ++i) cin &gt;&gt; a[i];
+
+    SegTree seg(a);
+    while (m--) {
+        int op; cin &gt;&gt; op;
+        if (op == 1) {
+            int l, r; ll v;
+            cin &gt;&gt; l &gt;&gt; r &gt;&gt; v;
+            seg.assignRange(1, 1, n, l, r, v);
+        } else {
+            int l, r;
+            cin &gt;&gt; l &gt;&gt; r;
+            Node res = seg.query(1, 1, n, l, r);
+            cout &lt;&lt; res.best &lt;&lt; '\n';
+        }
+    }
+    return 0;
+}</code></pre>
+
+    <p>
+        <strong>样例的正确输出是 <code>4</code> 和 <code>18</code></strong>（第一行来自 <code>3 + (−1) + 2</code>，
+        第二行来自赋值后的 <code>1 + 5 + 5 + 5 + 2</code>）。
+    </p>
+
+    <div class="callout callout-tip">
+        <strong>这题和 T3 的关系</strong>
+        <p style="margin:0.5em 0 0">
+            共同的能力是「把一种不常规的区间操作，翻译成节点上可合并的几个量」。
+            第一题的「按奇偶坍缩」和这道题的「赋值后 pre/suf/best 同时等于 sum」，本质是同一类思考：
+            先问「一个整段被打上标记后，它的统计信息长什么样」。
+        </p>
+    </div>
+
+    <h2>训练题 B：折半搜索</h2>
+
+    <div class="problem">
+        <h3>题目描述（训练题，非 CACC 原题）</h3>
+        <div class="problem-meta">
+            <span class="src-badge src-c">C 级 · 本教程自编训练题</span>
+            <span class="tag">对应 T4 题型</span>
+        </div>
+
+        <p>
+            给定 <em>n</em> 个正整数和一个上限 <em>S</em>，从这 <em>n</em> 个数中选出一个子集，
+            使子集和不超过 <em>S</em> 且尽可能大。输出这个最大子集和。
+        </p>
+
+        <p><strong>数据范围：</strong>1 ≤ n ≤ 40，1 ≤ a<sub>i</sub> ≤ 10<sup>9</sup>，1 ≤ S ≤ 10<sup>15</sup>。</p>
+
+        <h4>样例</h4>
+<pre><code class="language-plaintext">输入：
+5 10
+3 8 6 4 2
+
+输出：
+10</code></pre>
+
+        <p>3 + 4 + 2 = 9，但 8 + 2 = 10 更优；也可以选 6 + 4 = 10。</p>
+    </div>
+
+    <h3>为什么不能直接枚举</h3>
+
+    <p>
+        2<sup>40</sup> ≈ 1.1×10<sup>12</sup>，不可能枚举。但 2<sup>20</sup> ≈ 1.05×10<sup>6</sup>，是可以的。
+        折半搜索（meet in the middle）就是把 n 个数分成两半，各自枚举所有子集和，再合并。
+    </p>
+
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>枚举左半</h4>
+                <p>前 ⌈n/2⌉ 个数，2<sup>20</sup> 种子集和，存进数组 L。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>枚举右半并排序</h4>
+                <p>后 ⌊n/2⌋ 个数，得到数组 R，排序。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+                <h4>合并</h4>
+                <p>对每个 L 中的值 x，在 R 里二分找 ≤ S − x 的最大值，更新答案。复杂度 O(2<sup>n/2</sup> log 2<sup>n/2</sup>)。</p>
+            </div>
+        </div>
+    </div>
+
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+using ll = long long;
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    int n;
+    ll S;
+    cin &gt;&gt; n &gt;&gt; S;
+    vector&lt;ll&gt; a(n);
+    for (auto&amp; x : a) cin &gt;&gt; x;
+
+    int h = n / 2;                    // 前 h 个为左半
+    vector&lt;ll&gt; L, R;
+
+    for (int mask = 0; mask &lt; (1 &lt;&lt; h); ++mask) {
+        ll s = 0;
+        for (int i = 0; i &lt; h; ++i)
+            if (mask &gt;&gt; i &amp; 1) s += a[i];
+        if (s &lt;= S) L.push_back(s);
+    }
+
+    int h2 = n - h;
+    for (int mask = 0; mask &lt; (1 &lt;&lt; h2); ++mask) {
+        ll s = 0;
+        for (int i = 0; i &lt; h2; ++i)
+            if (mask &gt;&gt; i &amp; 1) s += a[h + i];
+        if (s &lt;= S) R.push_back(s);
+    }
+
+    sort(R.begin(), R.end());
+
+    ll ans = 0;
+    for (ll x : L) {
+        auto it = upper_bound(R.begin(), R.end(), S - x);
+        if (it != R.begin()) {
+            --it;
+            ans = max(ans, x + *it);
+        }
+    }
+
+    cout &lt;&lt; ans &lt;&lt; '\n';
+    return 0;
+}</code></pre>
+
+    <h3>常数优化</h3>
+
+    <ul>
+        <li>枚举子集和时用「lowbit 递推」：<code>sum[mask] = sum[mask ^ lowbit] + a[idx]</code>，把内层 O(n) 降到 O(1)，总复杂度从 O(n2<sup>n/2</sup>) 降到 O(2<sup>n/2</sup>)。</li>
+        <li>排序后去重（<code>unique</code>），减少二分范围。</li>
+        <li>把较大的数放在右半，右半的子集和更分散，二分的剪枝效果更好（可选技巧）。</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <strong>折半搜索适用信号</strong>
+        <p style="margin:0.5em 0 0">
+            「n ≤ 40」「每个元素选或不选」「求满足某约束的最优子集」——这三个条件同时出现，先想折半搜索。
+            n ≤ 20 时直接状压枚举，n ≤ 40 时折半，n 更大时就要想 DP 或贪心。
+        </p>
+    </div>
+
+    <h2>没有原题时，怎么安排训练</h2>
+
+    <ol>
+        <li><strong>按题型分布练，不按题号练</strong>：T1/T2 练速度，T3 练「模板 + 观察」，T4 练搜索剪枝，T5 练工程。</li>
+        <li><strong>限时</strong>：T3 给 60 分钟，T4 给 50 分钟，超时就停，看解析。赛场上你不会有一整晚。</li>
+        <li><strong>对拍</strong>：每道题都写暴力，随机 1000 组。这比多刷一道题有用。</li>
+        <li><strong>记录失败原因</strong>：是没想到观察、写挂边界、还是读错题？三类问题解法完全不同。</li>
+    </ol>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>第二届区域赛 T3、T4 的题面没有公开版本，本教程按 C 级处理，不编题。</li>
+        <li>缺题时练能力：数据结构合并信息 + 搜索剪枝/折半搜索。</li>
+        <li>区间赋值维护最大子段和的关键：负值时 <code>best</code> 只能取单元素。</li>
+        <li>折半搜索把 2<sup>40</sup> 压到 2<sup>20</sup>，是 n ≤ 40 子集问题的标准解法。</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <strong>下一章</strong>
+        <p style="margin:0.5em 0 0">
+            进入第二届总决赛。算法日 5 题（A–E）有接近逐字的选手记录，是全教程信息密度最高的一章。
+        </p>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav bottom">
+        <a href="08-2025-t2-forest.html">← 上一章：T2 魔法森林</a>
+        <a href="10-2025-final-algo.html">下一章：总决赛算法日 A–E →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

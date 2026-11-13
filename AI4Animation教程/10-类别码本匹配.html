@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 类别码本匹配 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="09-DeepPhase周期自编码器.html">← 上一章：DeepPhase</a>
+    <a href="11-Unity框架架构与代码走读.html">下一章：Unity 框架 →</a>
+</nav>
+
+<main>
+    <h1>10　类别码本匹配</h1>
+
+    <div class="paper-meta">
+        <dl>
+            <dt>论文</dt><dd>Categorical Codebook Matching for Embodied Character Controllers</dd>
+            <dt>作者</dt><dd>Sebastian Starke, Paul Starke, Nils Bore, Taku Komura</dd>
+            <dt>发表</dt><dd>ACM Transactions on Graphics 43(4), Article 113, SIGGRAPH 2024</dd>
+            <dt>仓库位置</dt><dd>AI4Animation/SIGGRAPH_2024</dd>
+        </dl>
+    </div>
+
+    <h2>10.1 问题背景：稀疏的三点追踪</h2>
+    <p>VR/AR 中的具身化身通常只能获得<strong>极稀疏的追踪信号</strong>——论文使用头、手、腰三个追踪点。仅凭这几个点
+    要实时生成协调的全身运动，且不同用户习惯、不同姿态下都要稳定，这与此前"密集轨迹+完整上一帧姿态"的输入假设完全不同。
+    论文同时指出，稀疏输入下的一对多歧义比以往更严重。</p>
+
+    <h2>10.2 核心思想：从回归姿态到预测类别概率</h2>
+    <div class="definition">
+        <h4>方法范式转换</h4>
+        <p>不再让网络直接回归连续姿态，而是建立<strong>两个离散码本（codebook）</strong>：输入码本把稀疏追踪信号编码为
+        类别概率，输出码本把全身运动编码为类别概率；训练目标是让这两个概率分布在共享的类别空间中对齐。这从机制上避免了
+        连续回归的均值化问题（呼应第 2 章的歧义分析）。</p>
+    </div>
+
+    <pre class="mermaid">
+flowchart TD
+        X["稀疏追踪输入<br/>头/手/腰三点"] --> EncX["输入编码器"]
+        EncX --> QX["输入码本概率 qₓ"]
+        Y["全身运动<br/>（训练时可得）"] --> EncY["输出编码器"]
+        EncY --> QY["输出码本概率 qᵧ"]
+        QX --> Match["匹配损失<br/>分布对齐"]
+        QY --> Match
+        QX --> Dec["输出解码器"]
+        Dec --> Out["全身运动预测"]
+        style Match fill:#fff2dd,stroke:#f08c1a
+        style Dec fill:#eaf7ed,stroke:#38a152
+    </pre>
+    <p class="mermaid-caption">图 10-1　双码本与匹配损失</p>
+
+    <h2>10.3 码本与量化机制</h2>
+    <p>码本本质上是一组可学习的类别嵌入向量，思想接近 VQ-VAE。为同时满足"训练时可微、推理时离散"，论文结合两种机制：</p>
+    <table>
+        <thead><tr><th>机制</th><th>作用阶段</th><th>特点</th></tr></thead>
+        <tbody>
+            <tr><td>向量量化 VQ</td><td>确定码本嵌入</td><td>最近邻离散选择，配合直通估计器（straight-through）传递梯度</td></tr>
+            <tr><td>Gumbel-Softmax</td><td>训练采样</td><td>对类别分布做可微采样，温度退火后逐渐逼近离散 one-hot</td></tr>
+        </tbody>
+    </table>
+
+    <h2>10.4 匹配损失</h2>
+    <p>训练时输入侧与输出侧各自产生类别概率分布，损失函数衡量两个分布的差异，使稀疏输入对应的类别分布逼近真实全身运动
+    对应的类别分布：</p>
+    <div class="formula">
+        L<sub>match</sub> = D( q<sub>x</sub> ‖ q<sub>y</sub> )
+        <span class="formula-label">D 为分布差异度量，整体仍含重建损失以保证姿态可解码</span>
+    </div>
+    <p>推理时只有稀疏输入，网络给出输入码本上的概率分布，再通过输出解码器把类别映射为全身姿态。</p>
+
+    <h2>10.5 采样 K 个码与多样性</h2>
+    <p>由于输出是概率分布而非单点，推理时可以<strong>采样 K 个类别码</strong>再解码，得到同一追踪输入下的多个候选全身运动。
+    这与第 7 章"潜码加噪声"的目的一致，但概率空间是显式离散的，候选之间的语义差异更可控。</p>
+
+    <h2>10.6 三点追踪与混合控制</h2>
+    <p>追踪特征由 <code>TrackingModule</code> 提取，三个追踪点分别对应头、手、腰。系统还支持<strong>混合控制模式</strong>：
+    离散码本负责选择动作类别，连续控制信号负责微调细节，两者在同一管线中组合，因此既能复用数据中的典型动作，又能响应用户
+    连续的姿态变化。</p>
+
+    <pre class="mermaid">
+flowchart LR
+        Track["三点追踪<br/>离散语义"] --> Mode["混合控制"]
+        Cont["连续控制信号<br/>微调"] --> Mode
+        Mode --> Net["码本网络"]
+        Net --> Pose["全身姿态"]
+        style Mode fill:#e9f4ff,stroke:#007acc
+    </pre>
+    <p class="mermaid-caption">图 10-2　离散+连续混合控制</p>
+
+    <h2>10.7 与运动匹配的关系</h2>
+    <p>这篇工作可以看作运动匹配思想的"学习化"版本：运动匹配在整个数据库上做最近邻检索，而码本匹配把数据库压缩成
+    有限类别码本，用网络预测类别概率替代显式检索。它保留了"从已知动作中选择"的可靠性，又把内存与检索成本降到网络级别。</p>
+
+    <h2>10.8 局限</h2>
+    <ul>
+        <li>码本类别数固定，数据中未被充分覆盖的动作会被量化到邻近类别，细节可能丢失</li>
+        <li>输出质量依赖训练数据的全身运动覆盖，三点之外的关节本质上是"猜测"出来的</li>
+        <li>Gumbel-Softmax 温度调度与码本大小需要调参，训练流程比普通回归网络复杂</li>
+    </ul>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>范式验证</h4>
+                    <p>回到第 2 章你对"概率化如何避免均值回归"的预判，结合匹配损失说明它在机制上如何成立。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>训练机制</h4>
+                    <p>为什么需要 Gumbel-Softmax 而不直接用 hard one-hot？温度退火在训练中扮演什么角色？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>方案设计</h4>
+                    <p>若追踪点从 3 个增加到 6 个（如加入双脚），码本与匹配损失的设计需要做哪些调整？给出你的判断。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>类别码本匹配把连续姿态预测改写为离散类别概率预测，双码本通过匹配损失对齐</li>
+        <li>VQ 配合直通估计器、Gumbel-Softmax 实现可微训练与离散推理</li>
+        <li>支持采样 K 码产生候选，三点追踪配合离散+连续混合控制</li>
+        <li>本质是学习化的运动匹配，保留选动作的可靠性、降低数据库成本；代价是量化误差与调参复杂度</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://paulxstarke.com/content/projects/CodebookMatching/Paper.pdf">类别码本匹配论文原文</a></li>
+            <li>Van Den Oord et al., <em>Neural Discrete Representation Learning</em>（VQ-VAE），2017</li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="09-DeepPhase周期自编码器.html">← 上一章：DeepPhase</a>
+        <a href="11-Unity框架架构与代码走读.html">下一章：Unity 框架架构 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

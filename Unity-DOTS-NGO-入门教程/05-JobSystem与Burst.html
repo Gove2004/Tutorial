@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 Job System 与 Burst - Unity DOTS 与 NGO 入门教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-编写第一个System.html">← 上一章</a>
+        <a href="06-数据组织与访问进阶.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>05　Job System 与 Burst：让数据跑满多核</h1>
+
+        <p>第四章的 SystemAPI.Query 仍然在主线程串行执行。这一章把数据搬进 Worker 线程，并交给 Burst 编译成原生机器码。这是 DOTS 性能的两个放大器：Job System 解决“用满多核”，Burst 解决“每个核都算得更快”。</p>
+
+        <h2>5.1 Job 的基本形态</h2>
+
+        <p>Job 是一个实现特定接口的 struct，包含<strong>需要处理的数据字段</strong>和一个 <code>Execute</code> 方法。它不是对象、不能捕获外部变量——所有输入都通过字段显式传入，这是它能被安全复制到其他线程的前提。</p>
+
+        <p>最基础的 <code>IJob</code> 只有一个 Execute，适合做一件独立的事：</p>
+
+<pre><code class="language-csharp">using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
+
+[BurstCompile]
+public struct SumJob : IJob
+{
+    public NativeArray&lt;float&gt; Values;
+    public NativeArray&lt;float&gt; Result;
+
+    public void Execute()
+    {
+        float sum = 0f;
+        for (int i = 0; i &lt; Values.Length; i++)
+            sum += Values[i];
+        Result[0] = sum;
+    }
+}
+</code></pre>
+
+        <h2>5.2 IJobEntity：按实体并行的主力</h2>
+
+        <p>游戏逻辑里最常见的需求是“对查询出的每个实体执行同样操作”，这正是 <code>IJobEntity</code> 的用途。它把第四章的查询循环封装成可调度的 Job：</p>
+
+<pre><code class="language-csharp">using Unity.Burst;
+using Unity.Entities;
+using Unity.Transforms;
+
+[BurstCompile]
+public partial struct RotationJob : IJobEntity
+{
+    public float DeltaTime;
+
+    // in = 只读，ref = 读写，由源生成器自动匹配拥有这些组件的实体
+    void Execute(ref LocalTransform transform, in RotationSpeed speed)
+    {
+        transform = transform.RotateY(speed.RadiansPerSecond * DeltaTime);
+    }
+}
+
+public partial struct RotationJobSystem : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        var job = new RotationJob
+        {
+            DeltaTime = SystemAPI.Time.DeltaTime
+        };
+
+        // 调度到多个 Worker 线程，按 Chunk 并行
+        state.Dependency = job.ScheduleParallel(state.Dependency);
+    }
+}
+</code></pre>
+
+        <p>几个关键约定：</p>
+        <ul>
+            <li>IJobEntity 必须是 <code>partial struct</code>，同样依赖源生成器。</li>
+            <li><code>Execute</code> 的参数用 <code>in</code>（只读）和 <code>ref</code>（读写）标注，语义和 RefRO/RefRW 一致。</li>
+            <li>需要过滤但不取值的组件，在 struct 上用特性标注：<code>[WithAll(typeof(AliveTag))]</code>、<code>[WithNone(typeof(StunnedTag))]</code>。</li>
+            <li>Job 不能捕获变量，DeltaTime 这类外部值通过字段传入。</li>
+        </ul>
+
+        <h2>5.3 三种调度方式</h2>
+
+        <table>
+            <thead>
+                <tr><th>方式</th><th>执行位置</th><th>用途</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>Schedule</code></td><td>单个 Worker 线程，异步</td><td>一般的后台任务，返回 JobHandle</td></tr>
+                <tr><td><code>ScheduleParallel</code></td><td>多个 Worker 线程，按 Chunk 并行</td><td>实体批量处理的默认选择</td></tr>
+                <tr><td><code>Run</code></td><td>主线程，立即同步执行</td><td>调试、需要立即拿结果；仍享受 Burst 编译</td></tr>
+            </tbody>
+        </table>
+
+        <div class="mermaid-wrapper">
+            <pre class="mermaid">
+flowchart LR
+    S["System OnUpdate"] -->|"ScheduleParallel"| W1["Worker 1<br/>Chunk A"]
+    S --> W2["Worker 2<br/>Chunk B"]
+    S --> W3["Worker 3<br/>Chunk C"]
+    W1 & W2 & W3 --> D["JobHandle 依赖汇合"]
+            </pre>
+        </div>
+
+        <h2>5.4 JobHandle 与依赖链</h2>
+
+        <p>调度 Job 是异步的，返回一个 <code>JobHandle</code> 作为这次工作的凭据。引擎用它做两件事：管理依赖顺序、决定何时等待完成。</p>
+
+        <p>在 ISystem 里，<code>state.Dependency</code> 是当前系统的依赖句柄。你把它传给 Schedule，再把返回的句柄赋回去，引擎就自动串起了依赖链：</p>
+
+<pre><code class="language-csharp">// 前一个 Job 的句柄作为输入，保证读写同一数据的 Job 不重叠
+state.Dependency = job.ScheduleParallel(state.Dependency);
+</code></pre>
+
+        <p>当主线程需要用到 Job 正在写入的数据（比如要做结构变更），调用 handle 的 <code>Complete()</code> 阻塞等待，引擎会在安全点自动完成大部分等待，你通常不需要手动 Complete，但要知道这个机制存在。依赖关系由安全系统根据你访问的 NativeContainer 和组件自动推导，写错访问意图会直接报冲突错误，而不是产生静默的数据竞争。</p>
+
+        <h2>5.5 Burst 编译器：不只是“变快”</h2>
+
+        <p>Burst 是基于 LLVM 的编译器，专门处理 DOTS 中的高性能代码。它做的事包括：</p>
+        <ul>
+            <li>把 IL 翻译成目标机器的原生码，消除托管运行时开销；</li>
+            <li><strong>自动向量化</strong>：识别可并行的数值循环，生成 SIMD 指令（一条指令同时处理多个 float）；</li>
+            <li>针对 <code>Unity.Mathematics</code> 的 math 类型做内联和代数优化；</li>
+            <li>在编译期对非法用法直接报错，把多线程和原生环境的危险操作挡在运行前。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>数学运算一律用 Unity.Mathematics</strong>：<code>float3</code>、<code>quaternion</code>、<code>math.mul</code> 等。它们是 struct、有明确的精度契约，Burst 能深度优化。不要在 Burst 代码里用 <code>Vector3</code>、<code>Quaternion</code> 等 UnityEngine 数学类型。
+        </div>
+
+        <h3>精度与性能的开关</h3>
+        <p><code>[BurstCompile]</code> 可加在 Job、System 的方法或普通方法上。需要调整浮点行为时可设置精度模式（如 <code>FloatPrecision</code>、<code>FloatMode</code>），默认配置对绝大多数游戏逻辑已经足够，不要为了“可能更快”随手放宽精度，先测量再决定。</p>
+
+        <h2>5.6 Burst 不允许什么</h2>
+
+        <p>这是新手报错最集中的地方。Burst 运行在原生、无托管运行时的环境，以下写法会被拒绝或无法正常工作：</p>
+
+        <table>
+            <thead>
+                <tr><th>禁止/受限用法</th><th>替代方案</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>访问 class 对象、string、托管数组</td><td>struct、FixedString、NativeArray</td></tr>
+                <tr><td>调用未被 Burst 编译的托管方法、虚方法</td><td>把逻辑放进 Burst 方法；必要时用函数指针</td></tr>
+                <tr><td>在 Job 里直接做结构变更</td><td>EntityCommandBuffer.ParallelWriter（第七章）</td></tr>
+                <tr><td>随意读写静态可变状态</td><td>System 字段、NativeContainer、SharedStatic（进阶）</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>读报错的方式</strong>：Burst 的错误信息通常会指出具体的非法构造和触发位置。不要看到一大段编译输出就慌，先找到指向你代码文件名和行号的那一行，它一般会明确说明“这里用了托管对象/不支持的调用”。
+        </div>
+
+        <h2>5.7 NativeContainer：Job 之间的数据通道</h2>
+
+        <p>Job 里用到的容器来自 <code>Unity.Collections</code>：<code>NativeArray</code>、<code>NativeList</code>、<code>NativeHashMap</code> 等。它们分配在原生内存、不经过 GC，并带有安全检查：</p>
+        <ul>
+            <li>创建时指定分配器：<code>Allocator.Temp</code>（帧内，最快）、<code>Allocator.TempJob</code>（跨帧、Job 用）、<code>Allocator.Persistent</code>（长期）；</li>
+            <li>用完必须 <code>Dispose()</code>，通常在 System 的 OnDestroy 或 Job 完成后；</li>
+            <li>安全系统会跟踪容器的读写归属，两个 Job 同时写同一容器会被直接拦截。</li>
+        </ul>
+
+<pre><code class="language-csharp">// 典型的生命周期：OnCreate 分配，OnDestroy 释放
+[BurstCompile]
+public void OnCreate(ref SystemState state)
+{
+    m_Buffer = new NativeList&lt;float&gt;(64, Allocator.Persistent);
+}
+
+[BurstCompile]
+public void OnDestroy(ref SystemState state)
+{
+    if (m_Buffer.IsCreated) m_Buffer.Dispose();
+}
+</code></pre>
+
+        <h2>5.8 一个完整的并行示例：带标签的批量推进</h2>
+
+<pre><code class="language-csharp">using Unity.Burst;
+using Unity.Entities;
+using Unity.Mathematics;
+using Unity.Transforms;
+
+[WithAll(typeof(AliveTag))]
+[WithNone(typeof(StunnedTag))]
+[BurstCompile]
+public partial struct MoveForwardJob : IJobEntity
+{
+    public float DeltaTime;
+
+    void Execute(ref LocalTransform transform, in MovementSpeed speed)
+    {
+        transform.Position += transform.Forward() * speed.Value * DeltaTime;
+    }
+}
+
+public partial struct MoveForwardSystem : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        state.Dependency = new MoveForwardJob
+        {
+            DeltaTime = SystemAPI.Time.DeltaTime
+        }.ScheduleParallel(state.Dependency);
+    }
+}
+</code></pre>
+
+        <div class="exercise">
+            <h3>思考与练习</h3>
+            <ol>
+                <li>把第四章的 EnemyMoveSystem 从主线程 Query 改写成 IJobEntity + ScheduleParallel，注意跨实体访问目标位置需要改用 ComponentLookup（第六章会讲，先尝试）。</li>
+                <li>分别用 Run 和 ScheduleParallel 调度同一个 Job，在 Profiler 里观察主线程耗时和 Worker 线程活动。</li>
+                <li>故意在 Burst Job 里访问一个 string 字段，记录编译器给出的错误信息，定位它指向的代码行。</li>
+                <li>解释为什么 Job 不能用 Lambda 捕获外部变量，字段传参解决了什么安全问题。</li>
+            </ol>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>Job 是携带数据字段与 Execute 的 struct，IJobEntity 是按实体批量处理的主力，配合 ScheduleParallel 按 Chunk 并行。</li>
+                <li>JobHandle 与 state.Dependency 自动管理依赖链，安全系统把读写冲突挡在运行前。</li>
+                <li>Burst 把 IL 编译为原生 SIMD 机器码，配合 Unity.Mathematics 做深度优化；托管对象、虚调用等在 Burst 中被禁止。</li>
+                <li>NativeContainer 是原生内存数据通道，按分配器创建、必须手动 Dispose。</li>
+                <li>读 Burst 报错先找指向你代码行号的那一条。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav">
+            <a href="04-编写第一个System.html">← 上一章：编写第一个 System</a>
+            <a href="06-数据组织与访问进阶.html">下一章：数据组织与访问进阶 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

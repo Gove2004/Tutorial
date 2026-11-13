@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>13 音频系统 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="12-HUD菜单与界面系统.html">← 上一章</a>
+        <a href="14-存档与数据持久化.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>13 音频系统</h1>
+        <p>Rain World 有两套音频设施：简单的静态 FSoundManager，以及游戏实际使用的、作为进程运行的 MenuMicrophone。后者配合数据驱动的 SoundLoader，支持声音变体、随机音高音量、池化复用与异步加载。本章按从简到繁的顺序讲清它们。</p>
+
+        <h2>13.1 两套系统的分工</h2>
+<table>
+    <thead><tr><th>系统</th><th>形态</th><th>用途</th></tr></thead>
+    <tbody>
+        <tr><td>FSoundManager</td><td>静态类，两个 AudioSource</td><td>早期/简单音效与背景音乐</td></tr>
+        <tr><td>MenuMicrophone</td><td>MainLoopProcess，管理声音对象</td><td>游戏内主力音频、环境音、位置音</td></tr>
+    </tbody>
+</table>
+
+        <h2>13.2 FSoundManager：静态双源</h2>
+        <p>它在一个 GameObject 上挂音效源、音乐源和 AudioListener，音效以字典缓存、懒加载：</p>
+<pre><code class="language-csharp">private static AudioSource _soundSource;
+private static AudioSource _musicSource;
+private static Dictionary<string, AudioClip> _soundClips = new Dictionary<string, AudioClip>();
+
+public static void PlaySound(string resourceName, float volume)
+{
+    string text = resourcePrefix + resourceName;
+    if (!_soundClips.ContainsKey(text))
+    {
+        AudioClip clip = Resources.Load(text) as AudioClip;
+        if (clip == null) return;       // 资源缺失时安全返回，不抛异常
+        _soundClips[text] = clip;
+    }
+    _soundSource.PlayOneShot(_soundClips[text], volume);  // 可叠加播放
+}</code></pre>
+        <p>音乐用独立源循环播放，切换时卸载旧剪辑；同一首歌默认不重复启动。它还提供完整的卸载方法（UnloadSound、UnloadMusic、UnloadAllSounds），避免音效资源长期占用内存。</p>
+
+        <h2>13.3 SoundID：可扩展的声音标识</h2>
+        <p>所有声音以 SoundID 标识，它是 ExtEnum，按生物与动作命名，数量上千：</p>
+<pre><code class="language-csharp">public class SoundID : ExtEnum<SoundID>
+{
+    public static readonly SoundID None = new SoundID("None", register: true);
+    public static readonly SoundID Slugcat_Step_A = new SoundID("Slugcat_Step_A", register: true);
+    public static readonly SoundID Slugcat_Normal_Jump = new SoundID("Slugcat_Normal_Jump", register: true);
+    public static readonly SoundID Slugcat_Wall_Jump = new SoundID("Slugcat_Wall_Jump", register: true);
+    // ... 数千个
+}</code></pre>
+        <p>用 ExtEnum 而非普通枚举，是为了让模组可以注册新的 SoundID 而不修改源码，这与 ExtEnum 在整个工程中的作用一致。</p>
+
+        <h2>13.4 MenuMicrophone：进程化的音频管理器</h2>
+        <p>尽管名字带 Menu，它其实是游戏的主音频进程，持有一组声音对象并在 GrafUpdate 中管理生命周期：</p>
+<pre><code class="language-csharp">public class MenuMicrophone : MainLoopProcess
+{
+    public SoundLoader soundLoader;
+    public List<MenuSoundObject> soundObjects;
+
+    public override void GrafUpdate(float timeStacker)
+    {
+        for (int i = soundObjects.Count - 1; i >= 0; i--)
+        {
+            if (soundObjects[i].slatedForDeletion) { /* 销毁移除 */ }
+            else if (soundObjects[i].Done)
+            {
+                if (soundObjects[i].PlayAgain) soundObjects[i].Play(); // 循环
+                else { /* 销毁移除 */ }
+            }
+            else soundObjects[i].Update(timeStacker, 1f);
+        }
+    }
+}</code></pre>
+        <p>每个声音是独立的 MenuSoundObject，拥有自己的 AudioSource（从 AudioSourcePool 池化取用），并支持从 AssetBundle 异步加载，加载完成后再自动播放。</p>
+
+        <h2>13.5 声音对象与循环音</h2>
+        <p>MenuSoundObject 处理单次音效，MenuSoundLoop 则处理需要持续的环境循环，并带平滑淡入淡出：</p>
+<pre><code class="language-csharp">public class MenuSoundLoop : MenuSoundObject
+{
+    public float loopVolume;
+    private float fade;
+    public bool isBkgLoop;
+
+    public override void Update(float timeStacker, float timeSpeed)
+    {
+        SetVolume = fade * loopVolume;
+        if (mic.manager.currentMainLoop is Menu.Menu)
+            fade = Mathf.Min(1f, fade + 0.025f);   // 进入菜单：淡入
+        else
+        {
+            fade = Mathf.Max(0f, fade - 0.025f);   // 进入游戏：淡出
+            if (fade == 0f) Destroy();
+        }
+    }
+}</code></pre>
+        <p>这让菜单与游戏之间的环境音无缝过渡，而不是生硬地开关。</p>
+
+        <h2>13.6 SoundLoader：数据驱动与限流</h2>
+        <p>声音的具体定义由 SoundLoader 从配置解析，包含剪辑变体、随机音量/音高范围与音量总线：</p>
+<pre><code class="language-csharp">public struct SoundPlayInstruction
+{
+    public int audioClip;
+    public float minVol; public float maxVol;
+    public float minPitch; public float maxPitch;
+    public float ignoreEffects;
+}
+
+public void PlaySound(SoundID soundId, float pan, float vol, float pitch)
+{
+    if (!soundLoader.ShouldSoundPlay(soundId)) return; // 限流：同帧过多重复则丢弃
+    SoundLoader.SoundData data = GetSoundData(soundId, -1);
+    if (SoundClipReady(data))
+        soundObjects.Add(new MenuSoundObject(this, data, false, pan, vol, pitch, false));
+}</code></pre>
+        <p>几个关键能力：</p>
+        <ul>
+            <li><strong>多变体</strong>：同一 SoundID 可挂多个剪辑（ClipLoadData.soundVariations），播放时随机选，避免重复音单调。</li>
+            <li><strong>随机音量/音高</strong>：用 min/max 区间随机化，听感更自然。</li>
+            <li><strong>音量总线</strong>：VolumeGroup 把一组声音归到同一总线统一调音量。</li>
+            <li><strong>限流</strong>：ShouldSoundPlay 防止同一声音在一帧内被大量触发导致爆音，TriggerSamples 控制随机变体采样。</li>
+        </ul>
+
+        <h2>13.7 声像与位置音</h2>
+        <p>PlaySound 接收 pan（声像）参数，游戏根据声源相对屏幕/相机的位置设置左右声道平衡，制造方位感。环境循环音（雨声、机械嗡鸣）以 MenuSoundLoop 常驻，进入/离开区域时淡入淡出。整套机制不依赖 Unity 的 3D 音频组件，而是用 2D 声像自行表达方位。</p>
+
+        <h2>13.8 完整播放流程</h2>
+<pre class="mermaid">
+flowchart TD
+    A["业务代码 PlaySound(SoundID)"] --> B{"SoundLoader.ShouldSoundPlay?"}
+    B -->|否| X["限流丢弃"]
+    B -->|是| C["选变体，随机音量/音高"]
+    C --> D["MenuSoundObject 从池取 AudioSource"]
+    D --> E["AssetBundle 异步加载(如未缓存)"]
+    E --> F["按 pan 播放"]
+    F --> G["GrafUpdate 跟踪：完成销毁/循环重播"]
+    G --> H["AudioSource 归还对象池"]
+</pre>
+
+        <h2>13.9 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：每帧无条件播放同一音效</summary>
+            <div class="details-content"><p>不经 ShouldSoundPlay 限流，密集事件会让同一声音在一帧内叠爆。应交给 SoundLoader 限流，或自行加冷却。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：不归还 AudioSource 导致源耗尽</summary>
+            <div class="details-content"><p>声音结束后必须让对象销毁并把 AudioSource 还池，否则可用源越来越少，后续声音无法播放。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：假设剪辑已加载就直接播放</summary>
+            <div class="details-content"><p>剪辑可能在 AssetBundle 中尚未加载，需用异步加载并在完成后自动播放，直接取空剪辑会静默失败。</p></div>
+        </details>
+
+        <h2>13.10 练习与思考</h2>
+        <ol>
+            <li>结合 MenuSoundLoop 的 fade 逻辑，解释菜单与游戏切换时环境音如何实现平滑过渡，若直接 Stop 会有什么听感问题。</li>
+            <li>说明 SoundID 用 ExtEnum 而非普通枚举，对模组新增自定义声音有什么决定性好处。</li>
+            <li>思考：游戏为什么用 2D 声像（pan）而不是 Unity 的 3D 定位音频？这在 2D 横版场景下有什么取舍？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>FSoundManager 提供静态双源的简单音效与音乐，带缓存与卸载；MenuMicrophone 是进程化的主力音频系统。</li>
+            <li>SoundID 以 ExtEnum 标识声音以便模组扩展，声音对象池化 AudioSource 并支持异步加载。</li>
+            <li>SoundLoader 数据驱动变体、随机音量/音高、音量总线与限流，循环音用淡入淡出平滑过渡，方位感用 2D 声像表达。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="12-HUD菜单与界面系统.html">← 上一章：HUD、菜单与界面系统</a>
+            <a href="14-存档与数据持久化.html">下一章：存档与数据持久化 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

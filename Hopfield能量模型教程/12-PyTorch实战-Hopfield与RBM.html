@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>12 PyTorch 实战：Hopfield 与 RBM - Hopfield 与能量生成模型教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-math.css">
+    <script>
+        MathJax = {
+            tex: { inlineMath: [['$','$'],['\\(','\\)']], displayMath: [['$$','$$'],['\\[','\\]']] },
+            svg: { fontCache: 'global' }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="11-能量模型的当代版图.html">← 上一章</a>
+        <a href="13-结语-知识图谱与深入路径.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>12 ｜ PyTorch 实战：从零实现 Hopfield 网络与 RBM</h1>
+        <p>本章把前十一章的理论落成可运行代码。实验分两组：先用离散 Hopfield 复现第 5 章的容量相变，再用 RBM 在 MNIST 上完成 CD-k 训练、去噪与生成。代码在 PyTorch 2.x 下验证，CPU 即可运行，不依赖任何额外安装包（torchvision 仅用于读取 MNIST）。</p>
+
+        <h2>12.1 离散 Hopfield 网络：完整实现</h2>
+        <p>实现严格对应第 3、4 章的公式：外积式 (4.1) 存储、异步更新、能量式 (3.1)。</p>
+        <pre><code class="language-python">import torch
+
+
+class HopfieldNetwork:
+    def __init__(self, n_units: int, device: str = "cpu"):
+        self.n = n_units
+        self.device = torch.device(device)
+        self.W = torch.zeros(n_units, n_units, device=self.device)
+
+    def store(self, patterns: torch.Tensor) -> None:
+        """外积存储：patterns 形状 (P, N)，分量必须为 -1/+1。"""
+        patterns = patterns.to(self.device)
+        if not torch.all((patterns == 1) | (patterns == -1)):
+            raise ValueError("模式分量必须为 -1 或 +1，请先做二值化编码")
+        W = (patterns.T @ patterns) / self.n
+        W.fill_diagonal_(0.0)  # 强制无自连接
+        self.W = W
+
+    def energy(self, state: torch.Tensor) -> torch.Tensor:
+        """支持批量状态 (B, N)，返回 (B,) 个能量值。"""
+        return -0.5 * torch.einsum("...i,ij,...j->...", state, self.W, state)
+
+    def _async_sweep(self, state: torch.Tensor, order: list[int]) -> torch.Tensor:
+        for i in order:
+            local_field = self.W[i] @ state
+            state = state.clone()
+            state[i] = torch.sign(local_field)
+        return state
+
+    def retrieve(self, query: torch.Tensor, max_steps: int = 100,
+                 seed: int = 0) -> torch.Tensor:
+        """异步检索，直到一轮扫描后状态不再变化。"""
+        g = torch.Generator().manual_seed(seed)
+        state = query.to(self.device).clone()
+        for _ in range(max_steps):
+            order = torch.randperm(self.n, generator=g).tolist()
+            new_state = self._async_sweep(state, order)
+            if torch.equal(new_state, state):
+                return new_state
+            state = new_state
+        return state  # 达到步数上限，调用方应检查是否收敛
+</code></pre>
+
+        <h3>容量相变复现实验</h3>
+        <p>下面的实验直接检验 0.14N 结论：在不同载荷比 $\alpha=P/N$ 下统计检索成功率，预期在 $\alpha\approx0.14$ 附近出现陡降。</p>
+        <pre><code class="language-python">def capacity_experiment(n_units: int = 200, n_trials: int = 20):
+    alphas = torch.linspace(0.05, 0.30, 11)
+    report = []
+    for alpha in alphas:
+        n_patterns = max(1, int(round(alpha.item() * n_units)))
+        successes = 0
+        for trial in range(n_trials):
+            net = HopfieldNetwork(n_units)
+            patterns = torch.randint(0, 2, (n_patterns, n_units)) * 2 - 1
+            net.store(patterns)
+
+            query = patterns[0].clone()
+            corrupted = torch.rand(n_units) < 0.2  # 随机翻转 20% 分量
+            query[corrupted] *= -1
+
+            recovered = net.retrieve(query, seed=trial)
+            if torch.equal(recovered, patterns[0]):
+                successes += 1
+        report.append((round(alpha.item(), 3), successes / n_trials))
+    return report
+
+
+for alpha, rate in capacity_experiment():
+    print(f"alpha={alpha:.2f}  检索成功率={rate:.2f}")
+</code></pre>
+        <div class="callout callout-tip">
+            <strong>预期结果与解读</strong>：$\alpha<0.10$ 时成功率接近 1.0，$\alpha$ 越过 0.14 后快速下滑。若你的曲线拐点明显偏离 0.14，先检查污染比例和 $N$ 的大小——$N$ 较小时有限尺寸效应会使临界区变宽，这是统计力学实验的正常现象，增大 $N$ 后曲线会变陡。
+        </div>
+
+        <h2>12.2 RBM：完整实现与 CD-k 训练</h2>
+        <p>RBM 实现对应第 8 章：Bernoulli 条件采样、自由能式 (8.2)、CD 算法。权重按隐单元在前、可见单元在后排列，与矩阵形状保持一致。</p>
+        <pre><code class="language-python">import torch
+from torch import nn
+
+
+class RBM:
+    def __init__(self, n_visible: int, n_hidden: int,
+                 device: str = "cpu", seed: int = 0):
+        g = torch.Generator().manual_seed(seed)
+        self.device = torch.device(device)
+        self.W = torch.randn(n_hidden, n_visible, generator=g) * 0.01
+        self.v_bias = torch.zeros(n_visible)
+        self.h_bias = torch.zeros(n_hidden)
+        self.to(self.device)
+
+    def to(self, device):
+        self.W = self.W.to(device)
+        self.v_bias = self.v_bias.to(device)
+        self.h_bias = self.h_bias.to(device)
+        return self
+
+    def sample_h(self, v):
+        p_h = torch.sigmoid(v @ self.W.T + self.h_bias)
+        return p_h, torch.bernoulli(p_h)
+
+    def sample_v(self, h):
+        p_v = torch.sigmoid(h @ self.W + self.v_bias)
+        return p_v, torch.bernoulli(p_v)
+
+    def free_energy(self, v):
+        v_term = v @ self.v_bias
+        h_term = torch.sum(n.functional.softplus(v @ self.W.T + self.h_bias), dim=1)
+        return -v_term - h_term
+
+    def contrastive_divergence(self, v0, k: int = 1):
+        p_h0, h = self.sample_h(v0)
+        v = v0
+        p_h = p_h0
+        for _ in range(k):
+            _, v = self.sample_v(h)
+            p_h, h = self.sample_h(v)
+        batch = v0.shape[0]
+        dW = (p_h0.T @ v0 - p_h.T @ v) / batch
+        dv = (v0 - v).mean(dim=0)
+        dh = (p_h0 - p_h).mean(dim=0)
+        return dW, dv, dh, v
+</code></pre>
+
+        <h3>MNIST 训练循环</h3>
+        <pre><code class="language-python">from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+
+
+def load_mnist(batch_size: int = 128, root: str = "./data"):
+    dataset = datasets.MNIST(root, train=True, download=True,
+                             transform=transforms.ToTensor())
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+
+def train_rbm(n_hidden: int = 128, epochs: int = 10,
+              lr: float = 0.05, cd_k: int = 1, device: str = "cpu"):
+    loader = load_mnist()
+    rbm = RBM(n_visible=28 * 28, n_hidden=n_hidden, device=device)
+    for epoch in range(epochs):
+        recon_errors, free_energies = [], []
+        for x, _ in loader:
+            v0 = x.view(x.shape[0], -1).to(device)
+            dW, dv, dh, recon = rbm.contrastive_divergence(v0, k=cd_k)
+            with torch.no_grad():
+                rbm.W += lr * dW
+                rbm.v_bias += lr * dv
+                rbm.h_bias += lr * dh
+            recon_errors.append(((v0 - recon) ** 2).mean().item())
+            free_energies.append(rbm.free_energy(v0).mean().item())
+        print(f"epoch {epoch + 1:2d} | 重建MSE={sum(recon_errors)/len(recon_errors):.4f}"
+              f" | 平均自由能={sum(free_energies)/len(free_energies):.2f}")
+    return rbm
+
+
+rbm = train_rbm()
+</code></pre>
+
+        <h3>去噪与生成</h3>
+        <pre><code class="language-python">def denoise(rbm: RBM, n_samples: int = 8, noise_rate: float = 0.2):
+    testset = datasets.MNIST("./data", train=False, download=True,
+                             transform=transforms.ToTensor())
+    clean = testset.data[:n_samples].float().view(n_samples, -1) / 255.0
+    noisy = clean.clone()
+    mask = torch.rand_like(noisy) < noise_rate
+    noisy[mask] = 1.0 - noisy[mask]
+
+    _, h = rbm.sample_h(noisy.to(rbm.device))
+    p_clean, _ = rbm.sample_v(h)
+    return clean, noisy, p_clean.cpu()
+
+
+def generate(rbm: RBM, n_samples: int = 16, gibbs_steps: int = 500):
+    v = torch.rand(n_samples, 28 * 28, device=rbm.device)
+    v = torch.bernoulli(v)
+    for _ in range(gibbs_steps):
+        _, h = rbm.sample_h(v)
+        _, v = rbm.sample_v(h)
+    return v.cpu()
+</code></pre>
+        <div class="callout callout-warning">
+            <strong>评估提醒</strong>：重建 MSE 下降只能说明 CD 负相位在起作用，不能替代似然评估——第 8 章已说明 CD 不约束能量绝对标定。要比较不同 RBM 的真实建模质量，可用退火重要性采样（AIS）估计配分函数后再算似然，这是 RBM 文献的标准做法。
+        </div>
+
+        <h2>12.3 故障排查清单</h2>
+        <table>
+            <thead><tr><th>症状</th><th>可能原因</th><th>处理</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>MNIST 下载报错或超时</td>
+                    <td>默认源网络不通</td>
+                    <td>手动下载 MNIST 四个原始文件放入 <code>./data/MNIST/raw/</code>，或设置可用镜像；不要用随机数据替代，否则实验结论无效</td>
+                </tr>
+                <tr>
+                    <td>重建结果全是灰色（约 0.5）</td>
+                    <td>学习率过大导致权重震荡，或初始化尺度不当</td>
+                    <td>学习率降到 0.01 量级，确认 W 初始化为 0.01 小尺度而非默认方差 1</td>
+                </tr>
+                <tr>
+                    <td>隐单元长期全 0 或全 1</td>
+                    <td>隐偏置漂移、饱和</td>
+                    <td>监控 <code>p_h.mean()</code>；饱和时检查 dh 更新是否被错误取负，必要时重置 h_bias</td>
+                </tr>
+                <tr>
+                    <td>设备不匹配 RuntimeError</td>
+                    <td>数据与参数不在同一 device</td>
+                    <td>确认输入经过 <code>.to(rbm.device)</code>；本实现的参数在 <code>to()</code> 中统一迁移</td>
+                </tr>
+                <tr>
+                    <td>Hopfield 检索未收敛就返回</td>
+                    <td>达到 max_steps 上限</td>
+                    <td>比较返回状态与 query 的能量，能量未稳定则增大 max_steps；同步更新出现振荡时回到异步规则</td>
+                </tr>
+                <tr>
+                    <td>容量实验成功率整体偏低</td>
+                    <td>模式高度相关或污染比例过高</td>
+                    <td>确认使用独立随机模式；污染比例固定在 0.2 并在报告中注明，不要为得到好看曲线而事后调参</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>12.4 练习与扩展任务</h2>
+        <div class="exercise">
+            <h4>任务 12-1（基础）</h4>
+            <p>把容量实验的 $N$ 分别取 100、200、400，绘制三条成功率曲线，验证有限尺寸效应下拐点随 $N$ 增大向 0.138 收敛。</p>
+        </div>
+        <div class="exercise">
+            <h4>任务 12-2（进阶）</h4>
+            <p>实现 8.4 节提到的 PCD：维护一条不随 batch 重置的持久 Gibbs 链生成负相位，与 CD-1 在相同 epoch 下比较重建误差与自由能。</p>
+        </div>
+        <div class="exercise">
+            <h4>任务 12-3（进阶）</h4>
+            <p>把 RBM 堆叠成 3 层 DBN：逐层训练后，用顶层 RBM 交替采样并向下传播生成样本，比较单 RBM 与 DBN 的生成质量。</p>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>离散 Hopfield 实现了外积存储、异步检索与能量计算，容量实验可直接复现 0.14N 相变。</li>
+                <li>RBM 实现了 Bernoulli 条件采样、自由能与 CD-k 更新，MNIST 上可完成重建、去噪与 Gibbs 生成。</li>
+                <li>重建误差不是似然的替代指标；严谨评估需要 AIS 等配分函数估计手段。</li>
+                <li>排查问题时先区分数据管线、参数尺度、采样混合三类原因，避免用调参掩盖逻辑错误。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="11-能量模型的当代版图.html">← 上一章：能量模型的当代版图</a>
+            <a href="13-结语-知识图谱与深入路径.html">下一章：结语 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

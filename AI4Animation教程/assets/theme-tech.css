@@ -1,0 +1,21 @@
+:root {
+    --primary: #007acc;
+    --primary-dark: #005a9e;
+    --primary-light: #e9f4ff;
+    --bg-main: #ffffff;
+    --bg-aside: #eef1f5;
+    --text: #2b2f36;
+}
+
+body { background: var(--bg-aside); color: var(--text); }
+main { background: var(--bg-main); }
+h1 { color: var(--primary); border-bottom-color: var(--primary); }
+h2 { color: #1c2733; }
+a { color: var(--primary); }
+
+.part-title { color: var(--primary); }
+.part-title::before { background: var(--primary); }
+
+.step-number { background: var(--primary); }
+.definition { border-color: var(--primary); }
+.definition h4 { color: var(--primary); }

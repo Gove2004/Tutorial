@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 现代 Hopfield 网络与注意力机制 - Hopfield 与能量生成模型教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-math.css">
+    <script>
+        MathJax = {
+            tex: { inlineMath: [['$','$'],['\\(','\\)']], displayMath: [['$$','$$'],['\\[','\\]']] },
+            svg: { fontCache: 'global' }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-能量模型通用框架.html">← 上一章</a>
+        <a href="11-能量模型的当代版图.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>10 ｜ 现代 Hopfield 网络与注意力机制</h1>
+        <p>经典 Hopfield 网络的二次能量把容量限制在 $0.14N$。2016–2020 年的两项工作通过更换能量函数，把容量提升到指数级，并意外地证明：Transformer 的注意力机制与现代 Hopfield 检索是同一个数学运算。这是能量老线与当代深度学习的正式汇合点。</p>
+
+        <h2>10.1 瓶颈在能量形式，不在网络结构</h2>
+        <p>第 5 章的容量分析表明，串扰来自二次能量中不同模式的线性叠加。一个自然的想法是：如果让能量函数对模式匹配更「尖锐」——只有高度匹配的模式才被激活，弱匹配被强力抑制——模式之间就不会互相干扰。Krotov 与 Hopfield 在 2016 年（NeurIPS）按此思路提出稠密联想记忆（Dense Associative Memory）：</p>
+        <div class="equation">
+            $$E(\boldsymbol{\xi}) = -\sum_{\mu=1}^{P}F\!\left(\boldsymbol{\xi}^{\top}\mathbf{x}^{\mu}\right)$$
+        </div>
+        <p>其中 $F$ 是强非线性函数（如高次幂 $F(x)=x^n$，$n\gg 2$），取代经典模型的二次项。$n$ 增大时，只有内积最大的模式被「点亮」，存储容量随 $n$ 提高到多项式量级；同时他们推导了仅依赖局部信息的学习规则，保留了生物合理性。这项工作是通往 2020 年连续模型的跳板。</p>
+
+        <h2>10.2 连续现代 Hopfield：log-sum-exp 能量</h2>
+        <p>Ramsauer 等人 2020 年（NeurIPS，《Hopfield Networks is All You Need》）取 $F$ 的极限形式，得到连续状态的现代 Hopfield 网络。设有 $N$ 个存储模式 $\mathbf{x}_1,\dots,\mathbf{x}_N\in\mathbb{R}^d$，按行组成模式矩阵 $\mathbf{X}\in\mathbb{R}^{N\times d}$，当前检索状态为 $\boldsymbol{\xi}\in\mathbb{R}^d$。能量函数为：</p>
+        <div class="equation">
+            $$L(\boldsymbol{\xi}) = -\frac1\beta\log\sum_{i=1}^{N}\exp\!\left(\beta\,\boldsymbol{\xi}^{\top}\mathbf{x}_i\right) + \frac12\boldsymbol{\xi}^{\top}\boldsymbol{\xi} + \text{常数项}$$
+            <span class="eq-label">(10.1)</span>
+        </div>
+        <p>第一项是模式匹配的 log-sum-exp（软最大值的负数），第二项把检索状态拉向存储模式。求能量的不动点：对 $\boldsymbol{\xi}$ 求梯度并令其为零。</p>
+        <div class="equation">
+            $$\frac{\partial L}{\partial\boldsymbol{\xi}}
+            = -\sum_i\frac{e^{\beta\boldsymbol{\xi}^{\top}\mathbf{x}_i}}{\sum_j e^{\beta\boldsymbol{\xi}^{\top}\mathbf{x}_j}}\mathbf{x}_i + \boldsymbol{\xi} = 0$$
+        </div>
+        <p>归一化的指数权重正是 softmax，于是得到<strong>检索更新规则</strong>：</p>
+        <div class="definition">
+            <div class="equation">
+                $$\boldsymbol{\xi}^{\text{new}} = \mathbf{X}^{\top}\,\operatorname{softmax}(\beta\,\mathbf{X}\boldsymbol{\xi})$$
+                <span class="eq-label">(10.2)</span>
+            </div>
+            <p>论文进一步证明该能量的 Hessian 满足良好条件，在 $\beta$ 足够大时更新规则一步收敛，且收敛点是能量的全局极小——相比经典模型可能陷入伪状态，现代版本的检索质量有结构性保证。</p>
+        </div>
+
+        <h2>10.3 与注意力机制的逐项对应</h2>
+        <p>把式 (10.2) 与 Transformer 的缩放点积注意力并排：</p>
+        <div class="equation">
+            $$\operatorname{Attention}(\mathbf{Q},\mathbf{K},\mathbf{V}) = \operatorname{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^{\top}}{\sqrt{d_k}}\right)\mathbf{V}$$
+        </div>
+        <p>逐项对应关系如下：</p>
+        <table>
+            <thead><tr><th>现代 Hopfield</th><th>注意力</th><th>作用</th></tr></thead>
+            <tbody>
+                <tr><td>检索状态 $\boldsymbol{\xi}$</td><td>查询 $\mathbf{Q}$</td><td>描述当前要找什么</td></tr>
+                <tr><td>存储模式 $\mathbf{X}$（在内积中）</td><td>键 $\mathbf{K}$</td><td>被查询匹配的索引</td></tr>
+                <tr><td>存储模式 $\mathbf{X}$（在加权和中）</td><td>值 $\mathbf{V}$</td><td>被取回的内容</td></tr>
+                <tr><td>逆温度 $\beta$</td><td>$1/\sqrt{d_k}$</td><td>softmax 的尖锐度/缩放</td></tr>
+            </tbody>
+        </table>
+        <p>在 Hopfield 中同一批存储模式同时充当键和值；加入投影矩阵 $\mathbf{W}_Q,\mathbf{W}_K,\mathbf{W}_V$ 后（即 $\mathbf{Q}=\boldsymbol{\xi}\mathbf{W}_Q$，$\mathbf{K}=\mathbf{X}\mathbf{W}_K$，$\mathbf{V}=\mathbf{X}\mathbf{W}_V$），式 (10.2) 严格变成注意力层。因此可以给出精确结论：</p>
+        <div class="callout callout-info">
+            <strong>结论（有严格边界）</strong>：多头注意力的<em>每一个头</em>，就是一个现代 Hopfield 网络的一次检索；一个注意力层是若干 Hopfield 网络并行后再投影。这不是比喻，Ramsauer 论文给出了代数推导。注意等价的是<em>检索/前向运算</em>，而 Hopfield 的能量视角额外提供了收敛性与容量的解释——注意力不再只是「经验上有效」的模块，它是一个有四十年理论谱系的内容寻址记忆操作。
+        </div>
+
+        <h2>10.4 指数级存储容量</h2>
+        <p>现代能量函数带来的容量提升是数量级的。论文给出容量结果：</p>
+        <div class="equation">
+            $$N_{\max}\;\approx\;0.14\,\beta^{-1}\exp(\beta K)$$
+        </div>
+        <p>其中 $K$ 是衡量存储模式间分离程度的量（模式归一化后，模式间最大内积越小、分离越好，$K$ 对应分离裕度）。与经典容量 $0.14N$ 对照：</p>
+        <table>
+            <thead><tr><th></th><th>经典 Hopfield</th><th>现代 Hopfield</th></tr></thead>
+            <tbody>
+                <tr><td>能量形式</td><td>二次型</td><td>log-sum-exp</td></tr>
+                <tr><td>容量</td><td>线性 $\sim0.14N$</td><td>指数 $\sim0.14\beta^{-1}e^{\beta K}$</td></tr>
+                <tr><td>检索</td><td>多步异步，可能入伪状态</td><td>近似一步收敛，全局极小</td></tr>
+            </tbody>
+        </table>
+        <div class="callout callout-warning">
+            <strong>假设条件</strong>：指数容量依赖模式具有有限分离度、且 $\beta$ 足够大；在 Transformer 中 $\beta=1/\sqrt{d_k}$ 是固定的，实际有效容量还受投影维度和训练方式约束。引用「指数容量」时应同时说明这是模型理论容量，不等同于具体网络的可利用容量。
+        </div>
+
+        <h2>10.5 概念意义：两条主线的汇合</h2>
+        <p>回看全教程，神经网络有两条长期并行的主线：一条是反向传播–函数逼近线（感知机→MLP→CNN），一条是能量–吸引子线（Hopfield→BM→RBM→EBM）。2017 年的 Transformer 与 2020 年的等价性证明，使两条线在注意力处汇合：<strong>注意力既是反向传播训练出来的函数组件，又是能量最小化的吸引子检索</strong>。</p>
+        <p>这对工程实践也有具体启示：把注意力理解为内容寻址记忆后，检索失败（注意力分散、无明确峰值）对应能量地形平坦、没有清晰吸引子；温度（缩放）、键的归一化、模式分离度这些 Hopfield 语言中的量，直接对应调参时观察到的现象。老理论提供了诊断新系统的词汇表。</p>
+
+        <h2>10.6 练习与思考</h2>
+        <div class="exercise">
+            <h4>基础练习 10-1</h4>
+            <p>不看书，从能量式 (10.1) 求导推出检索规则式 (10.2)，确认 softmax 的来源。</p>
+        </div>
+        <div class="exercise">
+            <h4>基础练习 10-2</h4>
+            <p>写出注意力与 Hopfield 检索的四个对应项，并解释为什么 $\beta$ 对应 $1/\sqrt{d_k}$ 而不是其他位置。</p>
+        </div>
+        <div class="exercise">
+            <h4>思考题 10-3</h4>
+            <p>当 $\beta$ 很小时 softmax 输出接近均匀，检索结果是什么？这对应注意力机制中的什么现象？为什么原论文用 $1/\sqrt{d_k}$ 控制温度？</p>
+        </div>
+        <div class="exercise">
+            <h4>思考题 10-4</h4>
+            <p>等价性证明针对的是前向检索运算。训练过程中，Hopfield 的「存储模式固定」与 Transformer 的「键值随训练更新」有什么语义差别？这种差别影响等价性结论吗？</p>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>Krotov–Hopfield 2016 用强非线性能量提升容量；Ramsauer 2020 取 log-sum-exp 能量，检索规则为 $\boldsymbol{\xi}^{\text{new}}=\mathbf{X}^{\top}\operatorname{softmax}(\beta\mathbf{X}\boldsymbol{\xi})$。</li>
+                <li>该规则与缩放点积注意力严格对应：状态是查询，模式分别充当键和值，逆温度是缩放因子；每个注意力头即一个现代 Hopfield。</li>
+                <li>理论容量从线性 $0.14N$ 跃升为指数 $0.14\beta^{-1}e^{\beta K}$，但依赖模式分离与温度假设。</li>
+                <li>注意力处汇合了反向传播与能量吸引子两条主线，老理论为诊断现代网络提供了能量语言。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="09-能量模型通用框架.html">← 上一章：能量模型通用框架</a>
+            <a href="11-能量模型的当代版图.html">下一章：能量模型的当代版图 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 7 章 存档系统全链路 - 空洞骑士源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="06-PlayerData数据中枢.html">← 上一章：PlayerData 数据中枢</a>
+    <a href="08-场景状态与持久化.html">下一章：场景状态与持久化 →</a>
+</nav>
+<main>
+    <h1>第 7 章　存档系统全链路</h1>
+    <p>存档系统是 PlayerData 与磁盘之间的桥梁。本章从内存数据模型出发，完整追踪一次保存和一次加载的调用链，再深入加密、原子写与备份机制，最后从工程安全角度审视其中的设计取舍。</p>
+
+    <h2>7.1 数据模型：SaveGameData 的两个字段</h2>
+    <p>落盘的不是 PlayerData 本身，而是一个包装类，结构非常精简：</p>
+<pre><code class="language-csharp">[Serializable]
+public class SaveGameData
+{
+    public PlayerData playerData;
+    public SceneData sceneData;
+
+    public SaveGameData(PlayerData playerData, SceneData sceneData)
+    {
+        this.playerData = playerData;
+        this.sceneData = sceneData;
+    }
+}</code></pre>
+    <p>这对应了游戏状态的两个层次：<strong>PlayerData 是跨场景的全局进度</strong>，<strong>SceneData 是各场景内部物体的开关状态</strong>（门开没开、宝箱拿没拿，下一章详述）。整个存档就是这两个可序列化对象的组合。</p>
+
+    <h2>7.2 保存全链路</h2>
+    <p>GameManager.SaveGame 是核心，整个保存过程可以拆成六个步骤：</p>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+flowchart TB
+    A["1. SaveLevelState<br/>触发 SavePersistentObjects 委托<br/>把场景物体状态写入 SceneData"] --> B["2. ShowSaveIcon<br/>显示保存图标"]
+    B --> C["3. 刷新 PlayerData<br/>累加 playTime、写版本号、profileID<br/>CountGameCompletion"]
+    C --> D["4. JsonUtility.ToJson<br/>序列化 SaveGameData"]
+    D --> E{"5. 加密开关<br/>useSaveEncryption 且<br/>文件系统非保护"}
+    E -->|"是"| F["Encryption.Encrypt<br/>BinaryFormatter 包装"]
+    E -->|"否"| G["UTF8 直接取字节"]
+    F --> H["6. Platform.WriteSaveSlot<br/>原子写盘"]
+    G --> H
+</div>
+    </div>
+<pre><code class="language-csharp">string json = JsonUtility.ToJson(new SaveGameData(playerData, sceneData));
+if (gameConfig.useSaveEncryption && !Platform.Current.IsFileSystemProtected)
+{
+    string encrypted = Encryption.Encrypt(json);
+    BinaryFormatter formatter = new BinaryFormatter();
+    MemoryStream stream = new MemoryStream();
+    formatter.Serialize(stream, encrypted);
+    byte[] binary = stream.ToArray();
+    Platform.Current.WriteSaveSlot(saveSlot, binary, callback);
+}
+else
+{
+    Platform.Current.WriteSaveSlot(saveSlot, Encoding.UTF8.GetBytes(json), callback);
+}</code></pre>
+
+    <h3>保存前的数据刷新</h3>
+    <p>注意写盘前对 PlayerData 做的三件事，它们解释了存档里几个字段的来源：</p>
+<pre><code class="language-csharp">playerData.playTime += sessionPlayTimer;
+ResetGameTimer();
+playerData.version = "1.5.12459";
+playerData.profileID = saveSlot;
+playerData.CountGameCompletion();</code></pre>
+    <p>游戏时长不是实时写进 PlayerData 的，而是按会话（sessionPlayTimer）累加，保存时才合并。版本号字符串硬编码在代码里，是判断存档格式的锚点。</p>
+
+    <h3>保存图标：计数器而非布尔</h3>
+<pre><code class="language-csharp">private void ShowSaveIcon()
+{
+    if (saveIconShowCounter == 0) checkpointSprite.Show();
+    saveIconShowCounter++;
+}
+private void HideSaveIcon()
+{
+    saveIconShowCounter--;
+    if (saveIconShowCounter == 0) checkpointSprite.Hide();
+}</code></pre>
+    <p>用计数器而不是简单开关，是因为保存可能嵌套或并发触发（自动保存 + 手动保存），只有最后一次保存结束才隐藏图标，避免提前消失。</p>
+
+    <h2>7.3 加载全链路</h2>
+    <p>LoadGame 是保存的逆过程，先读字节，再按相同的加密条件决定如何还原：</p>
+<pre><code class="language-csharp">Platform.Current.ReadSaveSlot(saveSlot, fileBytes =>
+{
+    string jsonData;
+    if (gameConfig.useSaveEncryption && !Platform.Current.IsFileSystemProtected)
+    {
+        BinaryFormatter formatter = new BinaryFormatter();
+        MemoryStream stream = new MemoryStream(fileBytes);
+        jsonData = Encryption.Decrypt((string)formatter.Deserialize(stream));
+    }
+    else
+    {
+        jsonData = Encoding.UTF8.GetString(fileBytes);
+    }
+    SetLoadedGameData(jsonData, saveSlot);
+});</code></pre>
+    <p>还原出 JSON 后，SetLoadedGameData 反序列化并替换内存中的单例：</p>
+<pre><code class="language-csharp">SaveGameData data = JsonUtility.FromJson<SaveGameData>(jsonData);
+PlayerData.instance = data.playerData;
+this.playerData = data.playerData;
+SceneData.instance = data.sceneData;
+this.sceneData = data.sceneData;
+profileID = saveSlot;
+inputHandler.RefreshPlayerData();</code></pre>
+    <div class="callout callout-info">
+        <p>这里能看到 PlayerData 的 instance 提供了 <code>set</code> 访问器的原因——加载存档时需要用反序列化出来的新对象整体替换单例，而不是逐字段拷贝。这是纯数据类单例相比 MonoBehaviour 单例的便利之处：可以直接换对象。</p>
+    </div>
+
+    <h2>7.4 加密机制：两个类与一把硬编码密钥</h2>
+    <p>工程里有两个加密相关的类，读代码时不要混淆：</p>
+    <table>
+        <thead><tr><th>类</th><th>位置</th><th>用途</th></tr></thead>
+        <tbody>
+            <tr><td><code>Encryption</code></td><td>不在反编译产物中，位于 TeamCherry.SharedUtils 库</td><td>存档加解密，SaveGame/LoadGame 实际调用它</td></tr>
+            <tr><td><code>StringEncrypt</code></td><td>Assembly-CSharp 根目录，已反编译</td><td>字符串加解密，揭示了项目的加密算法风格</td></tr>
+        </tbody>
+    </table>
+    <p>虽然 Encryption 的具体实现看不到，但 StringEncrypt 给出了明确的技术线索：</p>
+<pre><code class="language-csharp">private static byte[] keyArray = Encoding.UTF8.GetBytes(
+    "UKu52ePUBwetZ9wNX88o54dnfKRu0T1l");   // 32 字节硬编码密钥
+
+new RijndaelManaged
+{
+    Key = keyArray,
+    Mode = CipherMode.ECB,          // ECB 模式
+    Padding = PaddingMode.PKCS7
+}.CreateEncryptor().TransformFinalBlock(bytes, 0, bytes.Length);
+// 输出 Base64</code></pre>
+
+    <div class="callout callout-danger">
+        <p><strong>从安全角度看，这套设计有三个明确弱点</strong>（这里是客观分析，不是攻击教程）：</p>
+        <ul>
+            <li><strong>密钥硬编码在客户端</strong>：密钥随程序分发，任何拿到程序的人都能提取，它只能防"随手用记事本打开"，防不住有备而来的分析。</li>
+            <li><strong>ECB 模式</strong>：相同明文块产生相同密文块，不隐藏数据模式，是教科书级不推荐的分组模式。</li>
+            <li><strong>BinaryFormatter</strong>：反序列化不可信数据存在已知风险，微软已将其标记为不安全并建议停用。</li>
+        </ul>
+        <p>结论是：这层"加密"的真实定位是<strong>混淆与防误改</strong>，而非真正的安全边界。对单机游戏存档而言，这个定位本身是合理的——玩家本就拥有自己的存档数据。</p>
+    </div>
+
+    <h2>7.5 原子写与备份机制</h2>
+    <p>DesktopPlatform.WriteSaveSlot 没有直接覆盖主文件，而是走一套保证写入安全的流程：</p>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+flowchart LR
+    A["写入 .new 临时文件"] --> B["写版本化副本<br/>user1_1.5.12459.dat"]
+    B --> C{"主文件存在?"}
+    C -->|"是"| D["File.Replace<br/>主文件替换，旧文件转 .bak"]
+    C -->|"否"| E["File.Move<br/>直接改名"]
+</div>
+    </div>
+<pre><code class="language-csharp">string tempPath = saveSlotPath + ".new";
+File.WriteAllBytes(tempPath, bytes);
+// ...
+if (File.Exists(saveSlotPath))
+    File.Replace(tempPath, saveSlotPath, backupPath + GetBackupNumber(backupPath));
+else
+    File.Move(tempPath, saveSlotPath);</code></pre>
+    <div class="definition">
+        <h4>为什么要先写 .new 再替换？</h4>
+        <p>如果直接写主文件，写到一半进程崩溃或断电，主文件就会损坏，玩家进度全丢。先写临时文件，写完整后再用操作系统的原子操作 Replace 替换，能保证任何时刻主文件要么是旧的完整版本、要么是新的完整版本，不会出现写了一半的文件。残留的 .new 会在下次启动时被识别并清理。</p>
+    </div>
+    <p>备份文件带递增编号（.bak0、.bak1…），GetBackupNumber 会扫描已有备份决定编号，保留多代历史。另有 <code>.del</code> 后缀标记"待删除"的备份，对应 SaveSlotFileNameUsage.BackupMarkedForDeletion。</p>
+
+    <h2>7.6 文件命名、槽位与平台抽象</h2>
+    <h3>命名规则</h3>
+<pre><code class="language-csharp">// 0 号槽用 user.dat，其余槽用 user{槽号}.dat
+string name = (slotIndex != 0) ? $"user{slotIndex}.dat" : "user.dat";
+// 备份追加 .bak，待删除追加 .del</code></pre>
+    <p>桌面版存档根目录是 <code>Application.persistentDataPath</code>，共 5 个存档槽位（Platform.SaveSlotCount）。除主文件外，还会写一个带版本号的副本（如 user1_1.5.12459.dat），用于版本追溯。</p>
+
+    <h3>平台抽象</h3>
+    <p>GameManager 全程只依赖 <code>Platform.Current</code> 抽象基类，不关心文件具体怎么存。桌面走 DesktopPlatform 的文件系统；主机平台（如 XBoxConsolePlatform）可能走系统保护存储，此时 <code>IsFileSystemProtected</code> 为 true，加密分支整体跳过——因为系统存储本身已提供保护。若在线子系统声明 HandlesGameSaves（云存档），写盘会被转发给在线子系统。</p>
+
+    <h2>7.7 错误处理与回调</h2>
+    <p>整个链路的错误处理有两个值得学习的细节：</p>
+    <ul>
+        <li>保存的序列化包裹在 try-catch 中，异常被记录后通过回调返回 false，而不是让游戏崩溃</li>
+        <li>所有文件操作回调都经 <code>CoreLoop.InvokeNext</code> 派发，保证回调在 Unity 主线程下一帧执行——因为文件 IO 可能在异步线程完成，而回调里要操作 UI 和游戏对象，不能直接在 IO 线程调用</li>
+    </ul>
+
+    <div class="exercise">
+        <h3>思考与练习</h3>
+        <ol>
+            <li>画出从内存 PlayerData 到磁盘 .dat 文件的完整调用链，标出每一层的数据形态（对象 → JSON → 字节 → 文件）。</li>
+            <li>解释存档为什么用 .new 临时文件 + File.Replace，而不是直接写主文件，崩溃场景下两者结果有何不同。</li>
+            <li>区分 Encryption 与 StringEncrypt，并说明为什么无法从本反编译产物中确认 Encryption 的具体算法，证据是什么。</li>
+            <li>分析硬编码密钥 + ECB 模式的实际防护边界：它能防住什么、防不住什么？</li>
+            <li>为什么文件 IO 回调要通过 CoreLoop.InvokeNext 回到主线程？直接在回调里操作 UIManager 会有什么问题？</li>
+        </ol>
+    </div>
+</main>
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="06-PlayerData数据中枢.html">← 上一章：PlayerData 数据中枢</a>
+        <a href="08-场景状态与持久化.html">第 8 章：场景状态与持久化 →</a>
+    </nav>
+</footer>
+<script src="assets/script.js"></script>
+</body>
+</html>

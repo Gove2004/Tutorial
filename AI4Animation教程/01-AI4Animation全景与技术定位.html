@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 全景与技术定位 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <span class="nav-placeholder">上一章</span>
+    <a href="02-问题定义与运动数据基础.html">下一章：问题定义与数据基础 →</a>
+</nav>
+
+<main>
+    <h1>01　AI4Animation 全景与技术定位</h1>
+
+    <p>在进入任何算法细节之前，先建立一个整体判断：这个仓库<strong>是什么、不是什么、为什么值得作为研究入口</strong>。
+    这决定了后面十三章的阅读方式。</p>
+
+    <h2>1.1 官方定义与一句话定位</h2>
+    <p>仓库 README 的原始表述是：<em>"This repository explores the opportunities of deep learning for character
+    animation and control."</em> 它的目标是成为一个覆盖<strong>数据处理（data processing）、神经网络训练（neural
+    network training）与运行时控制（runtime control）</strong>的综合框架，而不是一个单纯的算法 demo 集合。</p>
+
+    <div class="definition">
+        <h4>核心定位</h4>
+        <p>AI4Animation 是一条<strong>以运动捕捉数据为输入、以神经网络为运动生成器、以实时交互控制为目标</strong>的
+        数据驱动角色动画研究管线。所有论文工作都共享同一套问题范式：从非结构化动捕数据中学习，在运行时根据用户控制信号
+        实时生成全身运动。</p>
+    </div>
+
+    <h2>1.2 它针对的工业痛点</h2>
+    <p>理解一个研究框架，先看它要替代什么。游戏与动画工业中让角色动起来的传统方案有三类，各有明确的边界：</p>
+    <table>
+        <thead>
+            <tr><th>传统方案</th><th>工作方式</th><th>典型问题</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>有限状态机 / 混合树</td>
+                <td>工程师手工搭建状态与过渡，混合树按参数插值动画片段</td>
+                <td>状态数量随动作种类组合爆炸；过渡规则全靠人工维护；动作多样性受限于预制片段</td>
+            </tr>
+            <tr>
+                <td>运动匹配（Motion Matching）</td>
+                <td>每帧用当前轨迹/姿态特征在动画数据库中做最近邻检索，直接播放匹配片段</td>
+                <td>数据库随动作量线性膨胀，内存与检索成本高；本质是"检索"而非"生成"，无法产生库中不存在的动作</td>
+            </tr>
+            <tr>
+                <td>物理仿真控制</td>
+                <td>对关节施加力矩，由物理引擎驱动角色</td>
+                <td>控制器设计困难、调参成本高；运动风格与动捕数据的贴合度长期弱于运动学方法</td>
+            </tr>
+        </tbody>
+    </table>
+    <p>AI4Animation 选择的是<strong>运动学（kinematic）路线</strong>：它用神经网络学习运动数据的分布，试图同时获得
+    运动匹配的动作质量与神经网络的紧凑性——把数 GB 的数据库压缩进几 MB 到几百 MB 的模型，并支持连续、可控的实时生成。</p>
+
+    <div class="callout callout-info">
+        <span class="callout-title">术语澄清：kinematic 与 physics-based</span>
+        <p>运动学方法直接预测关节的位置/旋转，不经过力与力矩仿真；物理方法则在物理引擎中通过力矩控制角色。本仓库 2017–2024
+        的主线工作全部是运动学方法，论文结尾多次把"与物理动画结合"列为未来工作。阅读时不要把两条路线混为一谈。</p>
+    </div>
+
+    <h2>1.3 三段式能力结构</h2>
+    <p>无论哪一年的项目，都落在同一条管线的三个环节上，这也是本教程第三篇工程章节的组织依据：</p>
+
+    <pre class="mermaid">
+flowchart LR
+    A["动捕数据<br/>BVH / FBX / GLB"] --> B["数据处理<br/>特征提取 · 归一化"]
+    B --> C["网络训练<br/>回归 / 生成模型"]
+    C --> D["权重导出"]
+    D --> E["运行时控制<br/>实时推理 · IK 后处理"]
+    E --> F["角色全身运动"]
+    style A fill:#e9f4ff,stroke:#007acc
+    style C fill:#eaf7ed,stroke:#38a152
+    style E fill:#fff2dd,stroke:#f08c1a
+    </pre>
+    <p class="mermaid-caption">图 1-1　AI4Animation 的三段式能力：数据处理 → 训练 → 运行时</p>
+
+    <h2>1.4 研究脉络：八年七项工作</h2>
+    <p>仓库的研究主线按时间排列如下。注意一条清晰的演进逻辑：<strong>从"人工标注单一相位"走向"自动学习多维相位"，
+    再走向"离散码本与端到端生成"</strong>。</p>
+
+    <pre class="mermaid">
+timeline
+    title AI4Animation 研究演进
+    2017 : PFNN 相位函数神经网络 : 地形自适应双足运动
+    2018 : MANN 模式自适应网络 : 四足动物步态控制
+    2019 : NSM 神经状态机 : 角色-场景交互
+    2020 : 局部运动相位 : 多接触篮球运动
+    2021 : 神经动画分层 NAL : 武术格斗合成
+    2022 : DeepPhase 周期自编码器 : 无监督相位流形（最佳论文）
+    2024 : 类别码本匹配 : VR 具身化身控制
+    2026 : AI4AnimationPy : Python 重制版框架
+    </pre>
+    <p class="mermaid-caption">图 1-2　2017–2026 研究时间线</p>
+
+    <h2>1.5 能力地图：一套框架覆盖的任务</h2>
+    <p>README 把演示能力按任务类型组织。这些任务共享框架，但对网络结构提出了不同的挑战，后续章节会逐一对应：</p>
+    <pre class="mermaid">
+flowchart TD
+    Root["AI4Animation 能力域"]
+    Root --> L["双足运动<br/>走/跑/跳/蹲 · 地形适应"]
+    Root --> Q["四足运动<br/>多种步态 · 姿态动作"]
+    Root --> S["角色-场景交互<br/>坐下/开门/搬运/避障"]
+    Root --> F["体育与格斗<br/>篮球运球 · 武术组合技"]
+    Root --> E["具身化身<br/>三点 VR 追踪 · AR/VR"]
+    style Root fill:#007acc,color:#fff,stroke:#005a9e
+    </pre>
+    <p class="mermaid-caption">图 1-3　任务能力地图</p>
+
+    <h2>1.6 Unity 版与 Python 版</h2>
+    <p>仓库目前存在两套实现，这是初学者最容易困惑的地方。2026 年发布的 AI4AnimationPy 并非简单的代码翻译，而是
+    把原本依赖 Unity 编辑器的数据处理、特征提取、推理与后处理全部迁移到 NumPy/PyTorch，同时保留了游戏引擎风格的
+    ECS 架构与更新循环。</p>
+    <table>
+        <thead>
+            <tr><th>维度</th><th>AI4Animation（Unity 版）</th><th>AI4AnimationPy（Python 版）</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>语言/运行时</td><td>C#，运行于 Unity 引擎</td><td>Python 3.12+，NumPy / PyTorch</td></tr>
+            <tr><td>数据处理</td><td>依赖 Unity 编辑器与 Inspector</td><td>独立 Python 环境，可无窗口运行</td></tr>
+            <tr><td>训练方式</td><td>早期版本外部框架（Theano/TensorFlow），后续版本 C# 内训练</td><td>PyTorch 训练，ONNX Runtime 推理</td></tr>
+            <tr><td>渲染</td><td>Unity 原生渲染</td><td>可选 Raylib 渲染，也可 Headless / Manual</td></tr>
+            <tr><td>适用场景</td><td>需要直接对接 Unity 游戏项目</td><td>服务器训练、批量实验、研究迭代</td></tr>
+        </tbody>
+    </table>
+    <div class="callout callout-tip">
+        <span class="callout-title">选型建议</span>
+        <p>如果目标是发论文、做算法实验、在服务器上批量训练，优先从 AI4AnimationPy 入手；如果要把控制器接入 Unity 游戏工程、
+        复现原始 SIGGRAPH Demo 的交互效果，则需要 Unity 版。本教程第二篇的算法原理对两套版本通用，第三篇分别讲解。</p>
+    </div>
+
+    <h2>1.7 在学术谱系中的位置</h2>
+    <p>AI4Animation 不是凭空出现的。它的直接思想源头是运动匹配，以及 Holden 等人更早的动作流形学习工作；
+    它的相位建模思路又影响了后续大量运动生成研究。理解这条谱系，有助于在文献综述中准确定位：</p>
+    <pre class="mermaid">
+flowchart LR
+    MM["运动匹配<br/>Motion Matching 2016"] --> PFNN["PFNN 2017"]
+    AE["动作流形学习<br/>Holden 2015"] --> PFNN
+    PFNN --> MANN["MANN 2018"]
+    MANN --> NSM["NSM 2019"]
+    NSM --> LP["局部相位 2020"]
+    LP --> NAL["NAL 2021"]
+    NAL --> DP["DeepPhase 2022"]
+    DP --> CBM["码本匹配 2024"]
+    style PFNN fill:#e9f4ff,stroke:#007acc
+    style CBM fill:#fdeeee,stroke:#d9534f
+    </pre>
+    <p class="mermaid-caption">图 1-4　学术谱系中的位置（仓库内部主线）</p>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>概念辨析</h4>
+                    <p>用自己的话说明：为什么运动匹配属于"检索"而神经网络控制器属于"生成"？这种区别在内存占用和动作多样性上各意味着什么？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>路线判断</h4>
+                    <p>假设你的课题是"在无显示器的 Linux 服务器上训练一个角色运动控制器"，应该选择哪套框架？列出至少三条依据。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>文献定位</h4>
+                    <p>结合图 1-2 的时间线，总结"相位"这一概念在八年中是如何从人工标注演变为自动学习的，带着这个问题进入后续章节。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>AI4Animation 是一条数据驱动、运动学路线的实时角色动画研究管线，覆盖数据处理、训练、运行时三环节</li>
+        <li>它以神经网络替代手工状态机与运动匹配数据库，目标是兼顾动作质量、紧凑性与可控性</li>
+        <li>2017–2024 的七项论文工作沿"相位建模"主线演进，2026 年增加 Python 重制版</li>
+        <li>研究用优先 Python 版，Unity 工程对接用原版；算法原理两者通用</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://github.com/sebastianstarke/AI4Animation">主仓库 README（所有项目与论文入口）</a></li>
+            <li><a href="https://facebookresearch.github.io/ai4animationpy/">AI4AnimationPy 官方文档</a></li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <span class="nav-placeholder">← 上一章</span>
+        <a href="02-问题定义与运动数据基础.html">下一章：问题定义与运动数据基础 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

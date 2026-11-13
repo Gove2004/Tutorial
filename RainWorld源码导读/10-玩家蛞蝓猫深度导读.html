@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 玩家蛞蝓猫深度导读 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-寻路系统.html">← 上一章</a>
+        <a href="11-渲染层与Futile框架.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>10 玩家蛞蝓猫深度导读</h1>
+        <p>Player 是整个工程中最大的类（约 1.4 万行），它把输入、物理身体、动作状态机和角色差异整合在一个巨型状态机里。本章不逐行复述，而是按“身体 → 输入 → 姿态 → 动作 → 角色差异 → 表现”的顺序，讲清它的组织结构与关键设计。</p>
+
+        <h2>10.1 Player 在架构中的位置</h2>
+        <p>Player 继承 Creature，因此它既是物理对象（有 BodyChunk），也是生物（有 Grasp、State），但它的决策不来自 ArtificialIntelligence，而来自玩家输入。对应关系：</p>
+<pre class="mermaid">
+flowchart TD
+    P["Player（现实）"] --> B["2 BodyChunk + 1 弹簧"]
+    P --> IN["InputPackage[]（10 帧输入历史）"]
+    P --> T["Tongue（Saint 专属）"]
+    P --> PS["PlayerState（抽象状态）"]
+    P --> PG["PlayerGraphics（程序化表现）"]
+    P --> SS["SlugcatStats（角色属性）"]
+</pre>
+
+        <h2>10.2 物理身体：两个 chunk 与一根弹簧</h2>
+        <p>蛞蝓猫的身体很简单，只有两个圆形刚体，用一根弹簧连接：</p>
+<pre><code class="language-csharp">float num = 0.7f * slugcatStats.bodyWeightFac;
+bodyChunks = new BodyChunk[2];
+bodyChunks[0] = new BodyChunk(this, 0, new Vector2(0f, 0f), 9f, num / 2f); // 头
+bodyChunks[1] = new BodyChunk(this, 1, new Vector2(0f, 0f), 8f, num / 2f); // 身
+bodyChunkConnections = new BodyChunkConnection[1];
+bodyChunkConnections[0] = new BodyChunkConnection(
+    bodyChunks[0], bodyChunks[1], 17f, BodyChunkConnection.Type.Normal, 1f, 0.5f);</code></pre>
+        <p>物理参数针对灵活移动调校：重力 0.9、空气阻力 0.999（很滑）、弹性 0.1、表面摩擦 0.5、浮力 0.95、碰撞层 1。注意质量与重量都乘以 <code>slugcatStats.bodyWeightFac</code>，所以不同角色的“手感”首先来自物理参数。</p>
+
+        <h2>10.3 输入系统：InputPackage 与 10 帧历史</h2>
+        <p>Player 维护一个长度 10 的 InputPackage 数组，而不是只读当前帧输入：</p>
+<pre><code class="language-csharp">input = new InputPackage[10];
+// 每帧把旧输入向后挪，最新输入放 input[0]
+for (int i = 9; i > 0; i--) input[i] = input[i - 1];
+input[0] = inputForThisFrame;</code></pre>
+        <p>为什么需要历史？因为很多动作要识别<strong>输入序列与按键时机</strong>：跳、蹲跳、墙跳、翻跳、蓄力、组合键，都要比较当前帧与前几帧的按键沿（按下/松开）。InputPackage 字段对应全部操作：</p>
+<pre><code class="language-csharp">public struct InputPackage
+{
+    public int x; public int y;     // 方向
+    public bool jmp;               // 跳跃
+    public bool thrw;              // 投掷
+    public bool pckp;              // 拾取
+    public bool mp;                // 地图
+    public bool spec;              // 特殊能力
+    public bool crouchToggle;
+    public IntVector2 analogueDir; // 手柄模拟量
+}</code></pre>
+
+        <h3>PlayerController：输入来源抽象</h3>
+        <p>谁来提供 InputPackage 由 PlayerController 抽象：真人玩家、AI 控制的蛞蝓 NPC（SlugNPC）、梦境/过场都可以是控制器。这让同一只 Player 既能被人玩，也能被代码驱动，是多人合作与 NPC 蛞蝓猫的基础。</p>
+
+        <h2>10.4 身体模式：BodyModeIndex</h2>
+        <p>玩家的运动姿态用 BodyModeIndex 表达，它是 ExtEnum，覆盖 11 种基础姿态：</p>
+<pre><code class="language-csharp">Default, Crawl, Stand,
+CorridorClimb, ClimbIntoShortCut, WallClimb, ClimbingOnBeam,
+Swimming, ZeroG, Stunned, Dead</code></pre>
+        <p>BodyMode 是<strong>运动层</strong>状态，决定物理身体当前如何与环境交互（贴墙、爬杆、游泳、失重），而具体的动画由 AnimationIndex 决定。这种“姿态与动画分离”让同一姿态下可以播放不同动作。</p>
+        <div class="callout callout-info">
+            <p><strong>ObjectGrabability</strong>：物品能被怎样抓取由内部枚举区分（CantGrab、OneHand、BigOneHand、TwoHands、Drag），配合 Grasp 决定双手是否被占用、能否边爬边拿。</p>
+        </div>
+
+        <h2>10.5 动作状态机：Update 的组织方式</h2>
+        <p>Player.Update 极长，但本质是一个围绕 bodyMode 与 animation 展开的状态机，每帧大致顺序：</p>
+<pre><code class="language-csharp">public override void Update(bool eu)
+{
+    // 1. 刷新输入历史，处理失温、饥饿、睡眠等全局状态
+    // 2. 根据身体模式分派移动逻辑（走/爬/游/零重力）
+    // 3. 处理动作：跳、跳的各种变体、投掷、拾取、握持
+    // 4. 调用 base.Update 驱动 chunk 物理与弹簧
+    // 5. 更新 animation 与 animationFrame
+}</code></pre>
+        <p>AnimationIndex 是 ExtEnum，包含上百个具体动作（走、跑、蹲、翻跳、滚动、腹部滑行、攀爬、受击……）。状态机的转移条件大量依赖输入历史与 contactPoint（地形接触），这是它与普通生物 AI 最大的不同——<strong>驱动源是确定性的按键沿，而非效用分数</strong>。</p>
+
+        <h2>10.6 舌头 Tongue：Saint 的绳索机制</h2>
+        <p>Saint 没有普通跳跃的强机动性，而是靠可伸缩的舌头。它内部用 Rope（绳索）实现：</p>
+<pre><code class="language-csharp">minRopeLength = 50f;
+maxRopeLength = 170f;
+rope = new Rope(player.room, baseChunk.pos, pos, 1f);
+public void increaseRopeLength(float amount) {
+    idealRopeLength = Mathf.Clamp(idealRopeLength + amount, minRopeLength, maxRopeLength);
+}</code></pre>
+        <p>舌头有 mode（Retracted 收起、AttachedToTerrain 附着），命中地形后像绳索一样摆动并牵引身体，配合 godTimer 限制单次摆动时长。它还会读取 NoSpearStickZone，在禁止区域无法附着，并兼容 ZeroG 模式。</p>
+
+        <h2>10.7 角色差异：SlugcatStats 与 SlugCatClass</h2>
+        <p>不同角色（ Survivor、Monk、Hunter 及 DLC 的 Rivulet、Saint、Artificer、Gourmand、Watcher 等）共享 Player 类，差异全部由 SlugcatStats 数据驱动：</p>
+<pre><code class="language-csharp">public int maxFood;
+public int foodToHibernate;
+public float runspeedFac = 1f;
+public float bodyWeightFac = 1f;
+public float loudnessFac = 1f;
+public float lungsFac;
+public int throwingSkill;
+public float poleClimbSpeedFac;
+public float visualStealthInSneakMode = 0.5f;
+public float generalVisibilityBonus;</code></pre>
+        <p>这套数值覆盖了移动速度、重量、噪声、肺活量、攀爬、投掷、潜行等所有维度。新增角色不需要写新类，只需提供新的 SlugcatStats 与 SlugcatStats.Name（ExtEnum），这是 DLC 能加入大量可玩角色而不破坏 Player 的根本原因。</p>
+
+        <h2>10.8 PlayerState：抽象层状态</h2>
+        <p>PlayerState 继承 CreatureState，保存需要跨房间保留的玩家数据：</p>
+<pre><code class="language-csharp">public int playerNumber;
+public SlugcatStats.Name slugcatCharacter;
+public int foodInStomach;
+public int quarterFoodPoints;
+public bool isGhost;
+public double permanentDamageTracking;
+public bool isPup;
+public string swallowedItem;
+public bool permaDead { get; set; }</code></pre>
+        <p>注意胃里的物品（swallowedItem）与身体状态都在抽象层，因此房间卸载后玩家吃下去的东西、成长阶段（isPup）不会丢失。</p>
+
+        <h2>10.9 PlayerGraphics：程序化表现</h2>
+        <p>PlayerGraphics 继承 GraphicsModule，玩家的尾巴和手都是程序化部件而非骨骼动画：</p>
+<pre><code class="language-csharp">tail = new TailSegment[4];
+// 每段尾巴按角色/成长阶段配置半径与摆幅
+tail[0] = new TailSegment(this, 6f, 4f, null, 0.85f, 1f, 1f, pullInPreviousPosition: true);
+// ...
+hands = new SlugcatHand[2];
+hands[j] = new SlugcatHand(this, bodyChunks[0], j, 3f, 0.8f, 1f);</code></pre>
+        <p>四个 TailSegment 与两个 SlugcatHand 作为 BodyPart 加入列表，跟随身体 chunk 做 Verlet 风格摆动。不同角色（Slugpup、Spear、Watcher 的加长尾巴）只是在构造里用不同参数分支，表现层完全数据驱动。</p>
+
+        <h2>10.10 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：只读当前帧输入，忽略历史</summary>
+            <div class="details-content"><p>很多动作（墙跳、蓄力、组合键）需要输入沿与历史，单帧判定无法识别。自定义动作应利用 input 数组比较前后帧。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：为新角色新建 Player 子类</summary>
+            <div class="details-content"><p>角色差异应通过 SlugcatStats 数据扩展，新建子类会割裂庞大的动作逻辑。先尝试用属性参数表达差异。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：把姿态与动画混为一谈</summary>
+            <div class="details-content"><p>BodyMode 决定物理交互，AnimationIndex 决定播放动作，二者分层。混淆会导致爬墙时动作错乱或物理行为异常。</p></div>
+        </details>
+
+        <h2>10.11 练习与思考</h2>
+        <ol>
+            <li>结合 InputPackage 历史，说明游戏如何区分“普通跳”与“墙跳”，需要检查哪几帧的哪些字段。</li>
+            <li>假设要新增一个“重量级、低速度、高噪声”的可玩角色，列出需要调整的 SlugcatStats 字段，并解释这些数值如何影响物理手感。</li>
+            <li>思考：Player 为什么用“输入驱动的状态机”而不是像其他生物那样用效用 AI？这两种驱动方式在可控性和可信度上各有什么取舍？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>Player 是输入驱动的巨型状态机，身体由 2 chunk + 1 弹簧构成，物理参数决定基础手感。</li>
+            <li>InputPackage 保留 10 帧历史以识别动作序列，PlayerController 抽象输入来源。</li>
+            <li>BodyMode 管运动姿态、AnimationIndex 管具体动作，舌头以 Rope 实现 Saint 的机动。</li>
+            <li>角色差异全部由 SlugcatStats 数据驱动，PlayerState 存抽象状态，PlayerGraphics 用程序化部件表现。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="09-寻路系统.html">← 上一章：寻路系统</a>
+            <a href="11-渲染层与Futile框架.html">下一章：渲染层与 Futile 框架 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

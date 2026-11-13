@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>08 AI 感知与效用决策 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="07-生物骨架与模板系统.html">← 上一章</a>
+        <a href="09-寻路系统.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>08 AI 感知与效用决策</h1>
+        <p>Rain World 的生物之所以显得“聪明”，并不是因为复杂的状态机，而是一套“感知 → 记忆 → 关系 → 效用决策”的流水线。本章按数据流动顺序，拆解它如何看、如何听、如何记住目标，以及如何决定当前该做什么。</p>
+
+        <h2>8.1 AI 的整体数据流</h2>
+<pre class="mermaid">
+flowchart LR
+    S["感官：视觉 VisualScore / 听觉 NoiseTracker"] --> T["Tracker：目标表征与记忆"]
+    T --> R["RelationshipTracker：动态关系"]
+    R --> U["各模块 Utility() 打分"]
+    U --> C["UtilityComparer：选最高效用"]
+    C --> B["Behavior 行为 + 寻路执行"]
+</pre>
+        <p>ArtificialIntelligence 本身很薄，核心 Update 只是依次更新所有模块，真正的智能分布在模块之间：</p>
+<pre><code class="language-csharp">public virtual void Update()
+{
+    timeInRoom++;
+    for (int i = 0; i < modules.Count; i++)
+        modules[i].Update();
+}</code></pre>
+
+        <h2>8.2 视觉：多因素评分而非简单距离</h2>
+        <p>生物能否看见某点，由 <code>VisualScore</code> 打分。它不是一次距离判定，而是多个因素叠加：</p>
+<pre><code class="language-csharp">public virtual float VisualScore(Vector2 lookAtPoint, float bonus)
+{
+    // 超出视野半径直接 0
+    if (!Custom.DistLess(creature.realizedCreature.VisionPoint, lookAtPoint,
+                        creature.creatureTemplate.visualRadius * (1f + bonus)))
+        return 0f;
+    // 距离归一化：越近分越高
+    float num = Mathf.InverseLerp(
+        creature.creatureTemplate.visualRadius * (1f + bonus), 0f,
+        Vector2.Distance(creature.realizedCreature.VisionPoint, lookAtPoint));
+    // 水面/深水视觉衰减
+    if (room.water) {
+        if (visionPoint 与目标深浅不同) num -= 1f - template.throughSurfaceVision;
+        if (任一方在深水中) num -= 1f - template.waterVision;
+    }
+    if (room.aimap.getAItile(lookAtPoint).narrowSpace) num -= 0.5f;
+    // 烟雾等遮挡物进一步调整
+    foreach (VisionObscurer obscurer in room.visionObscurers)
+        num = obscurer.VisionScore(VisionPoint, lookAtPoint, num);
+    return num;
+}</code></pre>
+        <p>评分通过后，<code>VisualContact</code> 还要做一次几何遮挡检测：</p>
+<pre><code class="language-csharp">return creature.Room.realizedRoom.VisualContact(
+    creature.realizedCreature.VisionPoint, lookAtPoint);  // 射线是否被墙挡住</code></pre>
+        <div class="callout callout-info">
+            <p><strong>这套模型解释了潜行机制</strong>：距离、水体、狭窄空间、烟雾、墙体都独立影响可见度。玩家蹲在暗处、躲在烟雾后、隔一层水面，都能降低被发现的概率；而运动物体通过 <code>movementBasedVision</code> 获得可见度加成，所以静止比移动更安全。</p>
+        </div>
+
+        <h2>8.3 Tracker：目标表征与记忆衰减</h2>
+        <p>Tracker 是核心感知模块，它为每个被发现的生物维护一个 <code>CreatureRepresentation</code>，即使目标暂时脱离视野也不立即遗忘：</p>
+<pre><code class="language-csharp">public abstract class CreatureRepresentation
+{
+    public AbstractCreature representedCreature;
+    public bool visualContact;
+    public int ticksSinceSeen;        // 距离上次看见经过多少步
+    public WorldCoordinate lastSeenCoord;
+    public int forgetCounter;
+    public float priority;
+}</code></pre>
+        <p>每帧表征会更新：ticksSinceSeen 递增，超过 <code>seeAroundCorners</code> 后失去视觉，但会重新调用 VisualContact 尝试找回：</p>
+<pre><code class="language-csharp">ticksSinceSeen++;
+if (ticksSinceSeen > parent.seeAroundCorners)
+{
+    visualContact = false;
+    if (parent.AI.VisualContact(chunk)) {
+        ticksSinceSeen = 0;
+        visualContact = true;
+    }
+}</code></pre>
+        <p>它还提供 <code>EstimatedChanceOfFinding</code>，用一个 sigmoid 风格的函数估计重新找到目标的概率，随看不见的时间增加而下降。这让生物在丢失目标后会<strong>前往 lastSeenCoord 搜索，而不是立刻放弃</strong>。</p>
+        <div class="callout callout-tip">
+            <p><strong>seeAroundCorners 的设计意图</strong>：它给生物一个短暂的“视觉记忆宽限”，目标短暂被遮挡（如走过柱子后面）不会立刻判定丢失，避免目标在遮挡边缘反复触发“发现/丢失”，让行为更连贯。</p>
+        </div>
+
+        <h2>8.4 听觉：推测声源并调查</h2>
+        <p>NoiseTracker 让生物在完全看不见目标时也能感知。它维护 <code>TheorizedSource</code>（推测声源）：</p>
+<pre><code class="language-csharp">public class TheorizedSource
+{
+    public Vector2 pos;
+    public int age;
+    public Tracker.CreatureRepresentation creatureRep;
+    public float LASTSOUNDSTRENGTH;
+}</code></pre>
+        <p>声源会随时间衰减并在 forgetTime 后被遗忘：</p>
+<pre><code class="language-csharp">if (age > noiseTracker.forgetTime) Destroy();
+LASTSOUNDSTRENGTH = Mathf.Max(10f, LASTSOUNDSTRENGTH * 0.6f);</code></pre>
+        <p>听到声音会刷新对应生物表征（HeardThisCreature）并更新其最后位置。于是生物能在没看见玩家的情况下，<strong>根据脚步声推断方位、进入 InvestigateSound 行为前往查看</strong>。这也是为什么大声落地、撞墙会引来附近的捕食者。</p>
+
+        <h2>8.5 关系系统：动态关系的演化</h2>
+        <p>模板提供的是默认关系，而 <code>RelationshipTracker</code> 维护会随交互改变的 <code>DynamicRelationship</code>：</p>
+<pre><code class="language-csharp">public class DynamicRelationship
+{
+    public CreatureTemplate.Relationship currentRelationship;
+    public AIModule trackedByModule;
+    public Tracker.CreatureRepresentation trackerRep;
+}
+
+public void Update()
+{
+    var newRelationship = (rt.AI as IUseARelationshipTracker)
+        .UpdateDynamicRelationship(this);
+    if (newRelationship.type != currentRelationship.type)
+        rt.SortCreatureIntoModule(this, newRelationship);
+    trackerRep.priority = newRelationship.intensity * trackedByModuleWeigth;
+    currentRelationship = newRelationship;
+}</code></pre>
+        <p>关系类型变化时，目标会被重新分配到对应的追踪模块（如从“猎物”变成“威胁”）。结合第 7 章的社交记忆，<strong>同一只生物对你的态度会因具体经历而长期改变</strong>——例如你攻击过拾荒者，它对你的关系会从默认转为敌对。</p>
+
+        <h2>8.6 效用决策：UtilityComparer</h2>
+        <p>最终决策采用效用 AI。每个候选模块（攻击、捕猎、躲避、避雨、回巢等）注册到 UtilityComparer，每帧计算自己的 Utility 分数：</p>
+<pre><code class="language-csharp">private float UnSmoothedUtility()
+{
+    return Mathf.Pow(module.Utility(), exponent) * weight;
+}
+
+public override void Update()
+{
+    float num = float.MinValue;
+    for (int i = 0; i < uTrackers.Count; i++)
+    {
+        uTrackers[i].UpdateSmoothing();
+        if (uTrackers[i].SmoothedUtility() > num) {
+            num = uTrackers[i].SmoothedUtility();
+            highestUtilityTracker = uTrackers[i];
+        }
+    }
+}</code></pre>
+        <p>四个关键参数：</p>
+        <table>
+            <thead><tr><th>参数</th><th>作用</th></tr></thead>
+            <tbody>
+                <tr><td>weight 权重</td><td>该行为的基础重要性，不同模块按物种差异加权</td></tr>
+                <tr><td>exponent 指数</td><td>对分数取幂，指数越大越倾向只在高确定性时才选择该行为</td></tr>
+                <tr><td>smoother 平滑器</td><td>用 Tween 平滑分数，避免数值抖动导致行为频繁跳变</td></tr>
+                <tr><td>continuationBonus 持续奖励</td><td>给当前正在执行的行为额外惯性，防止微小分数差打断动作</td></tr>
+            </tbody>
+        </table>
+        <p>最终 <code>HighestUtilityModule()</code> 返回最高分模块，驱动当前 Behavior。</p>
+
+        <h2>8.7 行为状态：Behavior</h2>
+        <p>AI 用一个高层 Behavior 枚举表达当前意图，以蜥蜴为例：</p>
+<pre><code class="language-csharp">public enum Behavior
+{
+    Idle, Hunt, Flee, Travelling, EscapeRain,
+    Fighting, Lurk, InvestigateSound, MoveToDen
+}</code></pre>
+        <p>注意 Behavior 是<strong>意图层</strong>，不直接控制身体：它决定“现在要捕猎/逃跑/回巢”，具体的移动由寻路器（第 9 章）和生物的移动方法执行。这种“意图与执行分离”让决策逻辑与运动控制解耦。</p>
+
+        <div class="callout callout-warning">
+            <p><strong>为什么不用大型状态机</strong>：显式状态机需要穷举所有状态与转移条件，新增行为要改大量转移规则。效用 AI 让每个模块独立打分，<em>新增行为只需新增一个模块并注册</em>，决策由分数竞争自然涌现，扩展性远优于状态机，这与 Rain World 的模组优先哲学一致。</p>
+        </div>
+
+        <h2>8.8 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：Utility 不做平滑导致行为抖动</summary>
+            <div class="details-content"><p>原始分数随感知逐帧波动，不平滑会让生物在两个行为间反复横跳。应配置 smoother 与 continuationBonus 给行为加惯性。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：目标丢失后立即遗忘</summary>
+            <div class="details-content"><p>不利用 ticksSinceSeen 与 lastSeenCoord，生物会在目标短暂遮挡后立刻放弃，表现得很“傻”。应保留记忆宽限并前往最后位置搜索。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：在决策层直接写移动代码</summary>
+            <div class="details-content"><p>Behavior 只应表达意图，直接在决策里改速度会与寻路、物理冲突。移动交给寻路器和移动方法，保持意图与执行分离。</p></div>
+        </details>
+
+        <h2>8.9 练习与思考</h2>
+        <ol>
+            <li>结合 VisualScore 的各因素，列出至少 4 种玩家能降低被发现概率的具体做法，并指出对应代码里的哪个减分项。</li>
+            <li>追踪一只蜥蜴从“听到声音”到“进入 InvestigateSound 前往声源”的完整模块调用链，说明 NoiseTracker、Tracker、UtilityComparer 各自的角色。</li>
+            <li>思考：效用 AI 相比有限状态机，在新增一个 DLC 行为（如“躲避暴雪”）时省去了哪些工作？它又可能带来什么新问题（如两个行为分数长期接近）？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>AI 是“感知→记忆→关系→效用→行为”的流水线，智能分布在模块间而非集中在状态机。</li>
+            <li>视觉由距离、水体、狭窄空间、烟雾、墙体多因素评分；Tracker 用记忆衰减与最后位置支撑搜索。</li>
+            <li>听觉通过推测声源驱动调查，RelationshipTracker 让关系随经历演化。</li>
+            <li>UtilityComparer 对各模块打分，经权重、指数、平滑、持续奖励后选出最高效用行为，Behavior 只表达意图。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="07-生物骨架与模板系统.html">← 上一章：生物骨架与模板系统</a>
+            <a href="09-寻路系统.html">下一章：寻路系统 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

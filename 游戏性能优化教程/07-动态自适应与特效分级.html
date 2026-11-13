@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动态自适应与特效分级 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-UI性能优化专题.html">← 上一章</a>
+        <a href="08-寻路优化.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>动态自适应与特效分级</h1>
+        <p class="chapter-meta">模块二 · 优化策略实战 ｜ 对应原文策略 4、7、10</p>
+
+        <p>前面的 LOD 与设备分档是“静态”的：进游戏定好档位后基本不变。但同一场战斗内部，压力也在剧烈波动——清兵线时 CPU 很闲，五人团战瞬间同屏单位、技能、特效全部拉满。动态自适应要解决的，是<strong>让画质随实时压力波动，把有限的帧预算集中到团战这种关键场景</strong>。</p>
+
+        <h2>7.1 战斗性能动态自适应</h2>
+
+        <p>核心思路是把战斗强度划分为低、中、高（可更多档），不同档位驱动不同的表现系统。当战斗强度升高时，逐步关闭或降低非关键表现：</p>
+
+        <table>
+            <thead>
+                <tr><th>表现项</th><th>低强度</th><th>中强度</th><th>高强度（团战）</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>描边</td><td>全开</td><td>仅主角</td><td>关闭</td></tr>
+                <tr><td>阴影</td><td>实时</td><td>简化</td><td>面片/关闭</td></tr>
+                <tr><td>非关键特效</td><td>正常</td><td>降密度</td><td>裁剪低优先级</td></tr>
+                <tr><td>UI 特效 / 音效</td><td>完整</td><td>精简</td><td>关闭非关键</td></tr>
+                <tr><td>特效质量档位</td><td>高</td><td>中</td><td>低</td></tr>
+            </tbody>
+        </table>
+
+        <h3>战斗强度如何度量</h3>
+        <p>档位不能凭空设定，需要一个可计算的强度信号。常见输入包括：同屏活跃单位数、近几秒技能/特效触发数、当前粒子总数，以及最直接的——近期 CPU 帧时间是否逼近预算。实践中通常把这些信号加权成一个强度分数，再映射到档位。</p>
+
+        <div class="callout callout-tip">
+            <strong>用帧时间做兜底反馈</strong>：基于单位数的预测可能失准（比如特效特别重的技能），加入“帧时间持续超预算就强制升档”的反馈回路，能保证系统在意外压力下仍然保命。
+        </div>
+
+        <h2>7.2 特效动态裁剪：五级分类</h2>
+
+        <p>要裁剪特效，先得知道哪些能裁、哪些不能动。原文按重要程度把特效分为五级：</p>
+
+        <table>
+            <thead>
+                <tr><th>等级</th><th>类型</th><th>裁剪优先级</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Level 1</td><td>氛围感特效（环境飘尘、光晕）</td><td>最先裁</td></tr>
+                <tr><td>Level 2</td><td>光感特效</td><td>高</td></tr>
+                <tr><td>Level 3</td><td>强化手感特效（打击火花）</td><td>中</td></tr>
+                <tr><td>Level 4</td><td>关键设计特效（技能核心表现）</td><td>低</td></tr>
+                <tr><td>Level 5</td><td>功能提示特效（命中、范围警示）</td><td>不裁（承载信息）</td></tr>
+            </tbody>
+        </table>
+
+        <p>高压力场景按等级从低到高裁剪，<strong>Level 5 承载玩法信息，关闭会让玩家无法判断技能范围，原则上保留</strong>。这体现了资源倾斜逻辑：牺牲装饰性表现，保住信息与核心手感。</p>
+
+        <h2>7.3 粒子离线裁剪：治 Overdraw</h2>
+
+        <p>粒子贴图通常是带大量透明区域的方形图，透明像素虽然不产生有效视觉，但默认仍可能进入渲染管线、参与光栅化，白白推高 Overdraw。原文的方案是把这部分处理搬到离线：</p>
+
+        <div class="mermaid">
+flowchart LR
+    A["原始粒子纹理"] --> B["离线分析 Alpha 通道"]
+    B --> C["提取有效像素区域"]
+    C --> D["凸包计算最小多边形"]
+    D --> E["生成裁剪顶点数据"]
+    E --> F["运行时直接使用，跳过透明区"]
+    style A fill:#fdecea,stroke:#e53935,color:#14395a
+    style D fill:#e7f3ff,stroke:#007acc,color:#14395a
+        </div>
+
+        <p>对有效像素点集求<strong>凸包（Convex Hull）</strong>，得到一个能包住所有不透明像素的最小多边形，运行时用这组顶点替代原始矩形，透明区域不再参与绘制。这是一次性的资产预处理，运行时零额外计算。</p>
+
+        <details>
+            <summary>展开：为什么用凸包而不是精确像素轮廓</summary>
+            <div class="details-content">
+                <p>精确沿像素边缘会产生大量顶点和凹多边形，顶点处理成本与排序复杂度上升；凸包以少量顶点换取大部分 Overdraw 收益，且凸多边形渲染稳定。对粒子这类边缘柔软、常带羽化的效果，凸包是性价比最高的近似。</p>
+            </div>
+        </details>
+
+        <h2>7.4 工程实现：带冷却的自适应状态机</h2>
+
+        <p>自适应系统最大的体验风险是<strong>档位频繁横跳</strong>：强度在阈值附近波动时，特效反复出现/消失比一直低档更刺眼。因此除了滞回，还要加切换冷却时间，两次换档之间强制间隔。</p>
+
+<pre><code class="language-csharp">using UnityEngine;
+
+public enum CombatTier { Low, Medium, High }
+
+public class AdaptiveQuality : MonoBehaviour
+{
+    [SerializeField] private int mediumThreshold = 6;
+    [SerializeField] private int highThreshold = 10;
+    [SerializeField] private float switchCooldown = 1.5f;
+    [SerializeField] private float frameBudgetMs = 16.6f;
+
+    private CombatTier tier = CombatTier.Low;
+    private float lastSwitch;
+    private float overBudgetSince;
+
+    public void Evaluate(int activeUnits, float currentFrameMs)
+    {
+        if (Time.unscaledTime - lastSwitch < switchCooldown) return;
+
+        CombatTier target = tier;
+
+        if (activeUnits >= highThreshold)
+        {
+            target = CombatTier.High;
+        }
+        else if (activeUnits >= mediumThreshold)
+        {
+            target = CombatTier.Medium;
+        }
+        else
+        {
+            target = CombatTier.Low;
+        }
+
+        if (currentFrameMs > frameBudgetMs)
+        {
+            overBudgetSince += Time.deltaTime;
+            if (overBudgetSince > 0.5f && tier != CombatTier.High)
+            {
+                target = CombatTier.High;
+            }
+        }
+        else
+        {
+            overBudgetSince = 0f;
+        }
+
+        if (target != tier)
+        {
+            Apply(target);
+            tier = target;
+            lastSwitch = Time.unscaledTime;
+        }
+    }
+
+    private void Apply(CombatTier next)
+    {
+        switch (next)
+        {
+            case CombatTier.Low:
+                QualitySettings.shadowDistance = 40f;
+                break;
+            case CombatTier.Medium:
+                QualitySettings.shadowDistance = 20f;
+                break;
+            case CombatTier.High:
+                QualitySettings.shadowDistance = 0f;
+                break;
+        }
+    }
+}
+</code></pre>
+
+        <h2>7.5 玩家感知边界</h2>
+        <ul>
+            <li>避免在玩家正注视某个特效时把它消失，裁剪优先作用于视野边缘和新触发的特效。</li>
+            <li>能用“降低密度/缩放”软降级的，就不要硬开关，平滑过渡更难被察觉。</li>
+            <li>任何降级都要记录日志，方便事后对照“某档关闭了什么”，排查表现问题。</li>
+        </ul>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">基础练习</span>特效分级标注</h3>
+            <p>为项目中 10 个特效按五级分类打标，并写出在 High 档下哪些会被裁剪、哪些必须保留，说明理由。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>反馈兜底</h3>
+            <p>为什么单靠“同屏单位数”预测强度会失准？请举出一个单位数不多但 GPU 压力很大的场景，并说明帧时间反馈如何兜底。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">进阶挑战</span>软降级</h3>
+            <p>把示例中的硬开关改造成带过渡的缩放/淡入淡出降级，并验证切换瞬间不再出现突变。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>动态自适应按战斗强度实时调整表现，把帧预算集中到团战；强度信号结合单位数与帧时间反馈。</li>
+            <li>特效五级分类决定裁剪顺序，承载玩法信息的功能提示特效不裁。</li>
+            <li>粒子离线裁剪用 Alpha 分析 + 凸包生成有效顶点，运行时零成本降低 Overdraw。</li>
+            <li>自适应状态机必须带滞回与切换冷却，并优先用软降级减少玩家感知。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章</strong>：离开表现层，进入逻辑计算。第 8 章讲寻路优化，包括 A*、区域分块、离线路径与跳点寻路。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="06-UI性能优化专题.html">← 上一章：UI 性能优化专题</a>
+            <a href="08-寻路优化.html">下一章：寻路优化 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

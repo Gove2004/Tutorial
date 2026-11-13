@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 - 第二届总决赛算法日：A–E 五题</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="09-2025-t3t4-gap.html">← 上一章</a>
+    <a href="11-2025-final-security.html">下一章 →</a>
+</nav>
+
+<main>
+    <h1>第二届总决赛算法日：A–E 五题</h1>
+
+    <p>
+        总决赛第一天是纯算法，5 题共 700 分，E 题单独占 300 分。题面来自博客园选手「我就是蓬蒿人」的赛后长文，
+        属于 <span class="src-badge src-b">B 级</span> 信息：题面接近逐字，但个别数据范围可能有出入。
+        代码为本教程重写并用暴力对拍验证，<strong>未做 GCC 编译实测</strong>。
+    </p>
+
+    <table>
+        <thead><tr><th>题</th><th>题型</th><th>关键思想</th><th>分值</th></tr></thead>
+        <tbody>
+            <tr><td>A</td><td>计数 + 单调性</td><td>乘积一旦超过 n，剩下全成立</td><td>100</td></tr>
+            <tr><td>B</td><td>DP / 对偶</td><td>最小权边覆盖</td><td>100</td></tr>
+            <tr><td>C</td><td>树上 + 集合</td><td>颜色点集求并</td><td>100</td></tr>
+            <tr><td>D</td><td>期望 + 多项式</td><td>线性期望 → 积分 → NTT</td><td>100</td></tr>
+            <tr><td>E</td><td>优化题</td><td>在既有代码上调参</td><td>300</td></tr>
+        </tbody>
+    </table>
+
+    <h2>A 题：乘积不小于长度的区间计数</h2>
+
+    <div class="problem">
+        <h3>题目描述</h3>
+        <div class="problem-meta">
+            <span class="src-badge src-b">B 级 · 选手回忆</span>
+            <span class="tag">总决赛算法日 A</span>
+        </div>
+
+        <p>
+            给定长度为 <em>n</em> 的正整数序列 <code>a[0..n−1]</code>，
+            求满足 <code>∏<sub>i=b</sub><sup>e−1</sup> a[i] ≥ e − b</code>（<code>b &lt; e ≤ n</code>）的区间个数。
+        </p>
+        <p><strong>数据范围：</strong>n ≤ 5×10<sup>5</sup>，a<sub>i</sub> ≤ 10<sup>3</sup>；10% 全为 1，10% 每个数 ∈ {1,2}。</p>
+    </div>
+
+    <h3>观察</h3>
+
+    <p>
+        长度最多是 n。乘积一旦超过 n，因为每个数 ≥ 1，继续往左扩展只会让乘积更大、长度也更大，
+        而乘积已经 &gt; n ≥ 长度，所以<strong>更靠左的所有起点都必然满足</strong>。
+    </p>
+
+    <p>
+        对每个右端点 e，从 e−1 往左扫，遇到 1 就<strong>跳过</strong>（1 不增大乘积，只让长度变大，条件更难），
+        只累乘非 1 的数。每乘一个 ≥2 的数乘积翻倍，最多约 19 次就超过 n。
+    </p>
+
+    <div class="definition">
+        <h4>结算规则</h4>
+        <p style="margin:0">
+            当前乘积为 p，当前非 1 位置为 i，左边最近的非 1 位置为 prev。
+            起点 <code>b ∈ (prev, i]</code> 的乘积都等于 p，条件化为 <code>b ≥ e − p</code>，
+            该段贡献 <code>max(0, i − max(prev+1, e−p) + 1)</code> 个区间。
+        </p>
+    </div>
+
+    <p>
+        另外，每个右端点都至少有「长度为 1」的区间 <code>[e−1, e)</code> 成立（乘积 ≥ 1，长度 1）。
+        如果 <code>a[e−1] = 1</code>，它不属于任何非 1 段，要单独补上。
+    </p>
+
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+using ll = long long;
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    int n;
+    cin &gt;&gt; n;
+    vector&lt;int&gt; a(n);
+    for (auto&amp; x : a) cin &gt;&gt; x;
+
+    // prevNonOne[i] = 下标 &lt;= i 中最后一个非 1 的位置，没有则 -1
+    vector&lt;int&gt; prevNonOne(n, -1);
+    for (int i = 0; i &lt; n; ++i) {
+        if (a[i] &gt; 1) prevNonOne[i] = i;
+        else if (i &gt; 0) prevNonOne[i] = prevNonOne[i - 1];
+    }
+
+    auto getPrev = [&amp;](int idx) -&gt; int {
+        return idx &gt;= 0 ? prevNonOne[idx] : -1;
+    };
+
+    ll ans = 0;
+    for (int e = 1; e &lt;= n; ++e) {              // 区间为 [b, e)
+        int i = getPrev(e - 1);
+        if (i &lt; e - 1) ++ans;                   // b = e-1，长度 1 必成立
+        if (i &lt; 0) continue;                    // 左侧全是 1，无其他可能
+
+        ll p = 1;
+        while (i &gt;= 0) {
+            p = min(p * a[i], (ll)n + 1);
+            int lo = getPrev(i - 1) + 1;        // 本段最小起点
+            int minB = (int)max((ll)lo, (ll)e - p);
+            if (minB &lt;= i) ans += i - minB + 1;
+            if (p &gt; n) {                        // 更靠左的起点全部成立
+                ans += lo;
+                break;
+            }
+            i = getPrev(i - 1);
+        }
+    }
+
+    cout &lt;&lt; ans &lt;&lt; '\n';
+    return 0;
+}</code></pre>
+
+    <p>复杂度 O(n log n)：每个右端点最多累乘约 19 次就触发跳出。</p>
+
+    <div class="callout callout-danger">
+        <strong>选手踩过的坑：把「跳过 1」写成「遇到 1 就 break」</strong>
+        <p style="margin:0.5em 0 0">
+            最初版本遇到 1 直接停止扫描，与暴力对拍得到 53 vs 72。1 只是不改变乘积，它左侧的区间仍可能成立，
+            break 会全部丢掉。正确做法是用 <code>prevNonOne</code> 跳到前一个非 1，而不是停止。
+        </p>
+    </div>
+
+    <h2>B 题：数轴上互不重叠的半径之和</h2>
+
+    <div class="problem">
+        <h3>题目描述</h3>
+        <div class="problem-meta">
+            <span class="src-badge src-b">B 级 · 选手回忆</span>
+            <span class="tag">总决赛算法日 B</span>
+        </div>
+
+        <p>
+            数轴上有 <em>n</em> 个点 <code>x_1 &lt; x_2 &lt; … &lt; x_n</code>。为每个点选非负半径 <code>r_i</code>，要求
+        </p>
+        <span class="formula">r<sub>i</sub> + r<sub>i+1</sub> ≤ d<sub>i</sub> = x<sub>i+1</sub> − x<sub>i</sub></span>
+        <p>求 <code>Σ r_i</code> 的最大值。</p>
+        <p><strong>数据范围：</strong>2 ≤ n ≤ 10<sup>6</sup>，x<sub>n</sub> ≤ 10<sup>9</sup>。</p>
+        <p><strong>样例：</strong><code>[0,1,5]</code> → 5（取 <code>[1,0,4]</code>）；<code>[0,3,7,10]</code> → 6（取 <code>[3,0,3,0]</code>）。</p>
+    </div>
+
+    <h3>转成对偶：最小权边覆盖</h3>
+
+    <p>
+        直接在实数上贪心定半径，容易陷入「当前点取多少」的连续取值困境。这个问题是线性规划，它的对偶是：
+    </p>
+
+    <div class="definition">
+        <h4>对偶问题</h4>
+        <p style="margin:0">
+            在 n−1 条边（边 i 的权为 d<sub>i</sub>）上选一个集合，使<strong>每个点都被至少一条选中的边覆盖</strong>，
+            最小化选中边的权值和。由强对偶，其最优值等于原问题的最大 Σr<sub>i</sub>。
+        </p>
+    </div>
+
+    <p>
+        路径上的边覆盖有标准 DP：<code>dp0</code> 表示当前点已被覆盖的最小代价，<code>dp1</code> 表示当前点尚未被覆盖
+        （等右边那条边来盖）的最小代价。
+    </p>
+
+    <div class="definition">
+        <h4>转移</h4>
+        <span class="formula">new0 = min(dp0, dp1) + d</span>
+        <span class="formula">new1 = dp0</span>
+    </div>
+
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+using ll = long long;
+
+const ll INF = (ll)4e18;
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    int n;
+    cin &gt;&gt; n;
+    vector&lt;ll&gt; x(n);
+    for (auto&amp; v : x) cin &gt;&gt; v;
+
+    // 第 1 个点只能被边 1 覆盖，此刻还没选边，所以 dp0 = INF
+    ll dp0 = INF, dp1 = 0;
+
+    for (int i = 1; i &lt; n; ++i) {
+        ll d = x[i] - x[i - 1];
+        ll n0 = min(dp0, dp1) + d;   // 选这条边，覆盖当前点与前一个
+        ll n1 = dp0;                 // 不选这条边，当前点未覆盖，前一个必须已覆盖
+        dp0 = n0;
+        dp1 = n1;
+    }
+
+    cout &lt;&lt; dp0 &lt;&lt; '\n';           // 最后一个点必须已被覆盖
+    return 0;
+}</code></pre>
+
+    <p>验证：<code>[0,1,5]</code> → 5；<code>[0,3,7,10]</code> → 6。</p>
+
+    <div class="callout callout-warning">
+        <strong>不要凭直觉「从外向内」</strong>
+        <p style="margin:0.5em 0 0">
+            选手原文提到最初以为最优是「从两端向中间尽量给外侧」。它在小例子上能蒙对，但最优解不唯一
+            （<code>[3,0,3,0]</code> 与 <code>[0,3,1,3]</code> 并列），贪心没有可证的交换性。
+            看到线性约束 + 最大化，先问「对偶是不是经典问题」。
+        </p>
+    </div>
+
+    <h2>C 题：子树并集上的同色果子</h2>
+
+    <div class="problem">
+        <h3>题目描述</h3>
+        <div class="problem-meta">
+            <span class="src-badge src-b">B 级 · 选手回忆</span>
+            <span class="tag">总决赛算法日 C</span>
+        </div>
+
+        <p>
+            以 0 为根的有根树，<code>t(v)</code> 为 v 的子树（含 v）。<em>m</em> 次操作，第 <em>i</em> 次给
+            <code>t(a_i) ∪ t(b_i)</code> 的每个点放一颗颜色为 <em>i</em> 的果子。
+        </p>
+        <p>对每个点 u，求有多少个点 v，使 u 与 v 的篮子中存在同色果子。</p>
+        <p><strong>数据范围：</strong>2 ≤ n ≤ 2×10<sup>5</sup>，m ≤ 10<sup>5</sup>。</p>
+    </div>
+
+    <h3>翻译成集合</h3>
+
+    <p>颜色 i 出现的点集是 <code>S_i = t(a_i) ∪ t(b_i)</code>，于是：</p>
+
+    <span class="formula">answer[u] = | ∪<sub>i : u ∈ S_i</sub> S_i |</span>
+
+    <p>u 自己一定在并集里，所以答案至少为 1。</p>
+
+    <h3>50 分：bitset</h3>
+
+    <p>
+        给每个点一个 bitset，第 i 位表示「有没有颜色 i」。对每次操作，把两个子树内所有点的第 i 位置 1
+        （Euler 序下子树是连续区间，可用差分/树状数组批量标记）。
+        然后对每个 u，把「与 u 有共同颜色」的所有点并入一个 bitset，统计 1 的个数。
+    </p>
+
+    <p>
+        点对之间的 bitset 交是 O(m/64)，枚举所有点对是 O(n²/64)，只能过 n 较小的数据。
+        选手的记录正是「bitset 暴力 50 分」。
+    </p>
+
+<pre><code class="language-cpp">// 50 分思路（伪代码）
+// dfn[v] 为 Euler 序，子树对应 [dfn[v], dfn[v] + sz[v])
+for (int i = 1; i &lt;= m; ++i) {
+    for (int v : subtree(a[i])) hasColor[v].set(i);
+    for (int v : subtree(b[i])) hasColor[v].set(i);
+}
+for (int u = 0; u &lt; n; ++u) {
+    bitset&lt;MAXM&gt; uni;
+    for (int v = 0; v &lt; n; ++v)
+        if ((hasColor[u] &amp; hasColor[v]).any()) uni.set(v);
+    cout &lt;&lt; uni.count() &lt;&lt; '\n';
+}</code></pre>
+
+    <h3>满分方向</h3>
+
+    <ul>
+        <li><strong>子树并 = 两个区间</strong>：Euler 序下每个子树是连续区间，<code>t(a) ∪ t(b)</code> 是两个区间的并（相交则合并）。</li>
+        <li><strong>离线扫描线</strong>：把「颜色 i 覆盖区间 I_i」看作区间染色，按右端点扫描，用线段树维护每个左端点的贡献。</li>
+        <li><strong>按颜色聚合</strong>：<code>answer[u] = Σ_i |S_i| [u ∈ S_i]</code> 减去重复计数，重复部分来自多个颜色覆盖同一批点，可用容斥或合并 dfs 序处理。</li>
+    </ul>
+
+    <p>
+        公开资料没有给出 C 题的完整正解，本章不编造。bitset 版本足够拿 50 分，剩余部分建议沿「区间并 + 扫描线」自己推。
+    </p>
+
+        <h2>D 题：抽卡次数的期望</h2>
+
+    <div class="problem">
+        <h3>题目描述</h3>
+        <div class="problem-meta">
+            <span class="src-badge src-b">B 级 · 选手回忆</span>
+            <span class="tag">总决赛算法日 D</span>
+        </div>
+
+        <p>
+            有 <em>m</em> 张 A 类卡，价值 <code>a_1…a_m</code>；<em>n</em> 张 B 类卡，价值 <code>b_1…b_n</code>。
+            所有卡混在一起，每次<strong>不放回</strong>抽一张，抽到某张的概率正比于它的价值。
+            一直抽到 <strong>A 类卡全部抽完</strong>为止，求总抽卡次数的期望，模 998244353。
+        </p>
+        <p><strong>数据范围：</strong>1 ≤ m ≤ 1000，0 ≤ n ≤ 100，a<sub>i</sub> ≤ 500，b<sub>i</sub> ≤ 10<sup>8</sup>；n = 0 时答案为 m。</p>
+    </div>
+
+    <h3>第一步：线性期望</h3>
+
+    <p>A 类卡一定会被全部抽完，所以总次数 = m + 抽到的 B 类卡数：</p>
+
+    <span class="formula">E = m + Σ<sub>j</sub> P(B<sub>j</sub> 在最后一张 A 之前被抽到)</span>
+
+    <p>
+        <code>P(B_j 在最后一张 A 之前) = 1 − P(B_j 排在所有 A 之后)</code>。
+        于是只需对每张 B 卡求「它排在全部 A 之后」的概率。
+    </p>
+
+    <h3>第二步：指数时钟</h3>
+
+    <p>
+        「按价值比例不放回抽」等价于给每张卡 k 一个速率 <code>w_k</code> 的指数时钟，每次抽最先响的那张
+        （Plackett–Luce 表示）。B<sub>j</sub> 排在所有 A 之后 ⟺ <code>T_j &gt; max_i T_i</code>，概率为：
+    </p>
+
+    <span class="formula">P<sub>j</sub> = ∫<sub>0</sub><sup>∞</sup> b<sub>j</sub>e<sup>−b<sub>j</sub>t</sup> ∏<sub>i</sub>(1 − e<sup>−a<sub>i</sub>t</sup>) dt</span>
+
+    <p>令 <code>u = e<sup>−t</sup></code>，化为 Beta 型积分：</p>
+
+    <span class="formula">P<sub>j</sub> = b<sub>j</sub> ∫<sub>0</sub><sup>1</sup> u<sup>b<sub>j</sub>−1</sup> ∏<sub>i</sub>(1 − u<sup>a<sub>i</sub></sup>) du</span>
+
+    <p>
+        把 <code>Q(u) = ∏(1 − u<sup>a<sub>i</sub></sup>) = Σ q<sub>k</sub>u<sup>k</sup></code> 展开，则：
+    </p>
+
+    <span class="formula">P<sub>j</sub> = b<sub>j</sub> Σ<sub>k</sub> q<sub>k</sub> / (b<sub>j</sub> + k)</span>
+
+    <p>
+        <code>Q</code> 的度数最大为 <code>Σa_i ≤ 5×10<sup>5</sup></code>。分治 + NTT 可以在
+        O(D log<sup>2</sup>D) 内求出所有 q<sub>k</sub>，再对每张 B 卡做一次 O(D) 求和。
+        模数选 998244353 正是因为它是 NTT 友好模数——这个信号本身就提示了正解方向。
+    </p>
+
+    <div class="callout callout-info">
+        <strong>为什么不能对每个 B 卡单独跑 DP</strong>
+        <p style="margin:0.5em 0 0">
+            直接按「A 的子集」做状态是 2<sup>m</sup>。而 <code>Q(u)</code> 只和 A 的价值有关，
+            算一次就能给所有 B 卡复用——这是本题的降维点。
+        </p>
+    </div>
+
+    <h3>小数据实现（多项式乘法用朴素双重循环）</h3>
+
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+using ll = long long;
+const ll MOD = 998244353;
+
+ll modpow(ll a, ll e) {
+    ll r = 1;
+    while (e) { if (e &amp; 1) r = r * a % MOD; a = a * a % MOD; e &gt;&gt;= 1; }
+    return r;
+}
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    int m, n;
+    cin &gt;&gt; m &gt;&gt; n;
+    vector&lt;int&gt; a(m), b(n);
+    for (auto&amp; v : a) cin &gt;&gt; v;
+    for (auto&amp; v : b) cin &gt;&gt; v;
+
+    // Q(u) = Π (1 - u^{a_i})，朴素卷积，仅适合小数据
+    vector&lt;ll&gt; q(1, 1);
+    int deg = 0;
+    for (int ai : a) {
+        vector&lt;ll&gt; nq(deg + ai + 1, 0);
+        for (int k = 0; k &lt;= deg; ++k) {
+            nq[k] = (nq[k] + q[k]) % MOD;
+            nq[k + ai] = (nq[k + ai] - q[k] + MOD) % MOD;
+        }
+        q = nq;
+        deg += ai;
+    }
+
+    ll ans = m % MOD;
+    for (int bj : b) {
+        ll p = 0;
+        for (int k = 0; k &lt;= deg; ++k) {
+            p = (p + q[k] * modpow((ll)bj + k, MOD - 2)) % MOD;
+        }
+        p = p * bj % MOD;                 // P_j
+        ans = (ans + 1 - p + MOD) % MOD;  // 加上「在最后一张 A 之前」的概率
+    }
+
+    cout &lt;&lt; ans % MOD &lt;&lt; '\n';
+    return 0;
+}</code></pre>
+
+    <p>
+        这段代码能验证公式，但 <code>Σa</code> 到 5×10<sup>5</sup> 时既跑不动卷积，也跑不动
+        <code>n × D</code> 次 <code>modpow</code>。大数据需要：分治 NTT 求 Q；再用线性递推预处理逆元或做多点评值，
+        把每张 B 卡的求和降到可接受范围。
+    </p>
+
+    <div class="callout callout-warning">
+        <strong>n = 0 是独立分支</strong>
+        <p style="margin:0.5em 0 0">
+            没有 B 卡时，抽卡次数恒为 m，直接输出 m。不要让它走进「n 张卡求和」的循环（会得到 m，但大量数据下
+            白跑一遍）。
+        </p>
+    </div>
+
+    <h2>E 题：优化 Satlike-w 局部搜索</h2>
+
+    <div class="problem">
+        <h3>题目描述</h3>
+        <div class="problem-meta">
+            <span class="src-badge src-b">B 级 · 选手回忆</span>
+            <span class="tag">总决赛算法日 E</span>
+            <span class="tag green">300 分</span>
+        </div>
+
+        <p>
+            赛题给出一份 Satlike-w（加权 MaxSAT 局部搜索算法）的代码，要求你实现或优化三个函数：
+        </p>
+        <ul>
+            <li><code>void flip(int flipvar)</code>：翻转一个变量，并增量更新所有相关子句的满足状态与权重；</li>
+            <li><code>void local_search(std::vector&lt;int&gt;&amp; init_solution)</code>：从初始解出发做局部搜索；</li>
+            <li><code>int pick_var()</code>：选择下一个要翻转的变量。</li>
+        </ul>
+
+        <p>
+            按最终解的质量（满足的加权子句总权重）给分，总分 300。评分不是「通过/不通过」，
+            而是按结果好坏分档。
+        </p>
+
+        <p>
+            选手记录的现场情况：官方给的代码有下标越界、编辑器频繁崩溃、只能用 gdb 命令行调试；
+            本地自测 60–70 分（满分 300 的分数段）、给 <code>local_search</code> 加「跳出局部最优」后反而只有 27 分。
+        </p>
+    </div>
+
+        <h3>这类题在考什么</h3>
+
+    <p>
+        它不考「你会不会 MaxSAT」，考的是<strong>在别人写好的代码上把指标做上去</strong>：
+        读懂增量维护的数据结构、找到瓶颈、做可控的改动、用评测分数验证改动是否有效。
+        这正是工程岗的日常。
+    </p>
+
+ <table>
+        <thead><tr><th>可改的地方</th><th>常见做法</th><th>风险</th></tr></thead>
+        <tbody>
+            <tr><td><code>pick_var</code></td><td>打分函数改成「make − break」的加权组合、加 tabu 或年龄项</td><td>改坏后陷入循环，分数暴跌</td></tr>
+            <tr><td><code>flip</code></td><td>增量更新 <code>score</code>、<code>make</code>、<code>break</code>，避免重算子句</td><td>漏更新一个数组，静默错误</td></tr>
+            <tr><td><code>local_search</code></td><td>加扰动、重启、自适应权重、按时间预算提前退出</td><td>扰动过强会破坏收敛，效果可能比不改更差</td></tr>
+        </tbody>
+    </table>
+
+    <h3>增量维护的核心</h3>
+
+    <p>
+        MaxSAT 局部搜索的每一次 <code>flip(v)</code> 只影响包含 v 的子句。对每个子句维护「当前满足的字面数」，
+        翻转 v 时：
+    </p>
+
+<pre><code class="language-cpp">// 伪代码：翻转变量 v
+void flip(int v) {
+    for (int c : clausesContaining[v]) {
+        bool wasSat = (satCount[c] &gt; 0);
+        // v 在子句 c 中可能是正文字或负文字
+        satCount[c] += (v 以正文字出现 ? -1 : +1);
+        bool nowSat = (satCount[c] &gt; 0);
+        if (wasSat &amp;&amp; !nowSat) {
+            // 从满足变不满足：该子句权重从得分中扣除，并更新相关变量的 break
+            curScore -= weight[c];
+            for (int u : varsInClause[c]) breakScore[u] += weight[c];
+        } else if (!wasSat &amp;&amp; nowSat) {
+            curScore += weight[c];
+            for (int u : varsInClause[c]) breakScore[u] -= weight[c];
+        }
+    }
+    curSolution[v] ^= 1;
+}</code></pre>
+
+    <p>
+        这段代码的关键不是「写得对」，而是<strong>每改一处都要验证</strong>：
+        修改前后用同一组初始解跑，比较最终分数；如果分数下降，先怀疑增量更新漏了一个数组，而不是怀疑算法。
+    </p>
+
+    <div class="callout callout-danger">
+        <strong>选手的 27 分教训</strong>
+        <p style="margin:0.5em 0 0">
+            他给 <code>local_search</code> 加了「跳出局部最优」的机制，本地测试 60–70 分，正式评测只有 27 分。
+            可能原因有两类：一是新逻辑改变了搜索的时间预算，导致大部分实例还没收敛就被截断；
+            二是扰动参数在正式数据分布下过强。这类改动<strong>必须在小样本上先验证「改动前后同一初始解」的分数差</strong>，
+            而不是只看「跑完了感觉不错」。
+        </p>
+    </div>
+
+    <h3>工程环境上的坑</h3>
+
+    <ul>
+        <li><strong>下标越界</strong>：官方代码本身有越界，开 <code>-fsanitize=address</code> 先定位，再决定是修还是绕。</li>
+        <li><strong>编辑器崩溃</strong>：文件大、补全插件拖慢时，用 <code>vim</code>/<code>nano</code> 直接改，别在 IDE 里反复重载。</li>
+        <li><strong>只能用 gdb</strong>：提前练会 <code>break</code>、<code>print</code>、<code>bt</code>、<code>watch</code> 四个命令，比现场查文档快。</li>
+        <li><strong>时间预算</strong>：300 分的题通常按「解的质量 + 运行时间」综合给分，先把「不超时」的版本跑通，再谈质量。</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <strong>可迁移的能力</strong>
+        <p style="margin:0.5em 0 0">
+            优化题的本质是「指标驱动开发」：定义指标 → 建立基线 → 做单点改动 → 对比指标 → 保留或回滚。
+            这套方法同样适用于虚拟机装箱（T5）、模型量化（AI 日）和任何工程题。
+        </p>
+    </div>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>A 题：乘积超过 n 后全部成立，用 <code>prevNonOne</code> 跳过 1，O(n log n)。</li>
+        <li>B 题：最大化问题和「最小权边覆盖」对偶，路径上 O(n) DP。</li>
+        <li>C 题：答案 = 覆盖 u 的所有颜色点集的并；bitset 拿 50 分，满分靠区间并 + 扫描线。</li>
+        <li>D 题：线性期望 → 指数时钟积分 → 多项式 <code>∏(1−u^{a_i})</code> → NTT，模数已经给了提示。</li>
+        <li>E 题：在既有代码上调指标，增量更新的正确性优先于花哨的扰动。</li>
+    </ul>
+
+    <p>
+        这五题里，A、B 是「想到就写完」，C、D 是「想到也写不完」，E 是「写完了也不一定分高」。
+        总决赛的分数分布，往往取决于你在 C、D 上愿意投入多少时间，以及 E 题能不能稳定跑完。
+    </p>
+
+
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav bottom">
+        <a href="09-2025-t3t4-gap.html">← 上一章：T3/T4 缺口</a>
+        <a href="11-2025-final-security.html">下一章：安全赛道 Q1–Q5 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

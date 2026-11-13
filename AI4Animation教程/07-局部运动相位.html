@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 局部运动相位 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="06-NSM神经状态机.html">← 上一章：NSM</a>
+    <a href="08-神经动画分层.html">下一章：神经动画分层 →</a>
+</nav>
+
+<main>
+    <h1>07　局部运动相位</h1>
+
+    <div class="paper-meta">
+        <dl>
+            <dt>论文</dt><dd>Local Motion Phases for Learning Multi-Contact Character Movements</dd>
+            <dt>作者</dt><dd>Sebastian Starke, Yiwei Zhao, Taku Komura, Kazi Zaman</dd>
+            <dt>发表</dt><dd>ACM Transactions on Graphics 39(4), Article 54, SIGGRAPH 2020</dd>
+            <dt>仓库位置</dt><dd>AI4Animation/SIGGRAPH_2020</dd>
+        </dl>
+    </div>
+
+    <h2>7.1 全局相位在异步运动上的失败</h2>
+    <p>篮球一对一包含运球、变向、假动作、抢断等动作，身体与球、地面、对手之间的接触快速切换且<strong>各身体部位
+    异步发生</strong>。单一全局相位无法描述这种各部位频率与相位差持续变化的运动——任何不遵循同一模式的动作都会被
+    错误地与其他状态混合。论文的回答是把相位概念"反转"：<strong>不再用一个全局相位描述全身，而是为每根骨骼定义
+    独立的局部相位</strong>。</p>
+
+    <h2>7.2 局部相位的定义</h2>
+    <div class="definition">
+        <h4>局部运动相位（local motion phase）</h4>
+        <p>以骨骼与外部物体/环境之间的<strong>接触转换</strong>为规则，为每根骨骼自动计算一个相位。它可以从非结构化动捕数据
+        中完全自动提取，无需人工标注；网络据此分别学习各肢体的局部运动，再整合为协调的全身行为。</p>
+    </div>
+
+    <h2>7.3 接触信号预处理</h2>
+    <p>原始信号是一个接触块函数（无接触为 0、接触为 1）。处理分两步：</p>
+    <ol>
+        <li><strong>窗口归一化</strong>：在以当前帧为中心、60 帧（1 秒）的窗口内做标准化，减去窗口均值、除以标准差。
+        这样短接触对应较大的正值、周围环绕较小负值，长接触反之，使不同接触时长保持相近的重要性</li>
+        <li><strong>Butterworth 低通滤波</strong>：对整个时域平滑，截止频率取 3.25，依据香农-奈奎斯特定理、对应网络
+        所用 13 样本（−1s 到 +1s）的时间窗口计算</li>
+    </ol>
+
+    <pre class="mermaid">
+flowchart LR
+    C["接触块函数<br/>0/1"] --> N["60 帧窗口<br/>归一化"]
+    N --> B["Butterworth<br/>低通滤波 (3.25)"]
+    B --> G["目标信号 G(t)"]
+    G --> Fit["进化策略<br/>三角函数拟合"]
+    Fit --> Phi["相位 φ + 振幅 a"]
+    style Fit fill:#fff2dd,stroke:#f08c1a
+    </pre>
+    <p class="mermaid-caption">图 7-1　单骨骼局部相位提取流程</p>
+
+    <h2>7.4 相位拟合：为什么用进化策略</h2>
+    <p>拟合目标由三角函数构成，优化景观是非凸的、存在大量局部极小值。普通梯度下降（论文中对比）会产生不稳定、带噪声的
+    错位。论文采用<strong>混合进化策略</strong>：以遗传算法与粒子群优化做全局概率搜索，再用 BFGS 做局部精修，兼顾全局
+    鲁棒性与梯度方法的速度和连续性。</p>
+    <p>拟合完成后，一维相位与二维相位向量分别为：</p>
+    <div class="formula">
+        φ<sub>i</sub> = ( f<sub>i</sub>·t − s<sub>i</sub> ) mod 2π
+    </div>
+    <div class="formula">
+        P<sub>i</sub> = ‖v<sub>Φ</sub>‖<sub>∞</sub> · a<sub>i</sub> · ( sin φ<sub>i</sub>, cos φ<sub>i</sub> )<sup>T</sup>
+    </div>
+    <p>其中 a 是拟合出的振幅，‖v<sub>Φ</sub>‖<sub>∞</sub> 是频率窗口 Φ = 1/Δφ 内骨骼的最大速度幅值。</p>
+
+    <h2>7.5 振幅调制的两个关键作用</h2>
+    <table>
+        <thead><tr><th>作用</th><th>机制</th></tr></thead>
+        <tbody>
+            <tr><td>处理"无运动"状态</td><td>骨骼不动时速度为零，P 被缩放到零向量——因为此时相位 φ 本身没有定义，零向量比任意角度更合理</td></tr>
+            <tr><td>区分快慢动作</td><td>接触模式相似的走与跑、不同速度的运球，靠振幅大小区分；振幅还可作为控制量，调小即可抑制某肢体运动</td></tr>
+        </tbody>
+    </table>
+    <p>论文给出的具体例子：运球时，非运球手那侧手臂的运动可以通过缩小对应振幅来抑制。</p>
+
+    <h2>7.6 生成式控制模型</h2>
+    <p>第二个贡献解决"低维控制信号与丰富全身动作之间的歧义"。它由三个组件构成：</p>
+    <pre class="mermaid">
+flowchart LR
+        subgraph 生成式控制模型
+        E["编码器 E<br/>512 单元"] --> Z["潜码（维度 n/2）"]
+        Z --> G["解码器 G"]
+        D["判别器 D"] -. 判断真伪 .-> G
+        end
+        U["平滑轨迹<br/>手柄+自回归混合"] --> E
+        G --> C["锐利控制信号<br/>→ 全身运动"]
+        style E fill:#e9f4ff,stroke:#007acc
+        style D fill:#fdeeee,stroke:#d9534f
+    </pre>
+    <p class="mermaid-caption">图 7-2　编码器-解码器-判别器结构</p>
+    <ul>
+        <li><strong>编码器</strong>：把用户手柄输入与自回归信号混合后的平滑轨迹压缩成低维潜码（取输入维度的一半形成瓶颈），
+        含 dropout 0.3</li>
+        <li><strong>解码器</strong>：从潜码还原控制信号</li>
+        <li><strong>判别器</strong>：对抗训练，区分生成的控制信号与真实控制信号，使潜空间构成控制信号的流形</li>
+    </ul>
+    <p>运行时对用户输入对应的潜码<strong>添加噪声</strong>再解码，即可在同一控制上下文下产生多种锐利的控制信号变体，
+    映射为带细微差异的全身动作——这为在相同语境下改变运动风格提供了机制。</p>
+
+    <h2>7.7 应用与效果</h2>
+    <p>在篮球数据上，系统可实时生成运球、假动作、抢断、攻防转换；局部相位在脚（LF/RF）、手（LH/RH）和球（B）上
+    分别提取，换手运球时手与球的相位关系能被正确刻画。论文还指出该方法用于坐椅子、开门、四足运动等接触型任务时，
+    质量高于此前模型，且全程无需人工标注。</p>
+
+    <h2>7.8 局限</h2>
+    <ul>
+        <li>局部相位仅基于接触定义，<strong>非接触运动无法覆盖</strong>，论文将其列为首要未来工作</li>
+        <li>进化策略逐骨骼拟合，计算流程复杂、耗时</li>
+        <li>控制信号一旦调整，控制器仍需从头重训——论文据此提出"解耦运动流形与控制映射"的设想，直接影响后续工作</li>
+    </ul>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>概念反转</h4>
+                    <p>用自己的话说明局部相位相对全局相位的"反转"体现在哪里，以及它为什么能处理异步接触。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>优化选择</h4>
+                    <p>为什么三角函数拟合不适合直接用梯度下降？混合进化策略中全局搜索与 BFGS 各自承担什么角色？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>生成机制</h4>
+                    <p>潜码加噪声为什么能产生运动风格变化？这与直接在姿态空间加噪声相比有什么优势？</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>局部相位以接触转换为规则、按骨骼自动提取，把单全局相位扩展为多局部相位，支持异步多接触运动</li>
+        <li>接触信号经窗口归一化与 Butterworth 滤波，再由遗传算法+粒子群+BFGS 的混合进化策略拟合</li>
+        <li>二维相位向量含振幅调制，零运动时归零、还能区分快慢并作为控制量</li>
+        <li>生成式控制模型用对抗潜空间加噪声采样，在同一语境下产生动作变体；局限是仅覆盖接触型运动</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://dl.acm.org/doi/pdf/10.1145/3386569.3392450">局部运动相位论文原文</a></li>
+            <li>Starke et al. 2018（进化策略在该团队工作中的早期应用）</li>
+        </ul>
+    </ul>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="06-NSM神经状态机.html">← 上一章：NSM</a>
+        <a href="08-神经动画分层.html">下一章：神经动画分层 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

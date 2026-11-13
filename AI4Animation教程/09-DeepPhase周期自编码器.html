@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>09 DeepPhase 周期自编码器 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="08-神经动画分层.html">← 上一章：神经动画分层</a>
+    <a href="10-类别码本匹配.html">下一章：类别码本匹配 →</a>
+</nav>
+
+<main>
+    <h1>09　DeepPhase：周期自编码器</h1>
+
+    <div class="paper-meta">
+        <dl>
+            <dt>论文</dt><dd>DeepPhase: Periodic Autoencoders for Learning Motion Phase Manifolds</dd>
+            <dt>作者</dt><dd>Sebastian Starke, Ian Mason, Taku Komura</dd>
+            <dt>发表</dt><dd>ACM Transactions on Graphics 41(4), Article 108, SIGGRAPH 2022（<strong>最佳论文奖</strong>）</dd>
+            <dt>仓库位置</dt><dd>AI4Animation/SIGGRAPH_2022</dd>
+        </dl>
+    </div>
+
+    <h2>9.1 动机：把相位从标注中解放出来</h2>
+    <p>回顾前序工作：PFNN 需要人工标注相位，局部相位依赖接触事件与进化策略拟合。DeepPhase 提出一个更彻底的问题：
+    <strong>能否完全无监督地、从任意运动信号中自动学出相位？</strong>它给出的工具是周期自编码器（Periodic
+    Autoencoder, PAE），并在工业数据上验证了所学相位流形的通用性。</p>
+
+    <h2>9.2 总体架构：时序卷积自编码器</h2>
+    <p>PAE 是一个时序卷积自编码器，输入输出为相同的运动信号窗口，中间瓶颈被强制为<strong>少量周期信号</strong>：</p>
+
+    <pre class="mermaid">
+flowchart LR
+        X["运动信号窗口<br/>N=121 · 60Hz"] --> Enc["时序卷积编码器<br/>多层 1D 卷积"]
+        Enc --> FFT["FFT 层<br/>频率域瓶颈"]
+        FFT --> PA["周期参数层<br/>振幅/频率/偏移/相移"]
+        PA --> PAct["周期激活<br/>2D 相位通道"]
+        PAct --> Dec["时序卷积解码器"]
+        Dec --> Out["重建运动信号"]
+        style FFT fill:#fff2dd,stroke:#f08c1a
+        style PAct fill:#eaf7ed,stroke:#38a152
+    </pre>
+    <p class="mermaid-caption">图 9-1　周期自编码器结构</p>
+
+    <h2>9.3 FFT 层：在频率域做线性滤波</h2>
+    <p>瓶颈处先做快速傅里叶变换，把信号映射到频率域。网络在频率域中以<strong>线性滤波</strong>的方式选择与压缩频率成分，
+    再逆变换回时域。这一设计把周期信号的提取变成可微操作，使整个网络可以端到端训练，同时保证瓶颈只保留与周期相关的
+    频率分量。</p>
+
+    <h2>9.4 周期参数与周期激活</h2>
+    <p>每个周期单元由四个可学习参数完全刻画：</p>
+    <table>
+        <thead><tr><th>参数</th><th>含义</th></tr></thead>
+        <tbody>
+            <tr><td>振幅 Amplitude</td><td>该周期分量的强度</td></tr>
+            <tr><td>频率 Frequency</td><td>周期运动的快慢</td></tr>
+            <tr><td>相位偏移 Phase Offset</td><td>该单元相对其他单元的相位差</td></tr>
+            <tr><td>相移 Phase Shift</td><td>时间上的整体偏移</td></tr>
+        </tbody>
+    </table>
+    <p>周期激活函数把每个通道输出为二维向量 <code>(sin φ, cos φ)</code>，与前几章的二维相位表示保持一致，
+    从而构成连续、可微、无首尾不连续的相位空间。</p>
+
+    <div class="formula">
+        φ<sub>c</sub>(t) = 2π f<sub>c</sub> t + s<sub>c</sub>，输出 a<sub>c</sub> ( sin φ<sub>c</sub>, cos φ<sub>c</sub> )
+    </div>
+
+    <h2>9.5 训练</h2>
+    <table>
+        <thead><tr><th>项目</th><th>设置</th></tr></thead>
+        <tbody>
+            <tr><td>目标函数</td><td>纯重建均方误差，无需任何标签或接触标注</td></tr>
+            <tr><td>窗口</td><td>60 Hz 下前后各 60 帧、共 N=121 采样点</td></tr>
+            <tr><td>优化器/轮数</td><td>Adam，约 30 epochs</td></tr>
+        </tbody>
+    </table>
+
+    <h2>9.6 相位流形的性质</h2>
+    <ul>
+        <li><strong>无监督</strong>：不依赖接触事件，非接触运动也能学（回应了局部相位的首要局限）</li>
+        <li><strong>连续可微</strong>：二维相位通道可直接作为下游控制器的输入，或用于生成式插值</li>
+        <li><strong>多通道</strong>：不同通道可对应不同身体部位/频率，天然扩展为多维相位表示</li>
+    </ul>
+
+    <h2>9.7 下游应用</h2>
+    <p>论文用约一半篇幅展示 PAE 作为通用组件的多种用法，这是它获得最佳论文奖的重要原因：</p>
+    <pre class="mermaid">
+flowchart TD
+        PAE["PAE 相位流形"]
+        PAE --> A["音乐驱动舞蹈<br/>相位与音乐节拍对齐"]
+        PAE --> B["运动匹配<br/>用相位特征检索替代全量数据库"]
+        PAE --> C["分层动作生成<br/>相位作为门控/控制输入"]
+        PAE --> D["运动学控制<br/>实时角色控制器"]
+        style PAE fill:#007acc,color:#fff
+    </pre>
+    <p class="mermaid-caption">图 9-2　PAE 的下游应用</p>
+    <p>其中音乐驱动舞蹈展示了相位与外部信号（音频节拍）对齐的能力；基于相位的运动匹配则把检索特征压缩到低维空间，
+    显著降低数据库代价。</p>
+
+    <h2>9.8 局限</h2>
+    <ul>
+        <li>周期假设本身不适合完全非周期、一次性的动作（如随机跌倒、即兴反应），需要额外处理</li>
+        <li>相位通道数需要人工选择，通道过少会丢失细节、过多会出现冗余</li>
+        <li>所学相位的语义是隐式的，不像接触相位那样有明确物理解释，论文中需要可视化才能确认对应关系</li>
+    </ul>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>方法对比</h4>
+                    <p>用一张表对比 PFNN 人工相位、局部接触相位、PAE 无监督相位在"信号来源、是否需要标注、适用运动、可解释性"上的差异。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>架构理解</h4>
+                    <p>FFT 层在瓶颈中起什么作用？如果去掉它、直接用普通全连接瓶颈，为什么难以保证学到的是周期信号？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>研究迁移</h4>
+                    <p>结合你的研究方向，设计一个把 PAE 相位用于自己课题的具体方案，明确输入信号、通道数与下游网络如何对接。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>DeepPhase 用周期自编码器无监督学习相位，瓶颈由 FFT 层与周期参数层构成，输出 2D 相位通道</li>
+        <li>周期单元含振幅、频率、相位偏移、相移四个可学习参数，纯重建误差即可训练</li>
+        <li>相位流形连续可微、支持多通道，覆盖接触与非接触运动</li>
+        <li>可作为音乐舞蹈、运动匹配、分层生成与实时控制的通用组件，获 SIGGRAPH 2022 最佳论文</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://raw.githubusercontent.com/sebastianstarke/AI4Animation/master/Media/SIGGRAPH_2022/Paper.pdf">DeepPhase 论文原文</a></li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="08-神经动画分层.html">← 上一章：神经动画分层</a>
+        <a href="10-类别码本匹配.html">下一章：类别码本匹配 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 9 章 HeroController 主角结构 - 空洞骑士源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="08-场景状态与持久化.html">← 上一章：场景状态与持久化</a>
+    <a href="10-主角输入与动作机制.html">下一章：主角输入与动作机制 →</a>
+</nav>
+<main>
+    <h1>第 9 章　HeroController 主角结构（上）</h1>
+    <p>主角是整个游戏交互的中心，HeroController 则是承载主角逻辑的巨型控制器——5600 多行，从移动参数、物理状态到攻击、施法、死亡全部管。本章先拆解它的静态结构：调参常量、组件构成、状态容器、生命周期；第 10 章再深入输入处理和具体动作机制。</p>
+
+    <h2>9.1 一个类，两种状态语言</h2>
+    <p>读 HeroController 前先分清它内部两套并行的状态表达：</p>
+    <table>
+        <thead><tr><th></th><th><code>hero_state</code>（ActorStates 枚举）</th><th><code>cState</code>（HeroControllerStates）</th></tr></thead>
+        <tbody>
+            <tr><td>类型</td><td>枚举，9 个值</td><td>[Serializable] 类，约 50 个布尔字段</td></tr>
+            <tr><td>语义</td><td>主角当前的宏观运动状态，互斥</td><td>各维度的并行状态标记，可同时为真</td></tr>
+            <tr><td>取值</td><td>grounded、idle、running、airborne、wall_sliding、hard_landing、dash_landing、no_input、previous</td><td>dashing、attacking、onGround、facingRight、invulnerable、focusing…</td></tr>
+        </tbody>
+    </table>
+    <div class="definition">
+        <h4>为什么需要两套？</h4>
+        <p>宏观运动状态是互斥的（你不能同时 grounded 又 airborne），用一个枚举表达最清晰；但很多状态是正交、可叠加的（可以同时 dashing + facingRight + invulnerable），无法用单个枚举表达，于是用一组布尔。SetState 切换枚举主状态，cState 布尔则在各动作方法里独立置位。</p>
+    </div>
+
+    <h2>9.2 调参常量区：数据驱动的移动手感</h2>
+    <p>类开头是上百个 public 常量字段，全部大写命名，按动作分组：</p>
+<pre><code class="language-csharp">public float RUN_SPEED;
+public float JUMP_SPEED;
+public int   JUMP_STEPS;          // 跳跃持续帧数
+public float DASH_SPEED;
+public float DASH_TIME;
+public float DASH_COOLDOWN;
+public float WALLSLIDE_SPEED;
+public float DEFAULT_GRAVITY;
+public float ATTACK_DURATION;
+// 水下、冲刺、二段跳、骨钉蓄力等各有一组</code></pre>
+    <p>这些数值不在代码里写死，而是在 Inspector 配置，让策划能独立调手感而不改逻辑。注意区分两类：速度类是 float（每秒位移），而 JUMP_STEPS、DASH_QUEUE_STEPS 这类是 int（帧数/步数），配合协程按帧计数。带 <code>_CH</code> 后缀的是对应护符（Charm）生效时的替换值。</p>
+
+    <h2>9.3 组件构成全景</h2>
+    <p>HeroController 自身和子物体上挂着大量组件，SetupGameRefs 把它们装配到字段：</p>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+flowchart TB
+    HC["HeroController 根物体"]
+    HC --> PHYS["物理：Rigidbody2D rb2d<br/>Collider2D col2d（私有）"]
+    HC --> ANIM["表现：HeroAnimationController animCtrl<br/>MeshRenderer / SpriteFlash / InvulnerablePulse"]
+    HC --> AUDIO["音频：HeroAudioController audioCtrl<br/>FootstepsRun/Walk AudioSource"]
+    HC --> VIB["震动：HeroVibrationController"]
+    HC --> BOX["受击：HeroBox（受击判定盒）"]
+    HC --> NAIL["攻击：NailSlash × 5<br/>normal/alt/up/down/wall + 对应 FSM"]
+    HC --> FSM["子 PlayMaker FSM：<br/>spellControl / superDash / dashBurst<br/>vignetteFSM / thornCounter / proxyFSM"]
+    HC --> PREFAB["特效预制体：冲刺/跳跃/落地/死亡/法术<br/>配合 ObjectPool 使用"]
+</div>
+    </div>
+
+    <h3>物理与碰撞：私有组件</h3>
+    <p>rb2d 和 col2d 是私有字段，通过 GetComponent 获取，外部不直接操作主角刚体。所有移动都经 HeroController 内部方法改 rb2d.linearVelocity，这保证了对主角运动的集中控制。</p>
+
+    <h3>受击与攻击的判定分离</h3>
+    <ul>
+        <li><code>HeroBox</code> 是主角身上的受击 Trigger，负责检测伤害源并回调 TakeDamage；它有静态开关 <code>inactive</code>，进场/过场时整体关闭受击</li>
+        <li><code>NailSlash</code> 是骨钉攻击的判定对象，五个方向各一个，配合独立的 PlayMaker FSM 控制挥砍动画与命中窗口</li>
+    </ul>
+<pre><code class="language-csharp">// HeroBox 识别两类伤害源：FSM 版与组件版
+if (FSMUtility.ContainsFSM(other.gameObject, "damages_hero")) { /* 读 FSM 伤害值 */ }
+DamageHero component = other.GetComponent<DamageHero>();
+if (component != null && (!cState.shadowDashing || !component.shadowDashHazard))
+{ /* 应用伤害，暗影冲刺可穿过特定危险 */ }</code></pre>
+
+    <h2>9.4 cState 状态容器与反射访问</h2>
+    <p>HeroControllerStates 是一个 [Serializable] 类，字段覆盖主角全部正交状态：</p>
+<pre><code class="language-csharp">[Serializable]
+public class HeroControllerStates
+{
+    public bool facingRight;
+    public bool onGround;
+    public bool dashing;
+    public bool attacking;
+    public bool invulnerable;
+    public bool focusing;
+    public bool nearBench;
+    // ... 约 50 个
+}</code></pre>
+    <p>它和 PlayerData 一样提供反射字符串访问，供 FSM 按名查询：</p>
+<pre><code class="language-csharp">public bool GetState(string stateName)
+{
+    FieldInfo field = GetType().GetField(stateName);
+    if (field != null)
+        return (bool)field.GetValue(HeroController.instance.cState);
+    Debug.LogError("HeroControllerStates: Could not find bool named" + stateName);
+    return false;
+}</code></pre>
+    <div class="callout callout-info">
+        <p>同样的反射模式第三次出现（PlayerData、HeroControllerStates、FSM 变量），这是全工程一致的架构选择：让数据驱动的 PlayMaker 能用字符串访问 C# 状态。代价也相同——拼写错误只能在运行时暴露。</p>
+    </div>
+
+    <h2>9.5 生命周期：Awake / Start / Update</h2>
+    <h3>Awake：单例去重与引用装配</h3>
+<pre><code class="language-csharp">private void Awake()
+{
+    if (_instance == null)
+    {
+        _instance = this;
+        DontDestroyOnLoad(this);
+    }
+    else if (this != _instance)
+    {
+        Destroy(gameObject);
+        return;
+    }
+    SetupGameRefs();
+    SetupPools();
+}</code></pre>
+    <p>这是第 3 章讲过的手写单例模式：静态字段 + DontDestroyOnLoad + 重复实例销毁。Awake 里还会 SetupPools 预建特效对象池。</p>
+
+    <h3>Start：容错定位与场景判断</h3>
+    <p>Start 里有大量"字段为空就手动定位"的兜底逻辑，是反编译代码里值得注意的防御性写法：</p>
+<pre><code class="language-csharp">if (superDash == null)
+{
+    Debug.Log("SuperDash came up null, locating manually");
+    superDash = FSMUtility.LocateFSM(gameObject, "Superdash");
+}</code></pre>
+    <p>随后判断当前是否游戏场景：是则启用 vignette、发送 heroInPosition；否则把主角移到 y=-2000 并关闭重力（菜单场景下主角藏在屏幕外）。</p>
+
+    <h3>Update：每帧的结构</h3>
+<pre><code class="language-csharp">private void Update()
+{
+    if (Time.frameCount % 10 == 0) Update10();   // 每 10 帧一次的低频逻辑
+    current_velocity = rb2d.linearVelocity;
+    FallCheck();
+    FailSafeChecks();
+    // 脚步声/特效、落地计时、受击硬直处理……
+    if (hero_state != ActorStates.no_input)
+        LookForInput();   // 输入驱动的动作（第 10 章）
+}</code></pre>
+    <div class="callout callout-warning">
+        <p><strong>两个工程细节</strong>：用 <code>frameCount % 10</code> 把不需要每帧跑的检查（Update10）节流到 10 帧一次，降低开销；<code>FailSafeChecks</code> 是兜底检测，防止主角卡在异常状态（如卡在墙里、状态标记不一致）。这种"主逻辑 + 看门狗"的组合在大型控制器里很常见。</p>
+    </div>
+
+    <h2>9.6 SetupGameRefs：集中的引用装配</h2>
+<pre><code class="language-csharp">private void SetupGameRefs()
+{
+    if (cState == null) cState = new HeroControllerStates();
+    gm = GameManager.instance;
+    animCtrl = GetComponent<HeroAnimationController>();
+    rb2d = GetComponent<Rigidbody2D>();
+    col2d = GetComponent<Collider2D>();
+    audioCtrl = GetComponent<HeroAudioController>();
+    inputHandler = gm.GetComponent<InputHandler>();
+    proxyFSM = FSMUtility.LocateFSM(gameObject, "ProxyFSM");
+    // ...
+    gm.UnloadingLevel += OnLevelUnload;
+    acceptingInput = true;
+}</code></pre>
+    <p>引用获取分两类：同物体组件用 GetComponent，跨系统用其他单例（GameManager.instance）。末尾订阅 gm.UnloadingLevel 事件，场景卸载时收到回调——再次体现事件解耦。</p>
+
+    <h2>9.7 巨型控制器的权衡</h2>
+    <table class="comparison">
+        <thead><tr><th>好处</th><th>代价</th></tr></thead>
+        <tbody>
+            <tr>
+                <td class="good">主角状态集中、可读字段齐全；调试时一处能看到全部信息；避免多组件间状态同步问题</td>
+                <td class="bad">5600 行单文件、职责过载；改动易产生回归；新人难以整体把握；状态布尔多，组合爆炸难推理</td>
+            </tr>
+        </tbody>
+    </table>
+    <p>团队用"子 FSM 分担表现、独立组件（HeroBox/NailSlash）分担判定、cState 集中状态"来缓解，但核心运动逻辑仍收在一个类里。这是动作游戏常见的务实选择——主角逻辑高度耦合，强行拆分会带来更多跨组件通信成本。</p>
+
+    <div class="exercise">
+        <h3>思考与练习</h3>
+        <ol>
+            <li>区分 hero_state 与 cState，说明为什么一套枚举不够、还要一组并行布尔。</li>
+            <li>列出 HeroController 上的物理、受击、攻击组件，说明受击判定（HeroBox）和攻击判定（NailSlash）为什么分开。</li>
+            <li>解释 Update 里 frameCount % 10 的作用，哪些逻辑适合放进 Update10 而不是每帧执行？</li>
+            <li>结合 cState 的反射 GetState，说明它与 PlayerData 反射访问共享的架构动机和共同风险。</li>
+        </ol>
+    </div>
+</main>
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="08-场景状态与持久化.html">← 上一章：场景状态与持久化</a>
+        <a href="10-主角输入与动作机制.html">第 10 章：主角输入与动作机制 →</a>
+    </nav>
+</footer>
+<script src="assets/script.js"></script>
+</body>
+</html>

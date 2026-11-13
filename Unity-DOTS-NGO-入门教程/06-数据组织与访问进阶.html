@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 数据组织与访问进阶 - Unity DOTS 与 NGO 入门教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="05-JobSystem与Burst.html">← 上一章</a>
+        <a href="07-结构变更与系统调度.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>06　数据组织与访问进阶</h1>
+
+        <p>掌握了查询和 Job，这一章补齐真实项目里反复用到的一组数据工具：随机访问、可变长数据、零成本开关、不可变资产与引擎资源引用。每一个都对应一个明确的 OOP 旧需求，注意它们各自的替代关系。</p>
+
+        <h2>6.1 ComponentLookup：跨实体随机访问</h2>
+
+        <p>第四章在循环里用 <code>SystemAPI.GetComponent</code> 读目标实体，每次调用都有查找开销。批量场景下正确的工具是 <code>ComponentLookup&lt;T&gt;</code>——它像一张以实体为键的组件索引表，构造一次，反复查询：</p>
+
+<pre><code class="language-csharp">using Unity.Burst;
+using Unity.Entities;
+using Unity.Mathematics;
+using Unity.Transforms;
+
+[BurstCompile]
+public partial struct LookupMoveSystem : ISystem
+{
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        float dt = SystemAPI.Time.DeltaTime;
+
+        // 只读 Lookup，true 表示只读，利于并行
+        var targets = SystemAPI.GetComponentLookup&lt;LocalTransform&gt;(isReadOnly: true);
+
+        foreach (var (transform, speed, target) in
+            SystemAPI.Query&lt;RefRW&lt;LocalTransform&gt;,
+                          RefRO&lt;MovementSpeed&gt;,
+                          RefRO&lt;MoveTarget&gt;&gt;())
+        {
+            if (targets.TryGetComponent(target.ValueRO.Entity, out var targetTransform))
+            {
+                float3 direction = math.normalize(
+                    targetTransform.Position - transform.ValueRO.Position);
+                transform.ValueRW.Position += direction * speed.ValueRO.Value * dt;
+            }
+        }
+    }
+}
+</code></pre>
+
+        <p>Lookup 也可以作为字段放进 IJobEntity，由安全系统自动处理依赖。判断实体是否拥有该组件用 <code>HasValue(entity)</code>；需要可选的读写引用时，用 <code>TryGetRefRW</code> / <code>TryGetRefRO</code>（旧的 GetRefRWOptional 已在 1.4 弃用）。</p>
+
+        <h2>6.2 DynamicBuffer：实体上的可变长数据</h2>
+
+        <p>OOP 里往对象上挂一个 <code>List&lt;T&gt;</code> 很自然，ECS 的对应物是 DynamicBuffer。先定义元素类型：</p>
+
+<pre><code class="language-csharp">using Unity.Entities;
+
+// 一个缓冲元素，比如伤害记录
+public struct DamageEvent : IBufferElementData
+{
+    public float Amount;
+    public int SourceId;
+}
+</code></pre>
+
+        <p>Baker 里通过 <code>AddBuffer</code> 初始化，运行时用 <code>GetBuffer</code> 取出并像列表一样操作：</p>
+
+<pre><code class="language-csharp">// 运行时读写
+var buffer = SystemAPI.GetBuffer&lt;DamageEvent&gt;(entity);
+buffer.Add(new DamageEvent { Amount = 10f, SourceId = 2 });
+
+for (int i = 0; i &lt; buffer.Length; i++)
+{
+    // 处理 buffer[i]
+}
+buffer.Clear();
+</code></pre>
+
+        <p>缓冲数据存在 Chunk 之外的原生内存，容量不足时自动重定位，因此不破坏 Chunk 的固定布局。它也能作为字段传入 Job 并行处理。典型用途：待处理事件队列、路径点、技能目标列表、帧输入历史。</p>
+
+        <h2>6.3 Tag Component：零大小的标记</h2>
+
+        <p>一个不含任何字段、实现 <code>IComponentData</code> 的 struct 就是 Tag 组件，占用<strong>零字节</strong>，只用于表达“是否属于某一类”，配合 WithAll/WithNone 过滤：</p>
+
+<pre><code class="language-csharp">public struct AliveTag : IComponentData { }
+public struct StunnedTag : IComponentData { }
+</code></pre>
+
+        <p>用 Tag 替代 OOP 里的布尔标志位或类型枚举，查询可以直接按 Archetype 快速筛选，而不必逐个读取字段。但注意：增删 Tag 仍然是结构变更，频繁切换的状态应该用下面的 Enableable Component。</p>
+
+        <h2>6.4 Enableable Component：零成本的开关</h2>
+
+        <p>让组件同时实现 <code>IEnableableComponent</code>，就可以在不改变 Archetype、不移动 Chunk 数据的情况下启用/禁用它：</p>
+
+<pre><code class="language-csharp">using Unity.Entities;
+
+public struct Cooldown : IComponentData, IEnableableComponent
+{
+    public float Remaining;
+}
+</code></pre>
+
+<pre><code class="language-csharp">// 切换启用状态，不触发结构变更
+SystemAPI.SetComponentEnabled&lt;Cooldown&gt;(entity, false);
+bool isActive = SystemAPI.IsComponentEnabled&lt;Cooldown&gt;(entity);
+</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>这是高频切换状态的首选方案</strong>。被禁用的组件默认不会出现在查询结果里，效果等同于“临时移除”，但没有任何数据搬迁成本。冷却、眩晕、行为开关、死亡标记等反复变化的状态都适合用它。
+        </div>
+
+        <h2>6.5 BlobAsset：不可变的原生数据资产</h2>
+
+        <p>“Blob”指不可变（immutable）的非托管数据，一旦构建就只读，可被 Burst 访问、无 GC、可在多个实体间共享。典型用途是烘焙期确定的配置表、网格数据、曲线等。用 BlobBuilder 构建：</p>
+
+<pre><code class="language-csharp">using Unity.Entities;
+
+public struct EnemyConfig
+{
+    public BlobArray&lt;float&gt; HealthPerLevel;
+    public float BaseSpeed;
+}
+
+public struct EnemyConfigReference : IComponentData
+{
+    public BlobAssetReference&lt;EnemyConfig&gt; Config;
+}
+</code></pre>
+
+        <p>在 Baker 中构建并挂载：</p>
+
+<pre><code class="language-csharp">class ConfigBaker : Baker&lt;EnemyConfigAuthoring&gt;
+{
+    public override void Bake(EnemyConfigAuthoring authoring)
+    {
+        var builder = new BlobBuilder(Allocator.Temp);
+        ref var root = ref builder.ConstructRoot&lt;EnemyConfig&gt;();
+
+        var array = builder.Allocate(
+            ref root.HealthPerLevel, authoring.HealthValues.Length);
+        for (int i = 0; i &lt; array.Length; i++)
+            array[i] = authoring.HealthValues[i];
+        root.BaseSpeed = authoring.Speed;
+
+        var reference = builder.CreateBlobAssetReference&lt;EnemyConfig&gt;(
+            Allocator.Persistent);
+        builder.Dispose();
+
+        AddBlobAsset(ref reference, out _);
+        AddComponent(new EnemyConfigReference { Config = reference });
+    }
+}
+</code></pre>
+
+        <p>运行时通过 <code>Config.Value.HealthPerLevel[i]</code> 读取。Blob 内部可用 <code>BlobArray</code>、<code>BlobString</code>、<code>BlobPtr</code> 组织嵌套结构。因为只读，它能安全地被并行 Job 同时访问。</p>
+
+        <h2>6.6 UnityObjectRef：在实体上引用引擎资源</h2>
+
+        <p>当实体确实需要引用材质、网格、ScriptableObject 等托管引擎对象时，用 <code>UnityObjectRef&lt;T&gt;</code> 而不是直接持有引用（直接持有会让组件变成托管组件，6.6 已弃用）：</p>
+
+<pre><code class="language-csharp">using Unity.Entities;
+using UnityEngine;
+
+public struct VisualReference : IComponentData
+{
+    public UnityObjectRef&lt;Material&gt; Material;
+    public UnityObjectRef&lt;Mesh&gt; Mesh;
+}
+</code></pre>
+
+        <p>通过 <code>.Value</code> 访问实际对象。注意：访问托管对象的那部分代码无法 Burst 编译，通常把这类引用限制在需要和引擎对象交互的少数系统里，纯模拟逻辑保持非托管。对于没有非托管等价物的类型（如 AnimationCurve），官方建议把它放进一个 ScriptableObject，再用 UnityObjectRef 引用。</p>
+
+        <h2>6.7 Singleton：全局唯一数据</h2>
+
+        <p>OOP 里的单例管理器，在 ECS 里表达为“只有一个实体拥有某组件”，用 Singleton API 访问：</p>
+
+<pre><code class="language-csharp">// 读取唯一配置实体的数据
+var config = SystemAPI.GetSingleton&lt;GameSettings&gt;();
+var configEntity = SystemAPI.GetSingletonEntity&lt;GameSettings&gt;();
+
+// Job 中也可通过 GetSingleton 取初始值
+</code></pre>
+
+        <p>前提是该组件确实只存在于一个实体上，否则会报错。这比自己写一个静态 Instance 更符合 ECS 数据流，也能被安全系统跟踪。</p>
+
+        <h2>6.8 实体预制体与运行时实例化</h2>
+
+        <p>Baker 里把一个 GameObject 预制体转成实体预制体引用，运行时用 EntityManager 实例化：</p>
+
+<pre><code class="language-csharp">public struct Spawner : IComponentData
+{
+    public Entity Prefab;
+    public int Count;
+}
+
+// Baker 中：预制体本身用 Dynamic 标志
+AddComponent(new Spawner
+{
+    Prefab = GetEntity(authoring.Prefab, TransformUsageFlags.Dynamic),
+    Count = authoring.Count
+});
+</code></pre>
+
+<pre><code class="language-csharp">// 运行时批量生成（主线程）
+var spawner = SystemAPI.GetSingleton&lt;Spawner&gt;();
+for (int i = 0; i &lt; spawner.Count; i++)
+{
+    Entity instance = state.EntityManager.Instantiate(spawner.Prefab);
+    // 设置初始位置等
+}
+</code></pre>
+
+        <p>在 Job 里不能直接调用 EntityManager，需要用 ECB 的 Instantiate，这正是第七章的内容。</p>
+
+        <h2>6.9 工具选型速查</h2>
+
+        <table>
+            <thead>
+                <tr><th>OOP 旧需求</th><th>ECS 工具</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>按对象引用查另一个对象的数据</td><td>ComponentLookup</td></tr>
+                <tr><td>对象上的 List 字段</td><td>DynamicBuffer（IBufferElementData）</td></tr>
+                <tr><td>类型/分类布尔标记</td><td>Tag Component（不常变）/ Enableable（常变）</td></tr>
+                <tr><td>只读配置表、共享资产</td><td>BlobAssetReference</td></tr>
+                <tr><td>引用材质、SO 等引擎对象</td><td>UnityObjectRef</td></tr>
+                <tr><td>单例管理器</td><td>Singleton 组件实体</td></tr>
+                <tr><td>预制体 Instantiate</td><td>EntityManager/ECB Instantiate</td></tr>
+            </tbody>
+        </table>
+
+        <div class="exercise">
+            <h3>思考与练习</h3>
+            <ol>
+                <li>用 ComponentLookup 重写第五章练习里的并行移动 Job，把 Lookup 作为 Job 字段传入并标注只读。</li>
+                <li>实现一个技能系统：用 DynamicBuffer 存待释放的技能请求，系统每帧处理后 Clear。</li>
+                <li>给一个敌人设计“死亡”状态，分别用 Tag 增删和 Enableable Component 实现，对比两者是否触发结构变更。</li>
+                <li>用 BlobAsset 构建一张等级→血量配置表，在 System 中按等级读取，验证无 GC 分配。</li>
+            </ol>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>ComponentLookup 提供高效的跨实体随机访问，支持只读标记与 TryGet 系列方法。</li>
+                <li>DynamicBuffer 替代托管 List，数据存于 Chunk 外原生内存，可传入 Job。</li>
+                <li>Tag 是零字节分类标记；Enableable Component 在不搬迁数据的前提下做开关，是高频状态首选。</li>
+                <li>BlobAsset 是不可变、可共享、可 Burst 的只读资产；UnityObjectRef 安全引用托管引擎资源。</li>
+                <li>Singleton 组件实体替代静态单例；实体预制体经 Instantiate 生成。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav">
+            <a href="05-JobSystem与Burst.html">← 上一章：Job System 与 Burst</a>
+            <a href="07-结构变更与系统调度.html">下一章：结构变更与系统调度 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

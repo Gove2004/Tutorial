@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>11 渲染层与 Futile 框架 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="10-玩家蛞蝓猫深度导读.html">← 上一章</a>
+        <a href="12-HUD菜单与界面系统.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>11 渲染层与 Futile 框架</h1>
+        <p>Rain World 没有用 Unity 的 GameObject 渲染体系，而是在 Unity 之上自建了一套 2D 渲染框架 Futile：以场景图组织节点、以图集精灵为基本图元、以 IDrawable 接口把游戏对象翻译成可绘制精灵。本章讲清这套框架的组成、绘制流程与房间相机的工作方式。</p>
+
+        <h2>11.1 为什么自研渲染</h2>
+        <p>游戏需要大量动态生成、程序化动画与按调色板统一着色的精灵，且要在固定逻辑帧之上做平滑插值。Unity 早期的 GameObject/组件模型对这种“每帧程序化生成大量 2D 精灵”的场景开销大、控制弱。Futile 直接操作网格与材质，把场景图、图集、批渲染握在自己手里，只把 Unity 当作底层图形 API。</p>
+
+        <h2>11.2 场景图：FNode、FContainer、FStage</h2>
+        <p>FNode 是所有节点的基类，携带变换、深度、透明度与完整的脏标记/矩阵系统：</p>
+<pre><code class="language-csharp">public class FNode
+{
+    protected float _x; protected float _y;
+    protected float _scaleX = 1f; protected float _scaleY = 1f;
+    protected float _rotation;
+    protected int _depth;
+    protected float _alpha = 1f;
+    protected bool _isMatrixDirty;
+    protected bool _isAlphaDirty;
+    protected FMatrix _matrix;
+    protected FMatrix _concatenatedMatrix;
+    protected FContainer _container;
+    public object data;
+}</code></pre>
+        <p>关键设计：</p>
+        <ul>
+            <li><strong>脏标记</strong>：位置、缩放、透明度变化只置脏，不立即重算，渲染时才更新矩阵，避免无谓计算。</li>
+            <li><strong>级联矩阵</strong>：节点的最终变换由父容器矩阵级联相乘（concatenatedMatrix），并维护逆矩阵与屏幕矩阵，支持坐标反算。</li>
+            <li><strong>depth 排序</strong>：FContainer 按 depth 决定子节点绘制顺序，是 2D 前后遮挡的核心。</li>
+        </ul>
+        <p>FContainer 是可挂子节点的容器，FStage 继承 FContainer 作为根节点。节点可见性变化时调用 <code>stage.HandleFacetsChanged()</code> 标记需要重排。</p>
+
+        <h2>11.3 图元与图集：FSprite、FAtlas</h2>
+        <p>FAtlas 是纹理图集，把多个小图打包进一张纹理，用 FAtlasElement 记录每块的矩形区域：</p>
+<pre><code class="language-csharp">public class FAtlas
+{
+    private List<FAtlasElement> _elements = new List<FAtlasElement>();
+    private Dictionary<string, FAtlasElement> _elementsByName = new Dictionary<string, FAtlasElement>();
+    private Texture _texture;
+    private Vector2 _textureSize;
+}</code></pre>
+        <p>FSprite 引用一个 FAtlasElement，知道自己画纹理的哪一块，再叠加自身变换：</p>
+<pre><code class="language-csharp">public class FSprite : FNode
+{
+    protected FAtlasElement _element;
+    protected Color _color = Color.white;
+    public FSprite(string elementName)
+    {
+        _element = Futile.atlasManager.GetElementWithName(elementName);
+    }
+}</code></pre>
+        <p>变体 FSpriteMesh 用自定义顶点数组绘制任意形状（程序化身体、尾巴常用），FLabel 则基于字体图集绘制文字。图集打包让同一材质的多个精灵可在一次 draw call 内批量提交。</p>
+
+        <h2>11.4 IDrawable：游戏对象的绘制契约</h2>
+        <p>游戏对象本身不继承 FNode，而是实现 IDrawable，由它在相机上租用精灵并每帧更新：</p>
+<pre><code class="language-csharp">public interface IDrawable
+{
+    void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam);
+    void DrawSprites(RoomCamera.SpriteLeaser sLeaser, float timeStacker,
+        Vector2 camPos, RoomCamera rCam);
+    void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette palette);
+    void AddToContainer(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, FContainer newContainer);
+}</code></pre>
+        <p>SpriteLeaser 是从相机“租”来的精灵集合，对象销毁时归还复用。DrawSprites 用 timeStacker 在 lastPos 与 pos 之间插值，这正是逻辑帧与渲染帧解耦的落点。</p>
+
+        <h2>11.5 调色板 RoomPalette</h2>
+        <p>每个房间的统一色调来自 RoomPalette，它是包含水、雾、天空、黑暗等全部颜色的结构体：</p>
+<pre><code class="language-csharp">public struct RoomPalette
+{
+    public Color blackColor;
+    public Color waterColor1; public Color waterColor2;
+    public Color waterSurfaceColor1; public Color waterSurfaceColor2;
+    public Color waterShineColor;
+    public Color fogColor; public Color skyColor;
+    public Color shortCutSymbol;
+    public float fogAmount; public float darkness;
+    public Color[] shortcutColors;
+}</code></pre>
+        <p>IDrawable.ApplyPalette 读取这些颜色给自己的精灵着色，使同一套精灵在不同房间呈现完全不同的氛围。黑暗度 darkness 还会影响灯光的强度。</p>
+
+        <h2>11.6 房间相机 RoomCamera</h2>
+        <p>RoomCamera 负责一个视口的实际绘制，核心职责包括：</p>
+<pre><code class="language-csharp">public class RoomCamera
+{
+    public Vector2 pos;
+    public Vector2 lastPos;
+    public FContainer[] containers;      // 分层容器
+    public List<IDrawable> drawables;
+    public Room currentCameraRoom;
+    public RoomPalette currentPalette;
+    public class SpriteLeaser { public FSprite[] sprites; public IDrawable origin; }
+}</code></pre>
+        <ul>
+            <li><strong>分层容器</strong>：背景、地形、物体、前景、雾等各占一个 FContainer，按 depth 组织遮挡关系。</li>
+            <li><strong>视差滚动</strong>：背景层按相机移动乘以不同系数，制造纵深。</li>
+            <li><strong>裁剪</strong>：只让视野内的对象绘制，离屏对象不产生精灵开销。</li>
+            <li><strong>GrafUpdate 插值</strong>：每帧根据 timeStacker 在 lastPos 与 pos 间平滑移动，逻辑 40FPS 下画面仍流畅。</li>
+        </ul>
+
+        <h2>11.7 灯光与特效</h2>
+        <p>LightSource 是 UpdatableAndDeletable 且实现 IDrawable，用专用 shader 绘制发光体：</p>
+<pre><code class="language-csharp">public class LightSource : UpdatableAndDeletable, IDrawable
+{
+    public float rad; public float alpha;
+    public float affectedByPaletteDarkness = 1f;
+    public bool colorFromEnvironment;
+    public bool fadeWithSun;
+    public PlacedObject.LightSourceData.BlinkType blinkType;
+}</code></pre>
+        <p>灯光可闪烁、绑定到物体、随太阳衰减、从环境取色，其强度受房间 darkness 影响。水、雾、粒子等特效同样以 IDrawable 形式挂载到对应分层容器。</p>
+
+        <h2>11.8 完整渲染管线</h2>
+<pre class="mermaid">
+flowchart TD
+    A["逻辑帧更新对象 pos/lastPos"] --> B["RoomCamera.GrafUpdate（每渲染帧）"]
+    B --> C["IDrawable.DrawSprites：timeStacker 插值"]
+    C --> D["ApplyPalette：按调色板着色"]
+    D --> E["精灵写入分层 FContainer"]
+    E --> F["FStage 按 depth 排序，图集批渲染"]
+    F --> G["Unity 提交 draw call"]
+</pre>
+
+        <h2>11.9 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：每帧新建精灵而不租用/归还</summary>
+            <div class="details-content"><p>精灵应通过 SpriteLeaser 租用并在销毁时归还复用，每帧 new FSprite 会造成大量垃圾与卡顿。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：在 DrawSprites 里写逻辑</summary>
+            <div class="details-content"><p>DrawSprites 只负责表现与插值，可能每渲染帧调用多次。游戏状态变更必须放在 Update，否则会与逻辑帧不同步。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：忽略调色板导致精灵颜色突兀</summary>
+            <div class="details-content"><p>写死颜色的精灵不会随房间氛围变化。应在 ApplyPalette 中读取 RoomPalette 着色。</p></div>
+        </details>
+
+        <h2>11.10 练习与思考</h2>
+        <ol>
+            <li>结合 FNode 的脏标记，解释为什么把矩阵重算推迟到渲染时比每次改坐标都立即重算更高效。</li>
+            <li>说明 SpriteLeaser 的“租用—归还”机制如何减少 GC 压力，若对象销毁时不归还会发生什么。</li>
+            <li>思考：IDrawable 为什么要把 InitiateSprites、DrawSprites、ApplyPalette、AddToContainer 拆成四个方法，而不是一个 Draw 方法？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>Futile 是构建在 Unity 之上的自研 2D 框架，FNode/FContainer/FStage 组成带脏标记与级联矩阵的场景图。</li>
+            <li>FAtlas 图集配合 FSprite/FSpriteMesh/FLabel 实现批量绘制，IDrawable 是游戏对象的绘制契约。</li>
+            <li>RoomPalette 统一房间色调，RoomCamera 负责分层、视差、裁剪与插值，灯光与特效均以 IDrawable 挂载。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="10-玩家蛞蝓猫深度导读.html">← 上一章：玩家蛞蝓猫深度导读</a>
+            <a href="12-HUD菜单与界面系统.html">下一章：HUD、菜单与界面系统 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

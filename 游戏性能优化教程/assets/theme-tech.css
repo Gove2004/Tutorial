@@ -1,0 +1,44 @@
+:root {
+    --primary: #007acc;
+    --primary-dark: #005a9e;
+    --primary-light: #e7f3ff;
+    --bg-main: #ffffff;
+    --bg-aside: #eef1f5;
+    --text: #1f2933;
+}
+
+body {
+    background: var(--bg-aside);
+    color: var(--text);
+}
+
+main {
+    background: var(--bg-main);
+}
+
+h1 {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+h2 { color: #14395a; }
+
+a { color: var(--primary); }
+
+.chapter-nav a:hover,
+.chapter-item a:hover {
+    color: var(--primary-dark);
+}
+
+.step-number,
+.copy-button:hover,
+.exercise .tag {
+    background: var(--primary);
+}
+
+.definition {
+    border-color: var(--primary);
+    background: var(--primary-light);
+}
+
+.definition h4 { color: var(--primary-dark); }

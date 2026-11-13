@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 - T5 资源分配：物理机装箱工程题</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="05-2024-t4-poker.html">← 上一章</a>
+    <a href="07-2025-t1-bignum.html">下一章 →</a>
+</nav>
+
+<main>
+    <h1>T5 资源分配：物理机装箱工程题</h1>
+
+    <div class="problem">
+        <h3>题目还原</h3>
+        <div class="problem-meta">
+            <span class="src-badge src-b">B 级 · 两位选手记录交叉还原</span>
+            <span class="tag">第一届区域赛</span>
+            <span class="tag orange">开放式工程题</span>
+            <span class="tag green">200 分</span>
+        </div>
+
+        <p>
+            你要实现一个虚拟机分配器：把若干虚拟机放进物理主机。每台物理主机有两个固定参数——CPU 核数与内存大小；
+            每台虚拟机也有两个需求参数 <code>(cpu, mem)</code>。只有主机的剩余 CPU 和剩余内存都够，创建才能成功。
+        </p>
+
+        <p>需要支持两种事件：</p>
+        <ul>
+            <li><strong>创建</strong>：给定虚拟机的 <code>(cpu, mem)</code>，把它放到某台主机上，或开一台新主机；</li>
+            <li><strong>删除</strong>：给定虚拟机编号，把它占用的 CPU 和内存归还给所在主机。</li>
+        </ul>
+
+        <p>
+            目标：<strong>用尽可能少的物理主机</strong>完成所有创建请求。
+            赛题提供一个已经实现的分配算法作为 baseline，并在公开的 20 个测试样例中给出 baseline 所需的主机数量；
+            你的算法如果比 baseline 强，可以得到额外加分，加分是<strong>乘法系数</strong>。
+        </p>
+
+        <p>
+            <strong>提交方式：</strong>本地给一个测试程序和 20 组数据，自己测好再交；正式提交<strong>只有 3 次机会</strong>。
+            题面来源为两位选手的赛后记录（silent-sure 与 CSDN 回忆版），接口细节以现场为准。
+        </p>
+    </div>
+
+    <div class="callout callout-warning">
+        <strong>这是 NP-hard 问题，别指望最优解</strong>
+        <p style="margin:0.5em 0 0">
+            二维装箱（2D bin packing）是 NP-hard。题目也不要求最优——它比的是「你比 baseline 少用多少台」。
+            工程题的正确心态是：<strong>先拿到一个稳定、不崩、比 baseline 略好的解，再迭代</strong>。
+        </p>
+    </div>
+
+    <h2>评分逻辑：为什么「随便写写」也有 120 分</h2>
+
+    <p>
+        首届选手的记录里有两个关键数字：有人认真调了三小时，最后 17.5 分；也有人听说「随便写写就能 120 分」。
+        差距不在算法，而在<strong>是否跑通、是否稳定</strong>。
+    </p>
+
+    <p>可以还原出的评分链路是：</p>
+
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>每个测试样例独立评分</h4>
+                <p>20 组数据，每组根据你用的主机数给一个基础分。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>与 baseline 比较，换算乘法系数</h4>
+                <p>如果你的主机数 ≤ baseline，系数 ≥ 1；省得越多，系数越高。若比 baseline 差，系数会被压低甚至接近 0。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+                <h4>总分 = Σ 每组得分 × 系数</h4>
+                <p>所以「稳定地比 baseline 好一点」比「个别样例极好、个别样例崩掉」更划算。</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="callout callout-tip">
+        <strong>策略结论</strong>
+        <p style="margin:0.5em 0 0">
+            先实现一个「永远能放下」的保守算法（放不下就开新主机），保证 20 组数据都不崩；
+            再在这个基础上做 best-fit 和排序优化。不要一上来就写复杂的状态压缩或随机搜索。
+        </p>
+    </div>
+
+    <h2>算法一：First Fit（保底）</h2>
+
+    <p>
+        维护每台主机的剩余 <code>(cpu, mem)</code>。每次创建，从第一台主机开始找，找到第一个放得下的就放；
+        都放不下就开新主机。删除时把资源加回去。
+    </p>
+
+    <p>优点：实现 10 分钟，永远不会失败。缺点：主机数通常比 best-fit 多 10%–20%。</p>
+
+    <h2>算法二：Best Fit（主力）</h2>
+
+    <p>
+        每次创建，在所有「放得下」的主机里，选<strong>放完之后剩余资源最少</strong>的那台。
+        直觉是「把边角料留给小虚拟机」，减少碎片。
+    </p>
+
+    <p>二维情况下，「剩余最少」需要定义打分函数。常用三种：</p>
+
+    <table>
+        <thead><tr><th>打分</th><th>公式</th><th>适用</th></tr></thead>
+        <tbody>
+            <tr><td>绝对剩余和</td><td><code>(rc − c) + (rm − m)</code></td><td>CPU/内存量级接近时</td></tr>
+            <tr><td>归一化剩余</td><td><code>(rc − c)/RC + (rm − m)/RM</code></td><td>两个维度量级差很大时（推荐）</td></tr>
+            <tr><td>主导资源</td><td><code>max((rc−c)/RC, (rm−m)/RM)</code></td><td>容易出现单一维度瓶颈时</td></tr>
+        </tbody>
+    </table>
+
+    <p>
+        首届题目的主机 CPU/内存是固定值，虚拟机需求分布未知，建议<strong>三种打分各跑一遍，取主机数最少的</strong>——
+        反正 20 组数据在本地跑得很快。
+    </p>
+
+    <h2>算法三：排序 + 多策略</h2>
+
+    <p>
+        装箱问题的经典结论是：<strong>先放大件</strong>（First Fit Decreasing）通常显著优于随机顺序。
+        但工程题的请求是「在线到达」的，你不能预知未来。可以做两件事：
+    </p>
+
+    <ul>
+        <li><strong>按主导资源排序</strong>：如果请求是批量给的（很多工程题会一次给全部请求），先按 <code>max(c/RC, m/RM)</code> 降序处理；</li>
+        <li><strong>多策略选优</strong>：同一批请求用 3 种排序 × 3 种打分跑 9 次，取主机数最少的方案。20 组数据 × 9 次，通常仍在时限内。</li>
+    </ul>
+
+    <h2>可运行的实现</h2>
+
+    <p>
+        下面是一个完整的单文件实现（训练用，输入格式自定义）。核心是 <code>Allocator</code> 类：
+        <code>create(c, m)</code> 返回虚拟机编号，<code>remove(id)</code> 归还资源。
+    </p>
+
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+using ll = long long;
+
+struct Host {
+    ll cpu, mem;          // 剩余资源
+    int id;
+};
+
+struct Allocator {
+    ll RC, RM;                        // 单台主机的总 CPU / 总内存
+    vector&lt;Host&gt; hosts;               // 已开的主机
+    vector&lt;int&gt; vmHost;               // 每台虚拟机所在主机下标
+    vector&lt;pair&lt;ll, ll&gt;&gt; vmNeed;      // 每台虚拟机的需求
+    vector&lt;int&gt; alive;                // 每台主机上当前承载的虚拟机数
+    int used;                         // 非空主机数（这才是题目要的主机数）
+    int mode;                         // 0 绝对剩余, 1 归一化, 2 主导资源
+
+    Allocator(ll rc, ll rm, int m = 1) : RC(rc), RM(rm), used(0), mode(m) {}
+
+    double score(const Host&amp; h, ll c, ll m) const {
+        double rc = (double)(h.cpu - c) / RC;        // 归一化后的剩余比例
+        double rm = (double)(h.mem - m) / RM;
+        if (mode == 0) return (double)(h.cpu - c) + (double)(h.mem - m);  // 绝对剩余和
+        if (mode == 1) return rc + rm;                                    // 归一化剩余和
+        return max(rc, rm);                                               // 主导资源
+    }
+
+    int create(ll c, ll m) {
+        int best = -1;
+        double bestScore = 1e100;
+        for (int i = 0; i &lt; (int)hosts.size(); ++i) {
+            if (hosts[i].cpu &gt;= c &amp;&amp; hosts[i].mem &gt;= m) {
+                double s = score(hosts[i], c, m);
+                if (s &lt; bestScore) { bestScore = s; best = i; }
+            }
+        }
+        if (best == -1) {
+            hosts.push_back({RC - c, RM - m, (int)hosts.size()});
+            alive.push_back(1);              // 新开一台主机，立刻承载 1 台虚拟机
+            ++used;
+            best = (int)hosts.size() - 1;
+        } else {
+            hosts[best].cpu -= c;
+            hosts[best].mem -= m;
+            if (alive[best] == 0) ++used;    // 复用一台曾经空了的主机
+            ++alive[best];
+        }
+        vmHost.push_back(best);
+        vmNeed.push_back({c, m});
+        return (int)vmHost.size() - 1;
+    }
+
+    void remove(int id) {
+        int h = vmHost[id];
+        hosts[h].cpu += vmNeed[id].first;
+        hosts[h].mem += vmNeed[id].second;
+        if (--alive[h] == 0) --used;        // 这台主机空了，不再算作「使用中」
+    }
+
+    int usedHosts() const { return used; }  // 不能用 hosts.size()：它只增不减
+};
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    ll RC, RM;
+    int q;
+    cin &gt;&gt; RC &gt;&gt; RM &gt;&gt; q;          // 主机规格 + 操作数
+
+    Allocator alloc(RC, RM, 1);
+    while (q--) {
+        string op;
+        cin &gt;&gt; op;
+        if (op == "C") {
+            ll c, m; cin &gt;&gt; c &gt;&gt; m;
+            int id = alloc.create(c, m);
+            cout &lt;&lt; id &lt;&lt; '\n';
+        } else if (op == "D") {
+            int id; cin &gt;&gt; id;
+            alloc.remove(id);
+        } else if (op == "Q") {
+            cout &lt;&lt; alloc.usedHosts() &lt;&lt; '\n';
+        }
+    }
+    return 0;
+}</code></pre>
+
+    <p>
+        输入示例：
+    </p>
+
+<pre><code class="language-plaintext">16 32 5
+C 2 4
+C 4 8
+C 8 16
+C 1 2
+Q</code></pre>
+
+    <p>
+        输出会给出每台虚拟机的编号，最后一行是主机数。这组请求（2×4、4×8、8×16、1×2）总需求
+        CPU 15、内存 30，而单台主机是 16/32，所以理论上 1 台就够——这段代码也确实会给出 1。
+        想观察 best-fit 与 first-fit 的差异，把主机规格改成 <code>10 10</code>，再试
+        <code>6 6 / 4 4 / 6 6 / 4 4</code> 这类「先大后大」的顺序，两者会给出不同的装箱方案。
+    </p>
+
+    <div class="callout callout-warning">
+        <strong>主机数不能直接取 <code>hosts.size()</code></strong>
+        <p style="margin:0.5em 0 0">
+            工程题里虚拟机随时会被删除，删空的物理机可以留给后来的请求复用。如果把「已开过的主机」
+            的个数当成答案，这个数只会单调增长，越删越多——这是最容易在本地测试里蒙对、在隐藏数据上
+            全错的实现。正确做法是单独维护每台主机上的虚拟机计数 <code>alive</code> 和「非空主机数」
+            <code>used</code>：放入时若该主机原本为空则 <code>++used</code>，删除时若减到 0 则
+            <code>--used</code>。
+        </p>
+    </div>
+
+    <h2>工程题的调试经验</h2>
+
+    <div class="callout callout-danger">
+        <strong>首届选手踩过的坑，逐个复盘</strong>
+        <ul style="margin:0.5em 0 0">
+            <li><strong>本地测试程序跑不起来</strong>：测试程序用 Linux 相对路径（<code>../data/xxx</code>），Windows 下要改成 <code>..\data\xxx</code> 或直接写绝对路径。先花 10 分钟解决路径，不要在这上面硬耗。</li>
+            <li><strong>priority_queue + 外部可变数组</strong>：比较函数访问成员数组，数组一变，堆的性质就破坏，属于未定义行为。改成 <code>set</code> 存 <code>(剩余资源, 主机编号)</code>，删除时按编号 erase。</li>
+            <li><strong>UB 导致「本地能跑、评测 0 分」</strong>：开 <code>-fsanitize=address,undefined</code> 编一遍，把越界和未定义行为先清掉。</li>
+            <li><strong>3 次提交机会</strong>：本地 20 组数据全部跑完、记录每组主机数，再交第一次。不要用正式提交试探。</li>
+            <li><strong>时间分配</strong>：如果 16:50 还在调工程题，先确保有一版能提交的代码，再去补算法题的部分分。</li>
+        </ul>
+    </div>
+
+    <h2>如果时间还剩两小时，优先做什么</h2>
+
+    <ol>
+        <li><strong>先保证 20 组都不崩</strong>：写一个「放不下就开新机」的版本，跑完全部数据，记录主机数。</li>
+        <li><strong>加 best-fit</strong>：只改 <code>create</code> 里的选择逻辑，重跑 20 组，比较主机数。</li>
+        <li><strong>加排序</strong>：如果请求可以离线处理，按主导资源降序重排，再跑一遍。</li>
+        <li><strong>记录 baseline 差距</strong>：把每组「baseline 主机数 / 你的主机数」列出来，优先优化差距最大的组。</li>
+        <li><strong>不要再加新策略</strong>：最后 30 分钟只做回归测试，确保提交版本就是本地验证过的版本。</li>
+    </ol>
+
+    <h2>易错点清单</h2>
+
+    <ul class="checklist">
+        <li>只比较 CPU 或只比较内存，忘记二维约束。</li>
+        <li>删除时没有归还资源，或归还到了错误的主机。</li>
+        <li>用「剩余资源最少」但没归一化，CPU 和内存量级差 10 倍时打分失真。</li>
+        <li>开新主机时直接 <code>hosts.push_back</code>，但 <code>vmHost</code> 里存的是旧下标（vector 扩容后失效——存下标而不是指针就没问题）。</li>
+        <li>把「主机总数」当成「已用主机数」，删除后没有回收空主机。</li>
+        <li>本地测试用的数据文件和正式评测的数据文件不是同一套，分数对不上。</li>
+    </ul>
+
+    <h2>延伸练习</h2>
+
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>回收空主机</h4>
+                <p>删除虚拟机后，如果某台主机变空，把它从 <code>hosts</code> 里移除。注意 <code>vmHost</code> 里的下标需要重映射（或者用「主机编号 + 惰性标记」避免重排）。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>加入「反亲和」约束</h4>
+                <p>某些虚拟机不能放在同一台主机上。此时 best-fit 的选择要跳过冲突主机，问题变成带约束的装箱。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+                <h4>离线版：全局最优近似</h4>
+                <p>如果所有请求一次给出，可以尝试「按资源降序 + best-fit」与「随机重启 + 局部搜索」，比较 20 组数据上的主机数。</p>
+            </div>
+        </div>
+    </div>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>工程题比的是「相对 baseline 的改进」，不是绝对最优。</li>
+        <li>先保底（永远能放下），再 best-fit，再多策略选优。</li>
+        <li>二维装箱的打分要归一化，否则量级差会毁掉启发式。</li>
+        <li>稳定性 > 精巧度：3 次提交机会经不起 UB 和路径问题。</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <strong>下一章</strong>
+        <p style="margin:0.5em 0 0">
+            进入第二届区域赛。T1 数位运算：200 位整数相加再求数位和，看似签到，实则在考「不要用浮点、不要用 int」。
+        </p>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav bottom">
+        <a href="05-2024-t4-poker.html">← 上一章：T4 牌型分组</a>
+        <a href="07-2025-t1-bignum.html">下一章：T1 数位运算 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

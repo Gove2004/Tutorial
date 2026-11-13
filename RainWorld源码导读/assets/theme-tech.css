@@ -1,0 +1,22 @@
+:root {
+    --primary: #007acc;
+    --primary-dark: #005a9e;
+    --accent: #2aa3f0;
+    --bg-main: #ffffff;
+    --bg-aside: #eef1f5;
+    --text: #1f2730;
+}
+
+body { background: var(--bg-aside); color: var(--text); }
+main { background: var(--bg-main); box-shadow: 0 2px 14px rgba(20, 40, 70, 0.08); }
+
+h1 { color: var(--primary); border-bottom-color: var(--primary); }
+h2 { color: #1c3d5a; }
+h3 { color: #234a6b; }
+
+a { color: var(--primary); }
+
+.chapter-badge { background: #e3f0fb; color: var(--primary-dark); }
+.step-number { background: var(--primary); }
+.definition { border-color: var(--primary); }
+.definition h4 { color: var(--primary); }

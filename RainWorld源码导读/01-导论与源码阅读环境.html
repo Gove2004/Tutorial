@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 导论与源码阅读环境 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <span></span>
+        <a href="02-总体架构鸟瞰.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>01 导论与源码阅读环境</h1>
+        <p>在进入任何具体机制之前，先搞清楚三件事：我们手上这份代码到底是什么、它是怎么被还原出来的、以及应该用什么方式去读它。这决定了后面所有章节的阅读效率。</p>
+
+        <h2>1.1 Rain World 是一款怎样的游戏</h2>
+        <p>Rain World 是一款由 Videocult 开发、Adult Swim Games（后由 Akupara Games）发行的生存平台游戏。玩家扮演一只蛞蝓猫（Slugcat），在一个被周期性暴雨主宰、生态系统自主运转的破碎世界里求生。它在技术上有三个鲜明标签：</p>
+        <ul>
+            <li><strong>自研程序化物理与动画</strong>：生物不是预制骨骼动画，而是由圆形刚体（BodyChunk）和弹簧连接实时模拟，姿态从物理中涌现。</li>
+            <li><strong>持续运转的生态模拟</strong>：每个生物都有自己的 AI、需求、记忆与关系，且在玩家看不到的房间里依然存活、迁徙、繁衍。</li>
+            <li><strong>深度可模组化</strong>：官方 DLC 与第三方模组共用同一套加载管线，类型系统采用可扩展枚举，催生了庞大的模组生态。</li>
+        </ul>
+        <p>这三点恰好对应本教程后面的三条主线：物理引擎、双层世界与 AI、模组生态。</p>
+
+        <h2>1.2 反编译产物的目录结构</h2>
+        <p>Unity 游戏的托管程序集位于游戏目录的 <code>RainWorld_Data/Managed/</code> 下，核心是 <code>Assembly-CSharp.dll</code>。这份源码就是用反编译器把该 DLL 还原成的 C# 工程。根目录结构如下：</p>
+
+<pre class="mermaid">
+flowchart TD
+    R["rainworld反编译源码"] --> C["code/"]
+    C --> SLN["Solution.sln"]
+    C --> A["Assembly-CSharp/"]
+    C --> F["Assembly-CSharp-firstpass/"]
+    A --> AR["根目录 720 个 .cs：核心游戏逻辑"]
+    A --> AS["按命名空间组织的子目录：MoreSlugcats / Watcher / Menu / HUD ..."]
+    F --> FF["86 个 .cs：第三方库、平台层、扩展与工具"]
+</pre>
+
+        <p>解决方案（<code>Solution.sln</code>）里包含两个工程，对应 Unity 编译时的两个程序集：</p>
+        <table>
+            <thead>
+                <tr><th>工程</th><th>对应 DLL</th><th>职责</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>Assembly-CSharp</code></td>
+                    <td>Assembly-CSharp.dll</td>
+                    <td>游戏主体代码：世界、房间、物理、生物、AI、玩家、渲染、菜单、DLC 逻辑</td>
+                </tr>
+                <tr>
+                    <td><code>Assembly-CSharp-firstpass</code></td>
+                    <td>Assembly-CSharp-firstpass.dll</td>
+                    <td>“先通过”的插件程序集：第三方库、平台原生封装、扩展方法、性能与日志工具</td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="callout callout-info">
+            <p><strong>为什么叫 firstpass</strong>：Unity 会把放在 <code>Plugins</code> 目录下的脚本单独编译成 firstpass 程序集，且它先于主程序集编译，因此主工程可以引用它，而它不能反向引用主工程。读代码时若发现某个工具类在 firstpass，就能理解它为何不依赖任何游戏逻辑。</p>
+        </div>
+
+        <h2>1.3 工程配置与依赖解读</h2>
+        <p>主工程的 <code>Assembly-CSharp.csproj</code> 暴露了关键的编译与运行信息：</p>
+<pre><code class="language-xml">&lt;TargetFramework&gt;net40&lt;/TargetFramework&gt;
+&lt;LangVersion&gt;12.0&lt;/LangVersion&gt;
+&lt;AllowUnsafeBlocks&gt;True&lt;/AllowUnsafeBlocks&gt;</code></pre>
+        <ul>
+            <li><strong>目标框架 net40</strong>：游戏运行在 Mono / .NET Framework 4.0 运行时上，因此源码里看不到高版本 BCL 才有的 API。</li>
+            <li><strong>LangVersion 12.0</strong>：这是反编译器输出工程时给现代编译器用的语言版本，<em>不代表当年用 C# 12 编写</em>；原始工程大约是 C# 6/7 时代的语法。</li>
+            <li><strong>AllowUnsafeBlocks</strong>：存在指针相关代码（多为高性能底层处理），阅读时遇到 <code>unsafe</code> 不必意外。</li>
+        </ul>
+        <p>引用列表则勾勒出整个技术栈：</p>
+        <table>
+            <thead><tr><th>依赖</th><th>用途</th></tr></thead>
+            <tbody>
+                <tr><td><code>UnityEngine.*</code> 系列模块</td><td>引擎核心：CoreModule、InputLegacy、Audio、Physics、ParticleSystem、IMGUIModule 等</td></tr>
+                <tr><td><code>Rewired_Core / Rewired.Runtime</code></td><td>第三方输入系统，替代 Unity 原生 Input，支持手柄/键鼠/多玩家</td></tr>
+                <tr><td><code>MonoMod.RuntimeDetour</code></td><td>运行时方法钩子（Hook）基础设施，是模组能改写游戏方法的关键</td></tr>
+                <tr><td><code>HOOKS-Assembly-CSharp</code></td><td>HookGen 为游戏程序集生成的事件化钩子程序集（On.* 命名空间）</td></tr>
+                <tr><td><code>Unity.Mathematics / Unity.Burst</code></td><td>数学库与 Burst 高性能编译，用于部分计算密集型逻辑</td></tr>
+                <tr><td><code>GoKit</code></td><td>轻量补间（Tween）库</td></tr>
+                <tr><td><code>com.rlabrecque.steamworks.net</code></td><td>Steamworks 的 C# 封装，成就与创意工坊</td></tr>
+            </tbody>
+        </table>
+        <div class="callout callout-warning">
+            <p><strong>注意 HintPath</strong>：csproj 里引用的 HintPath 指向 <code>D:\SteamLibrary\steamapps\common\Rain World\...</code>，这是<em>生成这份工程的机器</em>上的路径。换一台电脑直接编译会因找不到 DLL 而报错，需要把引用路径改成本机游戏安装目录，或改用 IDE 的程序集搜索。</p>
+        </div>
+
+        <h2>1.4 反编译代码的典型特征</h2>
+        <p>反编译不是还原原始源码，而是根据 IL（中间语言）重新推断出等价的 C#。因此它有一些稳定的“口音”，越早习惯，读起来越顺。</p>
+
+        <h3>特征一：无语义的临时变量名</h3>
+        <p>IL 里不保留局部变量的原始名字（除非有 PDB 调试符号），反编译器会按类型自动编号，于是到处是 <code>num</code>、<code>num2</code>、<code>vector</code>、<code>flag</code>、<code>splt</code> 这类名字。例如 <code>PhysicalObject.BodyChunkConnection.Update()</code> 中：</p>
+<pre><code class="language-csharp">float num = Vector2.Distance(chunk1.pos, chunk2.pos);
+Vector2 vector = Custom.DirVec(chunk1.pos, chunk2.pos);
+Vector2 vector2 = vector * ((distance - num) * weightSymmetry * elasticity);</code></pre>
+        <p>这里的 <code>num</code> 是当前两 chunk 的实际距离，<code>vector2</code> 是要施加的修正量。<strong>读这类代码要靠右侧表达式和上下文反推含义，而不是变量名</strong>。</p>
+
+        <h3>特征二：编译器生成的嵌套类型与 DisplayClass</h3>
+        <p>Lambda、闭包、迭代器（yield）、异步状态机在 IL 里都会被编译成独立的隐藏类。闭包典型命名是 <code>&lt;&gt;c__DisplayClass</code>，迭代器则是带状态字段的机器结构。看到尖括号开头的类名，要意识到它不是人手写的，而是某个 lambda/foreach-yield 的产物。</p>
+
+        <h3>特征三：属性与字段被摊平</h3>
+        <p>自动属性在 IL 里是一个 backing field 加 get/set 方法，反编译后可能呈现为字段，也可能还原成属性。判断一个成员是“数据”还是“计算属性”，要看它是否只有存取逻辑，还是在 getter 里做了计算（如 <code>AbstractWorldEntity.Room</code> 实际是 <code>world.GetAbstractRoom(pos.room)</code>）。</p>
+
+        <h3>特征四：注释完全丢失、switch 被改写</h3>
+        <p>注释不进入 IL，因此整份工程没有任何原始注释。字符串 switch、using 块、foreach 也可能被还原成等价但形态不同的写法（如 <code>using</code> 变成 try/finally，<code>foreach</code> 变成显式枚举器）。<strong>逻辑等价即可，不要在字面形式上纠结</strong>。</p>
+
+        <div class="callout callout-danger">
+            <p><strong>反编译不保证可直接编译</strong>：遇到歧义 IL、复杂泛型、状态机时，反编译结果可能无法一次通过编译。但用于“阅读理解”几乎没有障碍。本教程的目标是读懂而非重新构建可运行游戏，因此这一点不影响学习。</p>
+        </div>
+
+        <h2>1.5 推荐的阅读环境</h2>
+        <p>读这种规模的工程，强烈建议用带全局搜索、跳转定义、查找引用与类型层次图的 IDE，而不是文本编辑器：</p>
+        <ul>
+            <li><strong>JetBrains Rider / IntelliJ 系</strong>：类型层次（Type Hierarchy）、查找用法（Find Usages）、调用链分析能力最强，适合梳理继承树与调用关系。</li>
+            <li><strong>Visual Studio</strong>：解决方案原生格式，F12 跳转、查看定义、对象浏览器成熟。</li>
+            <li><strong>Visual Studio Code + C# 插件</strong>：轻量，全局搜索快，适合定向查代码。</li>
+            <li><strong>dnSpy / ILSpy</strong>：直接对 DLL 反编译、调试运行中进程；当你想对照原始 IL 或动态调试时使用。</li>
+        </ul>
+        <p>注意用户规则：<strong>不要私自下载安装任何程序</strong>。请使用本机已有的工具；若需要新工具，先确认后再安装。</p>
+
+        <h2>1.6 阅读方法论：四步走</h2>
+        <p>面对一个陌生的类，不要从第一行顺序啃到最后一行，按下面的顺序效率最高：</p>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>看它在继承树中的位置</h4>
+                    <p>先看类声明：继承谁、实现了哪些接口。例如看到 <code>Lizard : AirBreatherCreature, IHaveAppendages</code>，立刻知道它是用肺呼吸、带程序化肢体的生物。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>看字段，建立“它持有什么”的清单</h4>
+                    <p>字段是对象的状态骨架。先扫一遍字段名与类型，知道它由哪些子系统组成（如 AI、graphicsModule、bodyChunks）。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>看构造函数，理解“它如何被组装”</h4>
+                    <p>构造函数展示了对象的创建顺序与依赖注入。生物的 chunk、弹簧、模块都在这里被 new 出来，是理解组合关系的最佳入口。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>最后看 Update，理解“它每帧做什么”</h4>
+                    <p>游戏逻辑的主体在 Update 系列方法里。结合方法内调用的子对象方法，顺藤摸瓜画出调用链，而不是孤立地读单个方法。</p>
+                </div>
+            </div>
+        </div>
+        <div class="callout callout-tip">
+            <p><strong>善用全局搜索建立调用链</strong>：想知道某方法何时被触发，用“查找用法”反向追踪；想知道某字段在哪里被改，搜索其赋值。Rain World 大量使用组合而非继承，<em>真正的逻辑往往分散在协作对象之间</em>，搜索比顺序阅读更重要。</p>
+        </div>
+
+        <h2>1.7 练习与思考</h2>
+        <ol>
+            <li>打开 <code>Assembly-CSharp.csproj</code>，对照本机实际游戏安装路径，指出哪些引用会因 HintPath 失效，需要重新指向。</li>
+            <li>在 <code>BodyChunk.cs</code> 中找出至少 3 个反编译自动命名的变量（如 num/flag/vector），并根据右侧表达式写出它们的真实语义。</li>
+            <li>用 IDE 的类型层次功能查看 <code>PhysicalObject</code> 的所有子类，统计直接继承它的类大致分几类，为第 2 章的架构鸟瞰做准备。</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>这份代码是 Assembly-CSharp.dll 与 firstpass.dll 的反编译 C# 工程，版本为 Rain World v1.11.6。</li>
+            <li>主工程承载游戏逻辑，firstpass 承载插件与工具；引用列表勾勒出 Rewired、MonoMod、Burst 等技术栈。</li>
+            <li>反编译代码有自动命名、隐藏类、注释丢失等特征，阅读要靠表达式与调用链反推语义。</li>
+            <li>读类遵循“继承树 → 字段 → 构造 → Update”四步法，并善用全局搜索。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 目录</a>
+            <a href="02-总体架构鸟瞰.html">下一章：总体架构鸟瞰 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

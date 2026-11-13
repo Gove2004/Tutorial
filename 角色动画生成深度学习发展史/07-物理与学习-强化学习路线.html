@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 - 物理与学习：强化学习路线 - 角色动画生成的深度学习发展史</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-生成模型时代-文本到动作.html">← 上一章</a>
+        <a href="08-脉络总结-论文清单与学习路径.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>物理与学习：强化学习路线</h1>
+
+        <p>前面所有方法有一个共同的"作弊"：它们生成的是<strong>运动学（kinematic）动作</strong>——只管姿态好看，不管力从哪来。所以动作可能脚滑、失衡、被撞了没反应。这一章看另一条并行发展的重要路线：<strong>强化学习（RL）让角色在物理仿真里学会动作</strong>。它和生成路线并行推进，近年开始合流。</p>
+
+        <h2>7.1 两条路线的根本区别</h2>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>运动学路线（前 4-6 章）</th><th>物理路线（本章）</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>动作来源</strong></td>
+                    <td>网络直接输出姿态</td>
+                    <td>策略网络输出力/扭矩，物理引擎算出姿态</td>
+                </tr>
+                <tr>
+                    <td><strong>是否"物理正确"</strong></td>
+                    <td>不保证（可能脚滑、穿模）</td>
+                    <td>天然物理正确（由仿真保证）</td>
+                </tr>
+                <tr>
+                    <td><strong>可交互性</strong></td>
+                    <td>弱（被推了就崩）</td>
+                    <td>强（被推了会踉跄、会恢复平衡）</td>
+                </tr>
+                <tr>
+                    <td><strong>训练难度</strong></td>
+                    <td>监督学习，相对简单</td>
+                    <td>强化学习，训练不稳定、慢</td>
+                </tr>
+                <tr>
+                    <td><strong>落地</strong></td>
+                    <td>游戏引擎直接可用</td>
+                    <td>训练成本高，实时性/稳定性是坎</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>一句话</strong>：运动学路线追求"动作像人"，物理路线追求"动作符合力学"。游戏里两者都要——大部分时候用运动学（便宜），关键时刻（被击飞、攀爬边缘、跌倒起身）用物理。
+        </div>
+
+        <h2>7.2 里程碑：DeepMimic（2018）</h2>
+
+        <div class="definition">
+            <h4>Peng, Abbeel, Levine, van de Panne. "DeepMimic: Example-Guided Deep Reinforcement Learning of Physics-Based Character Skills." SIGGRAPH Asia 2018</h4>
+            <p>让一个物理仿真的角色，通过强化学习<strong>模仿动捕参考动作</strong>：奖励函数 = 姿态相似度 + 任务目标。训练后，角色能物理正确地完成走路、跑步、翻滚、后空翻等动作。</p>
+        </div>
+
+        <h3>核心机制拆解</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>参考动作（Reference Motion）</h4>
+                    <p>一段动捕数据作为"模仿对象"，给训练提供"什么是正确动作"的监督信号。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>奖励设计</h4>
+                    <p>每一帧比较"角色当前姿态"和"参考动作对应帧的姿态"，越接近奖励越高。外加任务奖励（前进速度、跳跃高度）。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>策略学习</h4>
+                    <p>PPO 等强化学习算法，让角色试错出"如何施加力才能跟上参考动作"。</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>为什么它是里程碑</h3>
+        <ul>
+            <li>第一次把"动捕数据"和"物理仿真"用强化学习桥接：<strong>动捕提供"动作风格"，物理提供"力学约束"</strong></li>
+            <li>证明了角色可以"学会"后空翻这种复杂技能，且每次落地都物理真实</li>
+            <li>成为后续所有物理角色学习工作的参照系</li>
+        </ul>
+
+        <h2>7.3 下一步：AMP（2021）——动作先验</h2>
+
+        <div class="definition">
+            <h4>Peng et al. "AMP: Adversarial Motion Priors for Stylized Physics-Based Character Control." SIGGRAPH 2021</h4>
+            <p>DeepMimic 需要"每帧对参考动作"（要逐帧对齐，动作必须和参考高度同步）。AMP 改用<strong>对抗学习</strong>：判别器区分"角色动作像不像真实动捕数据"，策略只要让判别器分不清就赢了。这样角色不需要逐帧对齐某个参考，可以自由探索任务，同时保持动作风格自然。</p>
+        </div>
+
+        <p>意义：</p>
+        <ul>
+            <li><strong>摆脱逐帧对齐</strong>：角色可以执行任意任务（比如"走到目标点"），只要动作风格"像人"就行</li>
+            <li><strong>动作先验（Motion Prior）</strong>：把"什么样算自然动作"变成一个可学习的先验，是 2021 年后物理角色的标准组件</li>
+            <li><strong>和生成路线合流</strong>：这个"判别器"思想和 GAN 一模一样——你在生成模型章节学到的对抗训练，在这里是物理控制的骨架</li>
+        </ul>
+
+        <h2>7.4 近年趋势：两条路线开始合流</h2>
+
+        <p>2022 年以后，最强的方向不是"纯生成"或"纯物理"，而是<strong>结合</strong>：</p>
+
+        <ul>
+            <li><strong>用生成模型做"运动先验"</strong>：扩散模型/GPT 学到的动作分布，作为物理角色 RL 的奖励来源（比手工奖励更自然）</li>
+            <li><strong>运动学 → 物理的"残差"</strong>：先生成运动学动作，再用 RL 加一个"物理校正项"，兼顾质量与稳定</li>
+            <li><strong>可控物理角色</strong>：让物理角色跟随文本/轨迹指令，同时保持平衡——"能听懂话的物理人"</li>
+        </ul>
+
+        <div class="sidebar-note">
+            <strong>对你做游戏开发的启发</strong>：物理角色短期内难以直接进 3A 游戏（训练贵、实时不稳），但"跌倒/被击飞/攀爬边缘"这类<strong>短时物理响应</strong>已经在很多游戏里用 RL 或混合方案做了。如果你之后想做个"被击飞会自然翻滚落地"的角色，这条线就是你要的技术。
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>运动学 vs 物理：一个管"像人"，一个管"符合力学"，游戏里两者都需要</li>
+            <li>DeepMimic（2018）：RL + 动捕参考，物理角色学会复杂技能</li>
+            <li>AMP（2021）：对抗式动作先验，摆脱逐帧对齐，任务自由</li>
+            <li>趋势：生成模型与物理 RL 合流——生成提供"自然"，物理提供"真实"</li>
+        </ul>
+
+        <h2>思考题</h2>
+        <ol>
+            <li>为什么 DeepMimic 的逐帧对齐限制很大？想一个它做不了的动作类型。</li>
+            <li>AMP 的"判别器分不清"和 GAN 的生成器-判别器博弈，本质上是不是同一件事？</li>
+            <li>如果让你给一个"物理角色"设计奖励，除了"像参考动作"，你还会加哪些项让它更鲁棒？</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="06-生成模型时代-文本到动作.html">← 上一章：文本到动作</a>
+            <a href="08-脉络总结-论文清单与学习路径.html">下一章：脉络总结 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

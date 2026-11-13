@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 - 生成模型时代：文本到动作 - 角色动画生成的深度学习发展史</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="05-实时控制-相位函数网络.html">← 上一章</a>
+        <a href="07-物理与学习-强化学习路线.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>生成模型时代：文本到动作</h1>
+
+        <p>2021 年开始，动作生成发生了第二次范式跃迁：<strong>从「条件控制」（摇杆/相位）到「语义生成」（文字/语音）</strong>。你打一句话「一个穿裙子的人在雨中开心地转圈」，系统直接生成一段符合描述的动作。这一章梳理文本到动作（Text-to-Motion）这条主线的全部关键节点。</p>
+
+        <h2>6.1 为什么是「文本」</h2>
+
+        <p>相位方法（上一章）解决的是「实时控制」，但它的输入是低层的运动信号。而用户/导演/策划真正想要的是<strong>语义级控制</strong>：「让角色开心地跳起来」——这是文本。文本到动作把「自然语言处理方法应用到动画合成」，也正是你老师研究方向简介里的原话。</p>
+
+        <div class="definition">
+            <h4>文本到动作（Text-to-Motion）</h4>
+            <p>输入：一段自然语言描述（例如「a person walks forward and punches」）。输出：一段与描述语义一致的动作序列。属于「跨模态生成」——语言和动作之间的对齐。</p>
+        </div>
+
+        <h2>6.2 关键前提：数据集的建立</h2>
+
+        <p>任何生成模型都需要「文本-动作对」的训练数据。这个方向能爆发，前提是 2022 年出现了标准数据集：</p>
+
+        <table>
+            <thead>
+                <tr><th>数据集</th><th>时间</th><th>内容</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>AMASS</strong></td>
+                    <td>2019</td>
+                    <td>大规模动捕数据统一到 SMPL 人体模型，动作生成的「原料库」</td>
+                </tr>
+                <tr>
+                    <td><strong>HumanML3D</strong></td>
+                    <td>2022</td>
+                    <td>在 AMASS 基础上标注了文本描述，是文本到动作的默认基准</td>
+                </tr>
+                <tr>
+                    <td><strong>KIT-ML</strong></td>
+                    <td>2020 前</td>
+                    <td>早期文本-动作数据集，规模小，常用于预训练</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>一个真实信号</strong>：你在论文里看到「T2M、MDM、MotionDiffuse 都用 HumanML3D 评测」——同一个数据集意味着方法之间可以公平比较，这也是这个方向 2022 年后论文井喷的机制性原因。<strong>数据集标准化的时间点，往往就是一个方向爆发的起点。</strong>
+        </div>
+
+        <h2>6.3 第一条路线：CLIP 对齐（MotionCLIP, 2022）</h2>
+
+        <div class="definition">
+            <h4>Tevet et al.「MotionCLIP: Exposing Human Motion Generation to CLIP Space」ECCV 2022</h4>
+            <p>把动作序列编码进 CLIP 的共享语义空间，让动作和文本/图像对齐。你给一段文字，找 CLIP 空间里最接近的动作编码，解码成动作。</p>
+        </div>
+
+        <p>意义：证明了<strong>「动作可以嵌入到一个和文本共享的语义空间」</strong>——这是后面所有文本到动作方法的思想根基。局限：CLIP 空间是给图像/文本设计的，动作只能「贴近」语义，精细控制不足。</p>
+
+        <h2>6.4 第二条路线：自回归/编码器路线（T2M, TEMOS, 2022）</h2>
+
+        <div class="definition">
+            <h4>Guo et al.「Executing your Commands via Motion Diffusion in Latent Space」（T2M 系列）</h4>
+            <p>最早的端到端文本到动作方法之一：文本编码器提取语义向量，条件化地生成动作序列。同时提出了至今沿用的评测指标（FID 等）。</p>
+        </div>
+
+        <div class="definition">
+            <h4>Petrovich et al.「TEMOS: Generating diverse human motions from textual descriptions」ECCV 2022</h4>
+            <p>用 VAE 结构，把文本条件注入潜在空间采样，生成多样化的动作——同一句文本可以生成多种「合理但不完全相同」的动作。</p>
+        </div>
+
+        <h2>6.5 第三条路线：扩散模型（2022-2023）——质量质变</h2>
+
+        <p>扩散模型在图像生成的统治力直接迁移到了动作生成，这是当前最主流路线：</p>
+
+        <table>
+            <thead>
+                <tr><th>方法</th><th>时间</th><th>核心思路</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>MotionDiffuse</strong></td>
+                    <td>2022 (CVPR)</td>
+                    <td>第一个把扩散模型用在文本到动作：从噪声逐步去噪成动作序列，条件为文本嵌入</td>
+                </tr>
+                <tr>
+                    <td><strong>MDM</strong></td>
+                    <td>2022 (ICLR 2023)</td>
+                    <td>Human Motion Diffusion Model：用 Transformer 骨干做去噪，支持文本/动作/轨迹等多条件</td>
+                </tr>
+                <tr>
+                    <td><strong>MLD</strong></td>
+                    <td>2023 (CVPR)</td>
+                    <td>Motion Latent Diffusion：先在潜在空间（VAE 压缩）做扩散，大幅提速——「先在压缩空间里想，再解码成动作」</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="sidebar-note">
+            <strong>为什么扩散模型适合动作</strong>：
+            <ul>
+                <li><strong>多样性好</strong>：同一条件每次采样都不同，不像回归模型只会输出「平均动作」（模糊）</li>
+                <li><strong>质量高</strong>：逐步去噪天然能生成平滑的时序信号，比一步到位的方法稳</li>
+                <li><strong>条件灵活</strong>：文本、轨迹、关键帧、音乐都能作为条件注入</li>
+            </ul>
+            代价：采样慢（要多步去噪）。MLD 用潜空间压缩缓解了这一点。
+        </div>
+
+        <h2>6.6 第四条路线：GPT 化（2023）——动作即语言</h2>
+
+        <p>2023 年最有趣的趋势：<strong>把动作当成「语言」来处理</strong>。</p>
+
+        <div class="definition">
+            <h4>T2M-GPT (Zhang et al., ICCV 2023)</h4>
+            <p>用 VQ-VAE 把动作序列离散成「动作 token」（类似 BPE 分词），然后像 GPT 一样自回归地预测下一个 token，文本作为前缀条件。</p>
+        </div>
+
+        <div class="definition">
+            <h4>MotionGPT (Jiang et al., 2023/2024)</h4>
+            <p>把动作 token 和文本 token 放进同一个词表，训练一个统一的大模型：既能「看懂」动作（动作→文本描述），也能「生成」动作（文本→动作）。一个模型干两件事。</p>
+        </div>
+
+        <p>这条路线直白地说：<strong>「动作和语言在 token 层面统一了」</strong>——你学过 NLP 里的 word2vec/seq2seq/Transformer，这里的动作 token 思路和语言模型几乎同构。</p>
+
+        <div class="callout callout-tip">
+            <strong>对你特别相关</strong>：你在 LearnDeep 里练过 word2vec/seq2seq/transformer，也读过鱼书的 NLP 部分——T2M-GPT/MotionGPT 的「动作分词 + 自回归」和你练的东西<strong>是一模一样的范式</strong>，只是把「词」换成了「动作片段」。你已有的基础可以直接平移到这个方向，这也是你老师给你列「深度学习 + NLP」参考书的原因。
+        </div>
+
+        <h2>6.7 主线对比：四代文本到动作方法</h2>
+
+        <table>
+            <thead>
+                <tr><th>路线</th><th>代表</th><th>核心机制</th><th>优点</th><th>缺点</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>CLIP 对齐</td>
+                    <td>MotionCLIP</td>
+                    <td>动作编码进 CLIP 空间</td>
+                    <td>零样本、多模态</td>
+                    <td>精细控制弱</td>
+                </tr>
+                <tr>
+                    <td>自回归/VAE</td>
+                    <td>T2M, TEMOS</td>
+                    <td>文本条件编码 → 生成</td>
+                    <td>简单、可评测</td>
+                    <td>质量有限</td>
+                </tr>
+                <tr>
+                    <td>扩散模型</td>
+                    <td>MDM, MotionDiffuse, MLD</td>
+                    <td>逐步去噪</td>
+                    <td>质量高、多样</td>
+                    <td>采样慢</td>
+                </tr>
+                <tr>
+                    <td>GPT 化</td>
+                    <td>T2M-GPT, MotionGPT</td>
+                    <td>动作分词 + 自回归</td>
+                    <td>统一理解/生成</td>
+                    <td>需要大 token 词表</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>文本到动作 = 语义级动作生成，数据前提是 HumanML3D 等标准数据集</li>
+            <li>四条路线：CLIP 对齐 → 自回归/VAE → 扩散模型 → GPT 化，扩散是当前主流</li>
+            <li>扩散模型带来质量质变，GPT 化带来「动作即语言」的统一范式</li>
+            <li>和你已有基础（NLP + PyTorch）直接衔接</li>
+        </ul>
+
+        <h2>思考题</h2>
+        <ol>
+            <li>为什么「回归模型」生成动作容易模糊（平均动作）而「扩散模型」不会？</li>
+            <li>MLD 为什么要在潜在空间做扩散而不是直接在动作空间做？代价是什么？</li>
+            <li>如果让你评测一个文本到动作模型，除了动作质量，你会评测哪些维度？（提示：文本-动作一致性、多样性）</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="05-实时控制-相位函数网络.html">← 上一章：实时控制</a>
+            <a href="07-物理与学习-强化学习路线.html">下一章：物理与学习 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

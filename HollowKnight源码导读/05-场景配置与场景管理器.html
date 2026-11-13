@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 5 章 场景配置与场景管理器 - 空洞骑士源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="04-场景切换管线.html">← 上一章：场景切换管线</a>
+    <a href="06-PlayerData数据中枢.html">下一章：PlayerData 数据中枢 →</a>
+</nav>
+<main>
+    <h1>第 5 章　场景配置与场景管理器</h1>
+    <p>第 4 章讲场景"怎么换"，本章聚焦每个场景"靠什么描述自己"。《空洞骑士》把一个场景的全部静态配置收在一个挂着 HK 版 SceneManager 的物体上，再配合相机锁区、动态边界和附加场景加载器，构成完整的场景组织方式。</p>
+
+    <h2>5.1 同名陷阱：两个 SceneManager</h2>
+    <div class="callout callout-danger">
+        <p>读源码时第一个要分清的名字：<code>SceneManager</code> 在游戏里有两个所指。</p>
+        <ul>
+            <li><code>UnityEngine.SceneManagement.SceneManager</code>——Unity 引擎的场景 API（LoadSceneAsync、UnloadScene 等）</li>
+            <li><code>SceneManager</code>（全局命名空间，本教程称 HK SceneManager）——Team Cherry 写的场景配置组件，每个场景一个</li>
+        </ul>
+        <p>源码里同一个文件中两者会同时出现，引擎调用写全限定名，HK 组件直接用 <code>sm</code> 字段。GameManager 的 <code>sm</code> 属性指向的是 HK SceneManager。</p>
+    </div>
+
+    <h2>5.2 HK SceneManager：场景的配置档案</h2>
+    <p>它是一个 <code>[Serializable]</code> MonoBehaviour，字段几乎全是 Inspector 配置，可以按六个维度分组：</p>
+    <table>
+        <thead><tr><th>维度</th><th>代表字段</th><th>作用</th></tr></thead>
+        <tbody>
+            <tr><td>身份</td><td><code>sceneType</code>、<code>mapZone</code></td><td>声明场景类型（GAMEPLAY/MENU…）和所属地图区域，是全局判断的依据</td></tr>
+            <tr><td>环境</td><td><code>isWindy</code>、<code>isTremorZone</code>、<code>environmentType</code></td><td>风、震动、脚步环境类型（灰尘/草/骨/金属/水），影响粒子与音效</td></tr>
+            <tr><td>色彩</td><td><code>saturation</code>、red/green/blueChannel、darknessLevel</td><td>色彩校正曲线、饱和度、黑暗等级</td></tr>
+            <tr><td>光照</td><td><code>defaultColor</code>、<code>defaultIntensity</code>、<code>heroLightColor</code></td><td>环境光与主角光源颜色</td></tr>
+            <tr><td>音频</td><td><code>atmosCue</code>、<code>musicCue</code>、四个 Snapshot</td><td>氛围/音乐 Cue 与混音快照</td></tr>
+            <tr><td>边界/映射</td><td><code>borderPrefab</code>、<code>sceneBordersMask</code>、<code>manualMapTrigger</code></td><td>场景边界生成与地图登记开关</td></tr>
+        </tbody>
+    </table>
+
+    <h3>Start 里的配置应用流程</h3>
+    <p>场景激活后，HK SceneManager 的 Start 按固定顺序把配置推给各子系统，这段代码是理解"场景如何影响全局表现"的主线：</p>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+flowchart TB
+    A["1. 色彩校正曲线/饱和度<br/>写入 colorCorrectionCurves"] --> B["2. 环境光 SetLighting<br/>写入 RenderSettings"]
+    B --> C["3. 主角光源 heroLight 颜色"]
+    C --> D["4. 登记场景访问<br/>订阅 OnFinishedEnteringScene"]
+    D --> E["5. 应用 atmosCue / musicCue<br/>含感染十字路替换逻辑"]
+    E --> F["6. 切换四个 AudioMixerSnapshot"]
+    F --> G["7. 黑暗等级写入<br/>Vignette 的 Darkness Control FSM"]
+    G --> H["8. 按需生成空洞阴影 / 梦门对象"]
+</div>
+    </div>
+<pre><code class="language-csharp">// 音乐的感染替换：十字路变化后同一场景换用不同 MusicCue
+MusicCue cue = this.musicCue;
+if (gm.playerData.crossroadsInfected && infectedMusicCue != null)
+{
+    cue = infectedMusicCue;
+}
+gm.AudioManager.ApplyMusicCue(cue, musicDelayTime, musicTransitionTime, applySnapshot: false);</code></pre>
+    <p>注意它不直接调用 PlayMakerFSM，而是通过 FSMUtility 定位场景里 Tag 为 "Vignette" 的黑暗控制 FSM 并写入黑暗等级——再次体现"配置组件通过工具类间接操作 FSM"的模式。</p>
+
+    <h2>5.3 CameraLockArea：相机锁区</h2>
+    <p>一个场景常被切成多个相机房间，每个房间由一个 CameraLockArea（Trigger Collider）描述四向边界。主角进出 Trigger 时驱动相机锁定与释放。</p>
+
+    <h3>进入时：记录从哪条边进来</h3>
+<pre><code class="language-csharp">public void OnTriggerEnter2D(Collider2D otherCollider)
+{
+    if (!IsInApplicableGameState() || !otherCollider.CompareTag("Player")) return;
+    heroPos = otherCollider.transform.position;
+    // 用 ±1 容差判断主角靠近哪条边，设置 camTarget.enteredLeft/Right/Top/Bot
+    if (heroPos.x > leftSideX - 1f && heroPos.x < leftSideX + 1f)
+        camTarget.enteredLeft = true;
+    // ...
+    cameraCtrl.LockToArea(this);
+}</code></pre>
+    <div class="definition">
+        <h4>为什么要记录进入方向？</h4>
+        <p>相机从一个锁区移动到下一个时，需要知道主角是从哪条边进来的，才能决定相机是横向平移还是纵向平移，避免镜头斜向滑动。entered/exited 四组布尔标记就是相机过渡动画的方向输入，由 CameraTarget 承载。</p>
+    </div>
+
+    <h3>停留与退出</h3>
+    <ul>
+        <li><code>OnTriggerStay2D</code> 持续调用 <code>LockToArea</code>，防止多个锁区重叠时锁被别的区域抢走</li>
+        <li><code>OnTriggerExit2D</code> 记录退出边并调用 <code>ReleaseLock</code></li>
+        <li><code>OnDisable</code> 兜底释放，避免组件被禁用后相机永久锁住</li>
+    </ul>
+    <div class="callout callout-warning">
+        <p><strong>边界默认值的约定</strong>：ValidateBounds 里 <code>-1</code> 是"未指定"哨兵值，会被替换成默认值（14.6 / 8.3 或相机极限）。四个边界全为 0 才判定为配置错误。读这类代码要先识别哨兵值，否则会把 -1 当成真实坐标。</p>
+    </div>
+
+    <h2>5.4 场景边界的动态生成</h2>
+    <p>HK SceneManager 不把边界写死在场景里，而是监听 <code>ForceCameraAspect.ViewportAspectChanged</code>，在宽高比变化时按位掩码 <code>sceneBordersMask</code> 动态实例化 borderPrefab：</p>
+<pre><code class="language-csharp">// 右边界：位置随场景宽度和宽高比偏移量调整
+transform.SetPosition2D(gm.sceneWidth + x / 2f - num, gm.sceneHeight / 2f);
+transform.localScale = new Vector2(x, gm.sceneHeight + x * 2f);</code></pre>
+    <p>宽高比变化（超宽屏、窗口拉伸）时，边界位置和长度都要跟着变，否则不同比例下会出现漏边。这是为多分辨率适配做的设计，也解释了为什么边界用代码生成而不是摆放。</p>
+
+    <h2>5.5 附加场景：条件加载与预加载</h2>
+    <p>除了主场景，游戏还会按需 additive 加载小场景，由两个组件分工：</p>
+
+    <h3>SceneAdditiveLoadConditional：数据驱动的条件加载器</h3>
+    <p>它在 OnEnable 里跑一组测试——PlayerData 布尔测试、整数比较（六种 TestType）、PersistentBool 测试、门口触发校验——全部通过才加载主附加场景，否则加载备选场景或不加载：</p>
+<pre><code class="language-csharp">switch (intTest.testType)
+{
+    case IntTest.TestType.Less: flag2 = playerDataInt < num; break;
+    case IntTest.TestType.More: flag2 = playerDataInt > num; break;
+    // Equal / NotEqual / LessOrEqual / MoreOrEqual
+}</code></pre>
+    <p>场景切换期间 <code>loadInSequence=true</code>，这些加载器先登记，由 SceneLoad 第 7 阶段（LoadBoss）统一 <code>LoadAll</code> 顺序执行，避免多个 additive 加载同时竞争。Boss 场景的附加内容主要走这条路径。</p>
+
+    <h3>ScenePreloader：相邻场景的后台预加载</h3>
+    <p>它在场景运行时就把相邻场景以 <code>allowSceneActivation=false</code> 预加载到 0.9，挂起等待；SceneLoad 开始时先 <code>FinishPendingOperations</code> 激活它们，管线结束时 <code>Cleanup</code> 卸载。这是用内存换取进门时的加载速度。</p>
+
+    <table>
+        <thead><tr><th>组件</th><th>加载时机</th><th>典型用途</th></tr></thead>
+        <tbody>
+            <tr><td>SceneAdditiveLoadConditional</td><td>切换序列中按条件加载</td><td>Boss 附加场景、状态相关内容</td></tr>
+            <tr><td>ScenePreloader</td><td>当前场景运行时提前加载</td><td>相邻房间预取，缩短进门等待</td></tr>
+        </tbody>
+    </table>
+
+    <h2>5.6 子场景命名后缀</h2>
+    <p>GameManager.GetBaseSceneName 会剥离一组子场景后缀（如 <code>_b</code> 等），把同一场景的拆分版本归并到基础名。这与 SaveDataUpgradeHandler 里的场景拆分逻辑（一个大场景被拆成两个）对应。读场景名时要意识到：<strong>磁盘上的场景名和逻辑上的场景名可能差一个后缀</strong>，存档与地图按基础名归并。</p>
+
+    <div class="exercise">
+        <h3>思考与练习</h3>
+        <ol>
+            <li>列出区分两个 SceneManager 的方法，并在 GameManager 中找出分别使用二者的代码位置。</li>
+            <li>追踪 CameraLockArea 从主角进入到相机完成锁定的调用链，说明 enteredLeft 这类标记最终被谁消费。</li>
+            <li>解释场景边界为什么要监听宽高比变化动态生成，固定摆放 在什么情况下会出问题。</li>
+            <li>对比 SceneAdditiveLoadConditional 与 ScenePreloader 的代价（内存/IO/时机），各举一个适合它们的场景。</li>
+        </ol>
+    </div>
+</main>
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="04-场景切换管线.html">← 上一章：场景切换管线</a>
+        <a href="06-PlayerData数据中枢.html">第 6 章：PlayerData 数据中枢 →</a>
+    </nav>
+</footer>
+<script src="assets/script.js"></script>
+</body>
+</html>

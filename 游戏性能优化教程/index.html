@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>游戏性能优化实战教程 - 从策略到分析体系</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <h1>游戏性能优化实战教程</h1>
+        <p class="intro">从 15 个一线优化策略出发，理解引擎与业务模块的性能特征，最终建立“可量化、可分析、可复用”的持续性能优化工程体系。案例以移动端 MOBA（《王者荣耀》）为原型，代码示例基于 Unity / C#。</p>
+
+        <div class="version-info">
+            <strong>内容来源</strong>：本教程在腾讯《王者荣耀》客户端工程师陆泽西的技术分享《游戏性能分析与挖掘》基础上重构、扩写而成。原文是讲座纪要，本教程补充了原理推导、可运行代码、边界条件、排查流程与练习，章节结构按学习路径重新组织，而非照搬原文顺序。
+        </div>
+
+        <div class="callout callout-info">
+            <strong>关于本教程</strong>
+            <ul>
+                <li><strong>面向读者</strong>：有 Unity 或其他商业引擎使用经验、能阅读 C# 代码的客户端开发者；也适合需要与客户端协作的技术美术、QA 与性能专项工程师。</li>
+                <li><strong>学习目标</strong>：学完后能独立完成一次真机性能采集、定位瓶颈模块、给出并验证优化方案，而不是只会背“减少 Draw Call”这类口号。</li>
+                <li><strong>深度定位</strong>：系统掌握级。覆盖核心机制、常见场景、生产陷阱与权衡；不做源码级引擎逆向，也不是入门速成。</li>
+                <li><strong>视觉风格</strong>：tech 技术蓝，代码块支持一键复制，流程图使用 Mermaid 渲染。</li>
+            </ul>
+        </div>
+
+        <h2>学习路径</h2>
+        <p>整套课程分四个模块，遵循“先建立度量、再动手优化、然后理解模块、最后形成体系”的递进关系。</p>
+        <div class="mermaid">
+flowchart LR
+    A["模块一<br/>基础与度量<br/>第1-3章"] --> B["模块二<br/>优化策略实战<br/>第4-11章"]
+    B --> C["模块三<br/>模块特征地图<br/>第12章"]
+    C --> D["模块四<br/>分析方法与体系<br/>第13-14章"]
+    style A fill:#e7f3ff,stroke:#007acc,color:#14395a
+    style B fill:#e9f7ec,stroke:#2e7d32,color:#14395a
+    style C fill:#fff6e8,stroke:#e65100,color:#14395a
+    style D fill:#f5eefb,stroke:#8e44ad,color:#14395a
+        </div>
+
+        <h2>课程目录</h2>
+
+        <p class="module-divider">模块一：基础与度量</p>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-导论-性能优化全景图.html">01 - 导论：性能优化全景图</a></h3>
+                <p>性能优化的真实目标与三层能力模型；性能问题的业务代价；本课程的知识地图与学习方法。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-核心指标与性能预算.html">02 - 核心指标与性能预算</a></h3>
+                <p>为什么用帧时间而非平均 FPS；Draw Call、Overdraw、面数、内存等指标的准确含义；如何制定性能预算。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-渲染管线与线程模型.html">03 - 渲染管线与线程模型</a></h3>
+                <p>一帧之内 CPU 与 GPU 各自做了什么；主线程、渲染线程与 Worker 线程的协作；CPU 瓶颈与 GPU 瓶颈的判定。</p>
+            </div>
+        </div>
+
+        <p class="module-divider">模块二：优化策略实战</p>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-动静分离与LOD分级体系.html">04 - 动静分离与 LOD 分级体系</a></h3>
+                <p>动静分离的更新策略；LOD 从模型扩展到 UI、动画、特效与管线；设备分档与切换抖动的处理。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-DrawCall与合批优化.html">05 - Draw Call 与合批优化</a></h3>
+                <p>Draw Call 贵在哪里；静态合批、动态合批、GPU Instancing、SRP Batcher 的适用边界；自定义动态合批的工程实现。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-UI性能优化专题.html">06 - UI 性能优化专题</a></h3>
+                <p>UGUI Canvas 重建机制与 Canvas 拆分；3D UI、UI 渲染管线分离；字体描边、UI Overdraw 与图集治理。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="07-动态自适应与特效分级.html">07 - 动态自适应与特效分级</a></h3>
+                <p>战斗强度驱动的质量自适应状态机；特效五级分类与裁剪；粒子离线裁剪与凸包算法。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="08-寻路优化.html">08 - 寻路优化</a></h3>
+                <p>A* 的成本结构；路径权重、区域分块、离线路径与跳点寻路（JPS）；动态障碍与路径平滑的陷阱。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="09-距离场碰撞优化.html">09 - 距离场碰撞优化</a></h3>
+                <p>把碰撞计算搬到离线阶段：距离场的生成算法、运行时查询、角色半径与碰撞方向判定，以及适用边界。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="10-场景加载纹理与内存优化.html">10 - 场景加载、纹理与内存优化</a></h3>
+                <p>异步加载与空间优先级；Mipmap 与纹理治理；Model 延迟加载；对象池、内存碎片与启动内存压力。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="11-阴影动画与引擎管线定制.html">11 - 阴影、动画与引擎管线定制</a></h3>
+                <p>面片阴影替代实时 Shadow Map；动画 Job System 与距离分帧；“业务层关闭 ≠ 引擎层停止”与管线定制。</p>
+            </div>
+        </div>
+
+        <p class="module-divider">模块三：模块特征地图</p>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="12-业务与引擎模块特征地图.html">12 - 业务与引擎模块特征地图</a></h3>
+                <p>UI、网络同步、技能、地图与内存、渲染、动画、粒子、UI 内核八大模块的架构特征与各自的典型性能问题。</p>
+            </div>
+        </div>
+
+        <p class="module-divider">模块四：分析方法与体系</p>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="13-微观分析四板斧与八大维度.html">13 - 微观分析四板斧与八大维度</a></h3>
+                <p>标准分析、差异分析、相关性分析、排除法；渲染、动画、逻辑、线程、IO、内存、UI、特效八大维度检查表。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="14-持续优化体系与综合实战.html">14 - 持续优化体系与综合实战</a></h3>
+                <p>性能标准、数据采集、自动化测试与 CI 接入；一次团战卡顿的完整排查案例；优化效果验证与深入学习路径。</p>
+            </div>
+        </div>
+
+        <h2>推荐学习方式</h2>
+        <ul>
+            <li><strong>顺序学习</strong>：第 1–3 章是后续所有内容的语言基础，指标概念没建立时直接看策略容易误用。</li>
+            <li><strong>动手验证</strong>：每章代码尽量在自己的工程里跑一遍，用 Profiler 对照测量前后差异——没有测量的优化只是猜测。</li>
+            <li><strong>完成练习</strong>：每章末尾有基础练习、进阶挑战与思考题，建议至少完成其中一项再进入下一章。</li>
+        </ul>
+
+        <h2>权威学习资源</h2>
+        <ul>
+            <li><a href="https://docs.unity3d.com/Manual/Profiler.html" target="_blank">Unity 官方手册：Profiler 性能分析器</a></li>
+            <li><a href="https://docs.unity3d.com/Manual/optimizing-graphics-performance.html" target="_blank">Unity 官方手册：图形性能优化</a></li>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.entities@latest" target="_blank">Unity Entities（DOTS / Job System）官方文档</a></li>
+            <li><a href="https://gameprogrammingpatterns.com/" target="_blank">Game Programming Patterns（游戏编程模式）</a></li>
+            <li><a href="https://developer.arm.com/documentation" target="_blank">ARM Developer：移动端 GPU 与性能优化文档</a></li>
+        </ul>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

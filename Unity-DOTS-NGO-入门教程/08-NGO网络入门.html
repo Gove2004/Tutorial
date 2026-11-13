@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>08 Netcode for GameObjects 入门 - Unity DOTS 与 NGO 入门教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="07-结构变更与系统调度.html">← 上一章</a>
+        <a href="09-网络变量与RPC.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>08　Netcode for GameObjects 入门：拓扑、权威与 NetworkManager</h1>
+
+        <p>从这一章开始进入多人网络。先建立网络拓扑和权威模型的概念，再动手装包、搭 NetworkManager、跑通第一个 Host/Client 连接。NGO 是高层 API，写的还是 MonoBehaviour，所以这部分对你来说语法门槛低，真正的难点是“换一种脑子想问题”。</p>
+
+        <h2>8.1 三种进程角色</h2>
+
+        <p>同一份游戏代码会以不同角色运行，NGO 里有三种：</p>
+
+        <table>
+            <thead>
+                <tr><th>角色</th><th>含义</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>Server（服务器）</strong></td><td>不渲染、不接收玩家输入，只负责模拟和状态仲裁，运行在专用进程上（Dedicated Server）。</td></tr>
+                <tr><td><strong>Host（主机）</strong></td><td>Server 与 Client 合体：一个进程同时承担服务器逻辑和一个本地玩家客户端。常见于朋友房间、无专用服务器的游戏。</td></tr>
+                <tr><td><strong>Client（客户端）</strong></td><td>采集本地输入、发送给服务器、接收状态并渲染，不自行决定最终结果。</td></tr>
+            </tbody>
+        </table>
+
+        <div class="mermaid-wrapper">
+            <pre class="mermaid">
+flowchart TB
+    C1["Client 1"] -->|"发送输入 / 接收状态"| S["Server（权威）"]
+    C2["Client 2"] --> S
+    C3["Client 3"] --> S
+    S -->|"广播同步状态"| C1
+    S --> C2
+    S --> C3
+            </pre>
+        </div>
+
+        <h2>8.2 权威服务器模型：谁说了算</h2>
+
+        <div class="definition">
+            <h4>权威（Authority）</h4>
+            <p>在客户端-服务器模型下，<strong>服务器是状态的唯一权威</strong>：玩家位置、血量、道具归属这些“真相”由服务器计算和确认，客户端本地的结果只是预测或表现，必须等服务器回传才作数。</p>
+        </div>
+
+        <p>这是和单机思维最大的区别。单机里 <code>transform.position</code> 改了就是改了；联网时客户端不能直接宣布“我走到这里了”，否则作弊者可以随意改内存。正确流程是：客户端上报输入 → 服务器模拟并判定 → 服务器把结果同步给所有人。NGO 默认服务器权威，也支持对单个对象做所有权（ownership）授权，第九章展开。</p>
+
+        <div class="sidebar-note">
+            <strong>几个要先接受的物理事实</strong>：网络有延迟（RTT，几十到几百毫秒）、会丢包、会乱序。你不能假设“调用立刻生效”或“两边状态永远一致”。插值、延迟补偿、可靠/不可靠通道这些机制都是为应对这些事实而生。
+        </div>
+
+        <h2>8.3 安装 NGO</h2>
+
+        <p>通过 Window → Package Manager 添加官方包 <code>com.unity.netcode.gameobjects</code>。版本选择与依赖关系需要注意：</p>
+        <ul>
+            <li><strong>NGO 3.x</strong>：要求 Unity 6.7 或更高，底层依赖 Netcode for Entities 包，安装时会自动拉入 Entities、Collections、Burst、Mathematics，构建时间和包数量会增加。</li>
+            <li><strong>NGO 2.x</strong>：不强制上述依赖，适合暂时不升级到 6.7 的项目。运行时 API 形态基本一致，主要差异在 RPC 特性和部分过时 API。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            这些都是 Unity 包管理器内的官方包，按你项目的编辑器版本选择即可，不要从第三方网站下载来源不明的网络库。本教程示例按 3.x 编写，2.x 差异会单独标注。
+        </div>
+
+        <h2>8.4 NetworkManager：整个网络的中枢</h2>
+
+        <p>每个联网场景需要一个挂载 <code>NetworkManager</code> 组件的 GameObject，并在它上面指定传输层（默认 <code>UnityTransport</code>）。NetworkManager 负责连接生命周期、对象生成、消息分发，运行时通过单例访问：<code>NetworkManager.Singleton</code>。</p>
+
+        <h3>启动三种角色</h3>
+
+<pre><code class="language-csharp">using Unity.Netcode;
+using UnityEngine;
+using UnityEngine.UI;
+
+public class ConnectionUI : MonoBehaviour
+{
+    [SerializeField] private Button hostButton;
+    [SerializeField] private Button clientButton;
+    [SerializeField] private Button serverButton;
+
+    void Start()
+    {
+        hostButton.onClick.AddListener(() =&gt; NetworkManager.Singleton.StartHost());
+        clientButton.onClick.AddListener(() =&gt; NetworkManager.Singleton.StartClient());
+        serverButton.onClick.AddListener(() =&gt; NetworkManager.Singleton.StartServer());
+    }
+}
+</code></pre>
+
+        <h3>监听连接事件</h3>
+
+<pre><code class="language-csharp">NetworkManager.Singleton.OnClientConnectedCallback += clientId =&gt;
+{
+    Debug.Log($"客户端 {clientId} 已连接");
+};
+
+NetworkManager.Singleton.OnClientDisconnectCallback += clientId =&gt;
+{
+    Debug.Log($"客户端 {clientId} 断开连接");
+};
+</code></pre>
+
+        <h2>8.5 UnityTransport 与连接地址</h2>
+
+        <p><code>UnityTransport</code> 是 NGO 默认的底层传输，基于 Unity 网络驱动，负责 UDP 数据收发、可靠/不可靠管道。在 Inspector 里设置监听地址和端口，客户端默认连 <code>127.0.0.1</code>（本机）。本机测试 Host+Client 直接用回环地址即可；跨机联机填主机的局域网 IP。</p>
+
+        <div class="callout callout-warning">
+            跨机连不上时，先排查防火墙是否放行对应 UDP 端口、两端是否在同一网络、客户端填的 IP 是否正确，再怀疑代码。这类问题九成是网络环境而非脚本。
+        </div>
+
+        <h2>8.6 NetworkObject：网络世界的身份</h2>
+
+        <p>需要联网同步的预制体必须挂 <code>NetworkObject</code> 组件，它给对象分配全局网络 ID，是 NGO 识别和同步对象的依据，概念上对应 ECS 里 Entity 的“身份”作用，但它工作在 GameObject 世界。</p>
+        <ul>
+            <li><strong>场景内放置对象</strong>：随场景加载自动同步，无需手动生成；</li>
+            <li><strong>运行时生成对象</strong>：预制体必须注册到 NetworkManager 的 NetworkPrefabs 列表，服务器调用 Spawn 后才会在各客户端生成。</li>
+        </ul>
+
+        <h2>8.7 NetworkBehaviour：网络脚本的基类</h2>
+
+        <p>联网脚本继承 <code>NetworkBehaviour</code> 而非 MonoBehaviour。它提供一组判断当前运行位置的属性，写逻辑时用它们分支：</p>
+
+        <table>
+            <thead>
+                <tr><th>属性</th><th>含义</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>IsServer</code></td><td>当前代码是否运行在服务器（含 Host 的服务器部分）</td></tr>
+                <tr><td><code>IsClient</code></td><td>是否运行在客户端（含 Host 的客户端部分）</td></tr>
+                <tr><td><code>IsOwner</code></td><td>当前客户端是否拥有这个对象</td></tr>
+                <tr><td><code>HasAuthority</code></td><td>当前端是否对该对象拥有权威（默认服务器权威下等于 IsServer）</td></tr>
+            </tbody>
+        </table>
+
+        <h3>网络生命周期回调</h3>
+        <p>不要用 <code>Start</code>/<code>OnDestroy</code> 处理网络状态，用对应的网络回调：</p>
+
+<pre><code class="language-csharp">using Unity.Netcode;
+using UnityEngine;
+
+public class PlayerController : NetworkBehaviour
+{
+    public override void OnNetworkSpawn()
+    {
+        // 对象在网络上生成后调用，客户端/服务器都会执行
+        Debug.Log($"对象已生成，IsServer={IsServer}, IsOwner={IsOwner}");
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        // 对象在网络上销毁时调用，用于清理
+    }
+
+    void Update()
+    {
+        // 只有拥有者才采集本地输入，避免其他客户端处理不属于自己的输入
+        if (!IsOwner) return;
+
+        // 输入处理（第九章会把输入通过 RPC 发给服务器）
+    }
+}
+</code></pre>
+
+        <h2>8.8 如何在一台电脑上测试联机</h2>
+
+        <p>不需要复制整个项目，两种官方方式：</p>
+        <ul>
+            <li><strong>Multiplayer Play Mode</strong>：Unity 官方包，在编辑器里同时启动多个玩家窗口（主窗口 + 虚拟玩家），共享资源、切换方便，是目前首选的本地测试手段。</li>
+            <li><strong>构建出一个客户端 exe</strong>：编辑器里开 Host，再运行构建版作为 Client 连接，最接近真实环境。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            旧教程常推荐的 ParrelSync 是第三方开源工具，新项目优先用官方 Multiplayer Play Mode。是否安装由你决定，二者都只在编辑器测试阶段使用。
+        </div>
+
+        <h2>8.9 跑通第一个连接的检查路径</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content"><h4>搭场景</h4><p>建 NetworkManager  GameObject，挂 NetworkManager 与 UnityTransport，确认默认预制体引用自动填好。</p></div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content"><h4>加连接 UI</h4><p>挂 ConnectionUI，配好三个按钮。</p></div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content"><h4>启动 Host</h4><p>点 Host，确认控制台无报错、连接回调触发。</p></div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content"><h4>启动 Client</h4><p>用 Multiplayer Play Mode 或构建版启动客户端连 127.0.0.1，看到“已连接”日志即成功。</p></div>
+            </div>
+        </div>
+
+        <div class="exercise">
+            <h3>思考与练习</h3>
+            <ol>
+                <li>不看教程，画出 Host 模式下逻辑上同时存在的 Server 与 Client 关系，解释为什么 Host 里 IsServer 和 IsClient 可以同时为 true。</li>
+                <li>搭好连接 UI，跑通 Host + 两个 Client 的本机连接，验证每个客户端的连接回调 ID。</li>
+                <li>在一个 NetworkBehaviour 的 Update 里打印 IsServer/IsClient/IsOwner，分别在 Host 和 Client 端观察输出差异。</li>
+                <li>解释为什么客户端不能直接修改自己的血量，权威模型下正确流程是什么。</li>
+            </ol>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>三种角色：Server、Host（Server+Client）、Client；NGO 默认服务器权威，服务器是状态唯一真相。</li>
+                <li>NetworkManager + UnityTransport 是网络中枢，通过 StartHost/Client/Server 启动并监听连接回调。</li>
+                <li>NetworkObject 提供网络身份，运行时预制体需注册到 NetworkPrefabs 并由服务器 Spawn。</li>
+                <li>NetworkBehaviour 用 IsServer/IsClient/IsOwner/HasAuthority 分支，用 OnNetworkSpawn/Despawn 处理生命周期。</li>
+                <li>本地测试优先用官方 Multiplayer Play Mode。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav">
+            <a href="07-结构变更与系统调度.html">← 上一章：结构变更与系统调度</a>
+            <a href="09-网络变量与RPC.html">下一章：网络变量与 RPC →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

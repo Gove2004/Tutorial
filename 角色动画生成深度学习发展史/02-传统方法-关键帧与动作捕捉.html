@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 - 传统方法（上）：关键帧与动作捕捉 - 角色动画生成的深度学习发展史</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-绪论-什么是角色动画生成.html">← 上一章</a>
+        <a href="03-传统方法-运动图与运动匹配.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>传统方法（上）：关键帧与动作捕捉</h1>
+
+        <p>在深度学习出现之前，角色动画是怎么做出来的？这一章讲两个最"原始"的手段——<strong>关键帧动画</strong>和<strong>动作捕捉</strong>，以及它们共有的痛点。理解这些痛点，是理解后续一切深度学习方法的起点。</p>
+
+        <h2>2.1 关键帧动画：动画师的手工时代</h2>
+
+        <div class="definition">
+            <h4>关键帧（Keyframe）</h4>
+            <p>动画师在时间轴上设置若干"关键姿势"（key pose），软件自动插值出中间帧。一个"走路循环"可能只需要 4-8 个关键帧，中间帧由插值生成。</p>
+        </div>
+
+        <p>这是最古老的动画技术，从二维动画继承而来。它的特点：</p>
+        <ul>
+            <li><strong>优点</strong>：完全可控，动画师想让它怎么动就怎么动，艺术表达最强</li>
+            <li><strong>缺点</strong>：极其昂贵。一个 AAA 游戏的角色，动画师可能要花数周手 K 一个复杂动作；动作库动辄数千个动画片段，人力成本惊人</li>
+            <li><strong>插值的坑</strong>：线性插值会导致关节角度"走捷径"（尤其旋转），所以需要贝塞尔曲线、样条插值等技巧——但插出来的动作仍然可能"机械感"很强</li>
+        </ul>
+
+        <h3>旋转插值的经典陷阱</h3>
+        <p>手 K 动画中最常见的技术细节：旋转不能简单线性插值。</p>
+
+<pre><code class="language-csharp">// 错误示范：欧拉角线性插值（会导致万向锁、走捷径）
+float yaw = Mathf.Lerp(a.eulerAngles.y, b.eulerAngles.y, t);
+
+// 正确做法：四元数球面插值
+Quaternion q = Quaternion.Slerp(a.rotation, b.rotation, t);
+</code></pre>
+
+        <div class="callout callout-info">
+            <strong>埋个伏笔</strong>：这个"旋转怎么表示"的问题，到了深度学习时代变成了"关节旋转用什么编码喂给网络"的问题——欧拉角、四元数、指数映射、位置+速度……不同的表示方法直接影响网络能不能学好。这是整个领域最基础也最容易被忽视的工程决策。
+        </div>
+
+        <h2>2.2 动作捕捉：让真人来演</h2>
+
+        <div class="definition">
+            <h4>动作捕捉（Motion Capture / MoCap）</h4>
+            <p>真人穿着动捕服（光学标记点 / 惯性传感器），在摄影棚里表演动作，系统记录每个关节的空间位置和旋转，再"映射"到虚拟角色上。</p>
+        </div>
+
+        <p>动作捕捉解决了关键帧最痛的"自然度"问题——真人怎么动，角色就怎么动，天然自然。</p>
+
+        <h3>动捕的完整流程</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>采集</h4>
+                    <p>演员表演，光学动捕用多台高速摄像机追踪反光标记点，惯性动捕用传感器记录肢体朝向。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>清理</h4>
+                    <p>标记点丢失、抖动、遮挡都需要人工修复。这一步通常比采集还费时间。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>重定向（Retargeting）</h4>
+                    <p>把动捕数据从演员的骨骼映射到目标角色的骨骼——因为角色可能是矮人、巨人、四足生物，骨骼比例完全不同。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>打磨</h4>
+                    <p>动画师再手动调整，让动作符合角色性格和游戏风格。</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>动捕的致命缺点</h3>
+        <table>
+            <thead>
+                <tr><th>痛点</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>贵</strong></td>
+                    <td>光学动捕棚（几十台高速相机 + 场地 + 演员）成本极高，只有大厂用得起</td>
+                </tr>
+                <tr>
+                    <td><strong>慢</strong></td>
+                    <td>采集一天，清理一周。动捕数据不能直接用，要大量人工后期</td>
+                </tr>
+                <tr>
+                    <td><strong>覆盖不全</strong></td>
+                    <td>动作库只包含"录过的动作"。玩家想做一个没录过的动作？没有。</td>
+                </tr>
+                <tr>
+                    <td><strong>重定向损失</strong></td>
+                    <td>骨骼比例差太多时（比如人形→龙形），重定向后动作会变形、穿模</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="sidebar-note">
+            <strong>一个行业事实</strong>：动捕数据的"重定向"问题催生了一个专门的研究方向（motion retargeting），也是动作学习领域的经典子问题之一。到了深度学习时代，自编码器/潜空间的方法天然可以处理"不同骨骼间的动作迁移"——这是后话。
+        </div>
+
+        <h2>2.3 动作数据的表示：一个必须懂的基础</h2>
+
+        <p>不管是手 K 还是动捕，最终都要把"动作"变成数据存下来。理解数据的表示方式，是后面理解一切算法的前提。</p>
+
+        <table>
+            <thead>
+                <tr><th>表示方式</th><th>是什么</th><th>优点</th><th>缺点</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>欧拉角</strong></td>
+                    <td>每个关节存 (pitch, yaw, roll) 三个角度</td>
+                    <td>直观、省内存</td>
+                    <td>万向锁、插值走捷径——深度学习时代基本被淘汰</td>
+                </tr>
+                <tr>
+                    <td><strong>四元数</strong></td>
+                    <td>每个关节存 4 个数 (w, x, y, z)</td>
+                    <td>无万向锁、插值平滑</td>
+                    <td>4 个数有冗余（单位约束），网络直接回归可能输出非法四元数</td>
+                </tr>
+                <tr>
+                    <td><strong>指数映射</strong></td>
+                    <td>旋转轴×角度，3 个数</td>
+                    <td>3 维无约束，适合网络回归</td>
+                    <td>有奇点，角度 ±180° 附近不连续</td>
+                </tr>
+                <tr>
+                    <td><strong>位置+速度</strong></td>
+                    <td>存关节的世界坐标位置和线速度/角速度</td>
+                    <td>最"物理"、最容易加物理约束</td>
+                    <td>对全局位置敏感，需要额外处理</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>重要直觉</strong>：动作数据不是"一张图"，而是一串<strong>时间步 × 关节 × 表示维度</strong>的高维序列。比如一个 60 帧、23 个关节、用 6D 旋转表示的动作，就是一个 (60, 23×6) 的矩阵。深度学习模型处理的就是这种结构——图像是 2D 网格，动作是 1D 时序 × 高维通道。
+        </div>
+
+        <h2>2.4 为什么传统方法"到头了"</h2>
+
+        <p>关键帧和动捕把动画质量做到了很高，但它们有一个共同的、无法回避的瓶颈：</p>
+
+        <div class="definition">
+            <h4>覆盖度问题（Coverage Problem）</h4>
+            <p>动画库只能包含"已经做过的动作"。但游戏是开放的——玩家可以任意组合方向、速度、动作，场景也千变万化。动作库永远覆盖不了全部情况。</p>
+        </div>
+
+        <p>于是行业需要一种技术：<strong>用有限的动画片段，合成无限的新动作</strong>。下一章讲的运动图和 Motion Matching，就是"合成"的第一次尝试——但它们靠的是"搜索拼接"，而不是"学习生成"。</p>
+
+        <div class="callout callout-tip">
+            <strong>本章与后续的衔接</strong>：记住两个词——<strong>贵</strong>（人力成本）和<strong>覆盖不全</strong>（泛化失败）。深度学习方法的每一次登场，本质上都是在回答这两个问题之一。
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>关键帧：可控但昂贵，插值有旋转表示陷阱</li>
+            <li>动作捕捉：自然但更贵，且清理/重定向是重灾区</li>
+            <li>动作数据的表示（欧拉角/四元数/指数映射/位置速度）是后续一切算法的基础决策</li>
+            <li>传统方法的共同瓶颈：覆盖度问题——动作库永远跟不上开放世界的需求</li>
+        </ul>
+
+        <h2>思考题</h2>
+        <ol>
+            <li>为什么欧拉角不适合做插值？用你熟悉的游戏引擎验证一下 <code>Lerp</code> 欧拉角会发生什么。</li>
+            <li>如果一个动作库只有"走路、跑步、跳跃、翻滚"四个片段，玩家从跑步切到翻滚时，游戏会发生什么？为什么？</li>
+            <li>搜索一下"motion retargeting 骨骼比例差异"，看看重定向在跨体型时具体会出什么问题。</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="01-绪论-什么是角色动画生成.html">← 上一章：绪论</a>
+            <a href="03-传统方法-运动图与运动匹配.html">下一章：传统方法（下）→</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

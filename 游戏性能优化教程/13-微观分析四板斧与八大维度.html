@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>微观分析四板斧与八大维度 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="12-业务与引擎模块特征地图.html">← 上一章</a>
+        <a href="14-持续优化体系与综合实战.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>微观分析四板斧与八大维度</h1>
+        <p class="chapter-meta">模块四 · 分析方法与体系 ｜ 对应原文第三部分方法与第四部分维度</p>
+
+        <p>性能分析应遵循一条主线：<strong>从宏观定位问题，再逐步深入到具体模块与函数</strong>。本章讲微观层面的四种分析方法，以及覆盖全部检查点的八大维度。它们是“怎么查”的操作手册。</p>
+
+        <h2>13.1 方法一：标准分析</h2>
+
+        <p>先建立明确的性能标准，确定目标与预算，否则“慢”没有参照。标准分析就是把第 2 章的指标体系落到具体模块，逐项对照预算：</p>
+
+        <table>
+            <thead><tr><th>类型</th><th>典型指标</th></tr></thead>
+            <tbody>
+                <tr><td>几何</td><td>总面数、场景面数、Draw Call</td></tr>
+                <tr><td>模型</td><td>建筑、树木、山石、角色面数</td></tr>
+                <tr><td>动画</td><td>骨骼数量、动画轨道数</td></tr>
+                <tr><td>纹理</td><td>主贴图、法线贴图、特效贴图</td></tr>
+                <tr><td>渲染特性</td><td>实时阴影、光照探针、后处理、抗锯齿</td></tr>
+                <tr><td>内存</td><td>各线程、资源、管线、动画、粒子、UI 占用</td></tr>
+                <tr><td>CPU</td><td>各模块耗时</td></tr>
+                <tr><td>GPU</td><td>各渲染阶段耗时</td></tr>
+            </tbody>
+        </table>
+
+        <p>标准分析的价值是快速识别“哪一项先突破预算”，把无限的可能性收敛到几个超标的具体指标。</p>
+
+        <h2>13.2 方法二：差异分析</h2>
+
+        <p>通过对比快速定位性能变化，对比对象包括：</p>
+        <ul>
+            <li><strong>前后版本</strong>：新版本掉帧，对比两个版本的同场景数据，定位是哪次提交引入。</li>
+            <li><strong>函数 / 线程 / 节点</strong>：对比相同阶段在不同样本里的耗时差异。</li>
+            <li><strong>设备之间</strong>：同场景在高、低端机上的差异，判断瓶颈是否硬件相关。</li>
+        </ul>
+
+        <p>Unity Profile Analyzer 支持把两份采集数据并排对比，自动标出耗时变化最大的函数，这比肉眼翻两份火焰图可靠得多。</p>
+
+        <h2>13.3 方法三：相关性分析</h2>
+
+        <p>寻找不同指标与帧时间（FPS）之间的关联，判断优化重点。原文给出的典型判断：</p>
+
+        <div class="callout callout-info">
+            如果业务逻辑耗时与 FPS 相关性较弱，而场景 Draw Call 与 FPS 相关性较强，那么优化重点应从业务逻辑转向场景渲染。
+        </div>
+
+        <p>具体做法是在多组受控场景里同时记录自变量（DC、面数、单位数……）与因变量（帧时间），计算相关系数，看哪个自变量的变化最能解释帧时间变化。</p>
+
+        <div class="callout callout-danger">
+            <strong>关键警惕：相关不等于因果。</strong>
+            <ul>
+                <li>两个指标可能同时受第三个混杂变量驱动。例如“粒子数”和“DC”都随战斗强度上升，单看相关性可能误判。</li>
+                <li>样本范围太窄时，某指标几乎不变，算不出真实关系；需要让自变量在足够宽的区间内变化。</li>
+                <li>相关性用于<strong>提出假设</strong>，因果关系仍要靠第 13.4 节的隔离实验来确认。</li>
+            </ul>
+        </div>
+
+        <h2>13.4 方法四：排除法</h2>
+
+        <p>通过逐层关闭或隔离模块，缩小问题范围。这是确认因果关系最直接的手段：</p>
+
+        <div class="mermaid">
+flowchart LR
+            A["整体性能问题"] --> B["排除渲染"]
+            B --> C["排除动画"]
+            C --> D["排除粒子"]
+            D --> E["排除 UI"]
+            E --> F["定位异常模块"]
+            style A fill:#fdecea,stroke:#e53935,color:#14395a
+            style F fill:#e9f7ec,stroke:#2e7d32,color:#14395a
+        </div>
+
+        <p>每关闭一个模块就复测一次帧时间：若关闭后帧时间显著下降，说明问题与该模块相关；若毫无变化，则排除它并继续。为了让这个过程可重复、不依赖手动操作，可以用一个统一的开关 harness：</p>
+
+<pre><code class="language-csharp">using UnityEngine;
+
+public class IsolationHarness : MonoBehaviour
+{
+    [SerializeField] private GameObject renderingRoot;
+    [SerializeField] private GameObject animationRoot;
+    [SerializeField] private GameObject particleRoot;
+    [SerializeField] private GameObject uiRoot;
+
+    public void SetModule(string module, bool enabled)
+    {
+        switch (module)
+        {
+            case "render":
+                renderingRoot.SetActive(enabled);
+                break;
+            case "animation":
+                animationRoot.SetActive(enabled);
+                break;
+            case "particle":
+                particleRoot.SetActive(enabled);
+                break;
+            case "ui":
+                uiRoot.SetActive(enabled);
+                break;
+        }
+    }
+
+    public void IsolateOnly(string module)
+    {
+        SetModule("render", module == "render");
+        SetModule("animation", module == "animation");
+        SetModule("particle", module == "particle");
+        SetModule("ui", module == "ui");
+    }
+}
+</code></pre>
+
+        <h2>13.5 八大性能分析维度</h2>
+
+        <p>无论项目怎么变，数据采集都可以从这八个维度展开，它是一份完整的检查清单：</p>
+
+        <table>
+            <thead><tr><th>维度</th><th>重点关注内容</th></tr></thead>
+            <tbody>
+                <tr><td>渲染压力</td><td>Draw Call、三角形、纹理、Shader</td></tr>
+                <tr><td>动画负载</td><td>角色、怪物、骨骼数量、动画轨道</td></tr>
+                <tr><td>逻辑压力</td><td>业务系统耗时、函数耗时、卡顿</td></tr>
+                <tr><td>线程负载</td><td>各线程耗时、活动线程占比</td></tr>
+                <tr><td>IO 负载</td><td>资源加载、文件写入、日志</td></tr>
+                <tr><td>内存负载</td><td>对象数量、资源内存、堆内存</td></tr>
+                <tr><td>UI 负载</td><td>合批、网格生成、重建次数</td></tr>
+                <tr><td>特效负载</td><td>节点耗时、粒子数量、单特效耗时</td></tr>
+            </tbody>
+        </table>
+
+        <h2>13.6 配套工具一览</h2>
+
+        <table>
+            <thead><tr><th>工具</th><th>用途</th><th>对应方法</th></tr></thead>
+            <tbody>
+                <tr><td>Profiler</td><td>CPU/GPU/内存/渲染时间线</td><td>标准、排除</td></tr>
+                <tr><td>Frame Debugger</td><td>逐 Draw Call 查看批次断裂</td><td>标准、差异</td></tr>
+                <tr><td>Memory Profiler</td><td>内存快照与对象引用</td><td>标准、差异</td></tr>
+                <tr><td>Profile Analyzer</td><td>多份采集对比与统计</td><td>差异、相关性</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">基础练习</span>隔离实验</h3>
+            <p>用 IsolationHarness 逐个关闭四大模块，记录每次的帧时间，用数据确认瓶颈落在哪个模块，而不是凭直觉。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>相关性陷阱</h3>
+            <p>设计一个受控实验，让 Draw Call 在宽区间内变化而保持其他条件不变，解释为什么这样做能避免把混杂变量误当成因果。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">进阶挑战</span>维度补全</h3>
+            <p>检查你当前的采集流程覆盖了八大维度中的哪几个，补全缺失维度的采集方法，并说明该维度可能暴露什么问题。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>标准分析对照预算找超标项，差异分析对比版本与对象定位变化。</li>
+            <li>相关性分析提出优化假设，但相关不等于因果，需隔离实验确认。</li>
+            <li>排除法逐层关闭模块缩小范围，可用统一 harness 复现。</li>
+            <li>八大维度构成完整采集清单，并与 Profiler 等工具一一对应。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章</strong>：最后一章把这些方法固化为持续运转的工程体系，并通过一个完整的团战卡顿案例串起全部知识。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="12-业务与引擎模块特征地图.html">← 上一章：业务与引擎模块特征地图</a>
+            <a href="14-持续优化体系与综合实战.html">下一章：持续优化体系与综合实战 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

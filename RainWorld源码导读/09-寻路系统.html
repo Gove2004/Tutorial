@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>09 寻路系统 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-AI感知与效用决策.html">← 上一章</a>
+        <a href="10-玩家蛞蝓猫深度导读.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>09 寻路系统</h1>
+        <p>Rain World 的寻路横跨两个层级：抽象层在房间节点图上规划“去哪个房间”，现实层在房间 AI 地图上规划“走哪条瓦片路径”。本章先讲 AI 地图如何建模与生成，再拆解分帧 A* 的实现、预算分配与路径跟随，最后收束到离屏寻路。</p>
+
+        <h2>9.1 两个层级的寻路</h2>
+<pre class="mermaid">
+flowchart TD
+    A["AbstractCreatureAI：房间级路径"] -->|房间加载后| B["PathFinder：瓦片级 A*"]
+    B --> C["Pather：跟随已算路径"]
+    C --> D["生物移动方法：实际位移"]
+</pre>
+        <table>
+            <thead><tr><th>层级</th><th>图结构</th><th>载体</th></tr></thead>
+            <tbody>
+                <tr><td>房间级（离屏）</td><td>AbstractRoomNode 与房间连接</td><td>AbstractCreatureAI.path</td></tr>
+                <tr><td>瓦片级（现实）</td><td>AImap（AItile + MovementConnection）</td><td>PathFinder / Pather</td></tr>
+            </tbody>
+        </table>
+
+        <h2>9.2 AItile：AI 视角的瓦片</h2>
+        <p>AI 不直接读物理瓦片，而是读预处理后的 AItile，它把地形翻译成对决策有用的信息：</p>
+<pre><code class="language-csharp">public class AItile
+{
+    public int accessibility;          // 可达性分类
+    public List<MovementConnection> connections; // 出入连接（图的边）
+    public bool narrowSpace;
+    public int floorY;
+    public float waterLevel;
+    public float visibility;
+    public int dropRisk;
+    public bool walkable;
+}</code></pre>
+        <p>accessibility 用整数常量区分地形角色：Floor、Corridor、Climb、Wall、Ceiling、Air、Solid、Sand 等。生物据此判断某瓦片是“可行走地面”“需要攀爬”“不可通过”。</p>
+
+        <h2>9.3 AImap：房间的 AI 地图</h2>
+        <p>AImap 持有整个房间的 AItile 二维数组，并支持生物专用地图：</p>
+<pre><code class="language-csharp">public class AImap
+{
+    public AItile[,] tiles;
+    public Dictionary<CreatureTemplate, AImap> creatureSpecificAImaps;
+    public bool ConnectionIsAllowedToCreature(MovementConnection con, CreatureTemplate t);
+}</code></pre>
+        <p>不同生物的移动能力不同（能飞、能爬、只能走地面），因此同一条连接对某生物可能不允许。<code>creatureSpecificAImaps</code> 让每个生物在自己的能力视角下读地图，而不是为每只生物重算。</p>
+
+        <h2>9.4 AImapper：分 pass 生成 AI 地图</h2>
+        <p>AImapper 在房间准备阶段（后台线程）逐瓦片、分 pass 生成地图，每帧只推进一小部分：</p>
+<pre><code class="language-csharp">public void Update()
+{
+    switch (pass)
+    {
+    case 0: FindAccessibilityOfCurrentTile(); break;   // 可达性分类
+    case 1:
+        FindPassagesOfCurrentTile();                  // 出入连接
+        FindFallRiskOfCurrentTile();                 // 坠落风险
+        break;
+    case 2: tpxm = new TerrainProximityMapper(map); break;
+    case 3: tpxm.Update(); break;                     // 地形邻近度
+    case 4: done = true; break;
+    }
+    // 逐瓦片扫描，扫完一行/列推进 pass
+    x++; if (x >= room.TileWidth) { x = 0; y++; ... }
+}</code></pre>
+        <p>把可达性、连接、坠落风险、地形邻近度分多趟扫描，是为了让地图生成可分帧、可在后台线程进行，避免房间加载时一次性长时间卡顿。</p>
+
+        <h2>9.5 MovementConnection：图的边</h2>
+        <p>MovementConnection 是连接 AItile 的边，携带丰富的移动语义：</p>
+<pre><code class="language-csharp">public struct MovementConnection
+{
+    public enum MovementType {
+        Standard, ReachOverGap, ReachUp, DoubleReachUp, ReachDown,
+        DropToFloor, DropToClimb, DropToWater, Slope, ShortCut,
+        NPCTransportation, RegionTransportation, BetweenRooms,
+        OffScreenMovement, SideHighway, SkyHighway, SeaHighway
+    }
+    public MovementType type;
+    public WorldCoordinate startCoord;
+    public WorldCoordinate destinationCoord;
+    public int distance;
+}</code></pre>
+        <p>每种移动类型对应一种真实动作（跳跃、下落、爬、走快捷通道、跨房间）。寻路时选了某条边，生物就知道该用什么动作经过它，而不只是“往那个方向走”。</p>
+
+        <h2>9.6 PathFinder：分帧 A*</h2>
+        <p>PathFinder 继承 AIModule，是瓦片级寻路的核心。它不是一次性算完整条路径，而是把搜索拆成多帧：</p>
+<pre><code class="language-csharp">public class PathingCell
+{
+    public WorldCoordinate coord;
+    public float costToGoal;
+    public PathingCell parent;
+    public int generation;
+}
+
+public override void Update()
+{
+    int steps = AI.pathfinderResourceDivider.RequestPathfinderUpdates(stepsPerFrame);
+    for (int i = 0; i < steps; i++)
+    {
+        if (checkNextList.Count == 0) break;
+        PathingCell cell = checkNextList[0];   // 开放列表（按启发式排序）
+        checkNextList.RemoveAt(0);
+        CheckNeighbours(cell);                 // 扩展邻居
+    }
+}</code></pre>
+        <p>几个关键设计：</p>
+        <ul>
+            <li><strong>开放列表 checkNextList</strong>：按启发式成本排序，等价于 A* 的 open list；CheckNeighbours 从目标方向反向扩散 costToGoal。</li>
+            <li><strong>generation 代</strong>：重新规划时新一代号，旧的 PathingCell 不与新结果混淆。</li>
+            <li><strong>边算边用</strong>：路径尚未完全确定时，生物就能跟随当前已扩散的部分（timeUntilPathCertain），不用等整条路径算完才开始动。</li>
+        </ul>
+
+        <h3>PathCost：阻力与合法性</h3>
+        <p>每条边的成本由 PathCost 表达，它同时包含阻力与合法性两个维度：</p>
+<pre><code class="language-csharp">public class PathCost
+{
+    public int resistance;   // 阻力：影响成本高低
+    public int legality;     // 合法性：是否允许经过
+}</code></pre>
+        <p>合法性优先于阻力：一条不合法的边（如陆地生物走水路）即使阻力低也不会被选。模板里的 shortcutAversion、tileResistances 都以 PathCost 形式参与成本计算。</p>
+
+        <h2>9.7 PathfinderResourceDivider：全局预算分配</h2>
+        <p>当大量生物同时寻路时，总开销需要被限制。资源分配器用固定预算按比例分配：</p>
+<pre><code class="language-csharp">public int RequestPathfinderUpdates(int ideal)
+{
+    requestedUpdates += ideal;
+    if (lastTotalRequestedUpdates <= budget)   // 预算 50
+        return ideal;
+    float ratio = (float)ideal / (float)lastTotalRequestedUpdates;
+    return Math.Max(1, Mathf.FloorToInt(ratio * budget));  // 至少 1 步
+}</code></pre>
+        <p>每帧总预算 50 个节点更新、可达性预算 500。总请求不超预算时全额满足，超了就按各生物请求占比打折，且至少保证 1 步。它用上一帧的总请求作为本帧依据，是一个带一帧延迟的反馈调度器，<strong>保证寻路总开销有硬上限，不会因生物数量增多而失控</strong>。</p>
+
+        <h2>9.8 StandardPather：跟随路径</h2>
+        <p>Pather 负责把 PathFinder 算出的成本图转成实际移动。StandardPather 用启发式在当前位置的连接中选最优：</p>
+<pre><code class="language-csharp">public override void FollowPath(bool eu)
+{
+    foreach (MovementConnection con in map.getAItile(creature.pos).connections)
+    {
+        if (!ConnectionAllowed(con)) continue;
+        float cost = map.getAItile(con.DestTile).costToGoal + con.distance;
+        if (cost < bestCost) { bestCost = cost; bestConnection = con; }
+    }
+    // 记忆过去连接，避免在两点间反复横跳
+    if (bestConnection != lastConnection) Move(bestConnection);
+}</code></pre>
+        <div class="callout callout-info">
+            <p><strong>防卡住的记忆机制</strong>：Pather 记住上次走的连接，若选到刚走过的回头路会被惩罚，避免生物在两个 AItile 之间来回踱步。它还会处理“有去无回点”（possibleToGetBackFrom），防止生物走进无法返回的连接后被困。</p>
+        </div>
+
+        <h2>9.9 AbstractCreatureAI：离屏房间级寻路</h2>
+        <p>房间未加载时，AbstractCreatureAI 在房间节点图上规划。它用 timeBuffer 累积轮转更新的时间：</p>
+<pre><code class="language-csharp">public virtual void Update(int time)
+{
+    timeBuffer += time;
+    if (parent.Room.realizedRoom == null)
+    {
+        AbstractBehavior(time);
+        if (destination.CompareDisregardingTile(parent.pos) && !DoIHaveAPathToCoordinate(destination))
+        {
+            SetDestination(parent.pos);   // 有目标但无路径，重新规划
+        }
+    }
+}</code></pre>
+        <p>AbstractBehavior 依次处理：跟随生物、沿 path 移动（FollowPath）、随机漫游、迁徙、回巢。GoToDen 通过 AbstractSpaceNodeFinder 在抽象房间图上找巢穴。这套离屏路径与现实瓦片路径在房间加载后无缝衔接。</p>
+
+        <h2>9.10 整体协作回顾</h2>
+<pre class="mermaid">
+sequenceDiagram
+    participant AI as ArtificialIntelligence
+    participant PF as PathFinder
+    participant RD as ResourceDivider
+    participant PT as Pather
+    AI->>RD: 请求本帧步数
+    RD-->>PF: 返回分配的步数
+    PF->>PF: 分帧扩展开放列表，更新 costToGoal
+    AI->>PT: FollowPath
+    PT->>PT: 选最优连接并移动
+</pre>
+
+        <h2>9.11 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：假设路径一次性算完</summary>
+            <div class="details-content"><p>寻路是分帧的，设置目标后路径不会立刻就绪。逻辑要能处理“路径尚未确定”的状态，利用边算边用，而不是阻塞等待。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：忽略生物专用地图导致走错连接</summary>
+            <div class="details-content"><p>不检查 ConnectionIsAllowedToCreature，陆地生物可能选到飞行/水路连接而卡住。寻路必须用对应生物能力视角的 AImap。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：Pather 无记忆导致来回踱步</summary>
+            <div class="details-content"><p>不记录上次连接，生物会在两个成本接近的连接间反复切换。应保留连接记忆并惩罚回头路。</p></div>
+        </details>
+
+        <h2>9.12 练习与思考</h2>
+        <ol>
+            <li>假设某帧有 10 只生物各请求 10 步寻路（总请求 100，预算 50），计算每只生物实际分到多少步，并解释为什么至少保证 1 步。</li>
+            <li>结合 AImapper 的 pass 划分，说明可达性、连接、坠落风险为何要分趟扫描，而不是一次遍历同时算出。</li>
+            <li>思考：PathCost 为什么要把“合法性”和“阻力”分开，而不是用一个数值？这对“生物不能走某类地形”的表达有什么好处？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>寻路分房间级（抽象节点图）与瓦片级（AImap）两层，由 AbstractCreatureAI 与 PathFinder 分别承担。</li>
+            <li>AImap 由 AItile 与 MovementConnection 组成，AImapper 分 pass、逐瓦片、在后台线程生成。</li>
+            <li>PathFinder 用分帧 A* 边算边用，PathCost 分离阻力与合法性，资源分配器用固定预算公平调度。</li>
+            <li>StandardPather 选最优连接并记忆防卡顿，离屏 AI 在房间图上规划并处理无路径情况。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="08-AI感知与效用决策.html">← 上一章：AI 感知与效用决策</a>
+            <a href="10-玩家蛞蝓猫深度导读.html">下一章：玩家蛞蝓猫深度导读 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

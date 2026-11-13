@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 抽象世界层 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-主循环与进程系统.html">← 上一章</a>
+        <a href="05-世界加载与房间系统.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>04 抽象世界层</h1>
+        <p>抽象世界层是 Rain World 架构中最独特、也最值得学习的部分。它让整个区域的生态在玩家视野之外持续运转，并让房间可以随时卸载与重建。本章从“为什么”出发，逐层拆解它的坐标、身份、实体、房间与序列化机制。</p>
+
+        <h2>4.1 为什么需要一个抽象层</h2>
+        <p>多数 Unity 游戏采用“对象激活/停用”的方式：玩家靠近时 SetActive(true)，离开时 SetActive(false)。Rain World 没有这样做，而是维护了一个完全独立于物理与渲染的逻辑层，原因有三：</p>
+        <ul>
+            <li><strong>生态连续性</strong>：生物在玩家离开房间后仍要继续觅食、避雨、回巢、迁徙，简单停用会冻结整个世界。</li>
+            <li><strong>房间可彻底卸载</strong>：抽象层只保留轻量的逻辑状态（瓦片坐标、生命值、目标），房间的物理对象、精灵、纹理可以被完全释放，显著降低内存占用。</li>
+            <li><strong>确定性与可序列化</strong>：抽象状态用整数坐标与字符串表达，天然适合存档，且与帧率无关，结果可复现。</li>
+        </ul>
+
+        <h2>4.2 抽象层类关系</h2>
+<pre class="mermaid">
+flowchart TD
+    W["World"] --> ARS["AbstractRoom[]（整个区域的房间）"]
+    ARS --> NODES["AbstractRoomNode（巢穴/快捷通道）"]
+    ARS --> ENT["AbstractWorldEntity 列表"]
+    ENT --> AWE["AbstractWorldEntity"]
+    AWE --> APO["AbstractPhysicalObject"]
+    APO --> AC["AbstractCreature"]
+    APO --> AIT["AbstractItem（物品）"]
+    APO -.stuckObjects.-> STK["AbstractObjectStick（对象间黏附）"]
+    AC -.abstractAI.-> AAI["AbstractCreatureAI（离屏 AI）"]
+</pre>
+
+        <h2>4.3 坐标系统：WorldCoordinate</h2>
+        <p>抽象层不使用像素坐标，而是使用 <code>WorldCoordinate</code> 结构体，它以“房间 + 瓦片 + 节点”三元组定位任何实体：</p>
+<pre><code class="language-csharp">public struct WorldCoordinate
+{
+    public int x;          // 瓦片列
+    public int y;          // 瓦片行
+    public int room;       // 房间索引
+    public int abstractNode; // 抽象节点索引（巢穴/快捷通道）
+    public string unknownName; // 未知房间名（模组/兼容用）
+}</code></pre>
+        <p>几个关键设计：</p>
+        <ul>
+            <li><strong>瓦片与节点二选一</strong>：<code>TileDefined</code> 表示用 x/y 定位，<code>NodeDefined</code> 表示用 abstractNode 定位。实体在房间内活动时用瓦片，躲进巢穴或走快捷通道时用节点。</li>
+            <li><strong>unknownName 机制</strong>：当存档引用了当前世界不存在的房间（模组被移除），房间索引 room 为 -1，名字保留在 unknownName，实体不会因此崩溃，<code>Valid</code> 据此判断。</li>
+            <li><strong>序列化用房间名而非索引</strong>：<code>SaveToString</code> 会把 room 索引解析成房间名写入，因为索引可能随版本变化，而名字稳定。</li>
+        </ul>
+<pre><code class="language-csharp">public string SaveToString()
+{
+    string text = ResolveRoomName();
+    return string.Format(CultureInfo.InvariantCulture,
+        "{0}.{1}.{2}.{3}", (text != null) ? text : room.ToString(), x, y, abstractNode);
+}</code></pre>
+
+        <h2>4.4 身份系统：EntityID</h2>
+        <p>每个抽象实体有唯一的 <code>EntityID</code>，由两部分组成：</p>
+<pre><code class="language-csharp">public struct EntityID
+{
+    public int spawner; // 生成该实体的生成器 ID
+    public int number;  // 该生成器内的序号
+    private int altSeed;
+    public int RandomSeed => (altSeed > -1) ? altSeed : number;
+}</code></pre>
+        <p>注意相等性只比较 <code>number</code>，因为 number 在整个世界内是唯一发放的。<code>RandomSeed</code> 是确定性随机的关键：生物的颜色、人格、变异都由这个种子驱动，<em>同一只生物在房间卸载/重建后依然保持相同外观</em>，因为 EntityID 不变。</p>
+        <div class="callout callout-info">
+            <p><strong>SaveState.nextIssuedID</strong>：存档里记录了下一个要发放的 number，保证读档后新建实体不会与已有实体撞号。这是维持身份唯一性的全局计数器。</p>
+        </div>
+
+        <h2>4.5 实体基类：AbstractWorldEntity</h2>
+        <p><code>AbstractWorldEntity</code> 是抽象层所有实体的根基类，核心成员包括：</p>
+        <table>
+            <thead><tr><th>成员</th><th>含义</th></tr></thead>
+            <tbody>
+                <tr><td><code>world</code> / <code>ID</code> / <code>pos</code></td><td>所属世界、身份、当前坐标</td></tr>
+                <tr><td><code>Room</code></td><td>计算属性：<code>world.GetAbstractRoom(pos.room)</code>，每次访问实时解析</td></tr>
+                <tr><td><code>evenUpdate</code></td><td>奇偶更新标志，配合房间防止重复更新</td></tr>
+                <tr><td><code>InDen</code></td><td>是否处于巢穴/快捷通道节点中</td></tr>
+                <tr><td><code>Move(coord)</code></td><td>移动到新坐标，并处理房间归属切换</td></tr>
+                <tr><code>Update(timePassed)</code></td><td>抽象逻辑更新（虚方法，子类重写）</td></tr>
+            </tbody>
+        </table>
+
+        <h2>4.6 AbstractPhysicalObject：类型、黏附与双向转换</h2>
+        <p><code>AbstractPhysicalObject</code> 在实体基类之上增加了“可被物理实现”的能力，是抽象层的核心类。</p>
+
+        <h3>类型是 ExtEnum</h3>
+        <p><code>AbstractObjectType</code> 是可扩展枚举，原版定义了数十种物品类型（Rock、Spear、DataPearl、VultureMask、Bomb、FlyLure…），模组可注册新类型。</p>
+
+        <h3>Realize：抽象→现实的工厂</h3>
+        <p>房间被加载时，每个抽象对象调用 <code>Realize()</code>，按类型创建对应的物理对象并挂到房间：</p>
+<pre><code class="language-csharp">public virtual void Realize()
+{
+    if (type == AbstractObjectType.Rock)
+        realizedObject = new Rock(world, this);
+    else if (type == AbstractObjectType.Spear)
+        realizedObject = new Spear(world, this);
+    else if (type == AbstractObjectType.DataPearl)
+        realizedObject = new DataPearl(world, this);
+    // ... 其余类型
+    realizedObject.room.abstractRoom.index ...
+}</code></pre>
+
+        <h3>Abstractize：现实→抽象的回收</h3>
+        <p>房间卸载时反向操作，把现实对象销毁、状态收回：</p>
+<pre><code class="language-csharp">public override void Abstractize(WorldCoordinate coord)
+{
+    base.Abstractize(coord);
+    Move(coord);
+    if (realizedObject != null && realizedObject.room != null)
+        realizedObject.room.RemoveObject(realizedObject);
+    realizedObject = null;
+    if (destroyOnAbstraction)
+        Destroy();
+}</code></pre>
+
+        <h3>对象间黏附：AbstractObjectStick</h3>
+        <p>生物握持物品、矛插中生物、玩家背上的同伴等“关系”，由 <code>AbstractObjectStick</code> 的子类表达，集中存在 <code>stuckObjects</code> 列表里。具体类型有：</p>
+        <table>
+            <thead><tr><th>序列化标签</th><th>类</th><th>含义</th></tr></thead>
+            <tbody>
+                <tr><td>gripStk</td><td>CreatureGripStick</td><td>生物握持/携带物品</td></tr>
+                <tr><td>sprLdgStk</td><td>AbstractSpearStick</td><td>矛插在生物身上</td></tr>
+                <tr><td>sprImplStk</td><td>ImpaledOnSpearStick</td><td>生物被矛刺穿</td></tr>
+                <tr><td>sprOnBackStk</td><td>Player.AbstractOnBackStick</td><td>玩家背着同伴</td></tr>
+            </tbody>
+        </table>
+        <p>这些关系本身也被序列化，且每个都用 <code>unrecognizedAttributes</code> 保存未知字段，保证模组/新版本追加的属性在旧版本读取时不丢失。</p>
+
+        <h2>4.7 AbstractRoom：实体、节点与连接</h2>
+        <p><code>AbstractRoom</code> 是抽象层的房间，它不关心地形像素，只维护逻辑关系：</p>
+        <ul>
+            <li><code>connections</code>：与其他房间的连接（门、快捷通道、管道）。</li>
+            <li><code>nodes</code>：AbstractRoomNode 列表，即巢穴（Den）、快捷通道入口。</li>
+            <li><code>entities</code> / <code>entitiesInDens</code>：房间内实体与躲在巢穴中的实体。</li>
+            <li><code>roomAttractions</code>：各类生物对该房间的吸引力权重，驱动迁徙与巡游。</li>
+            <li>各类出口计数：exits、dens、sideExits、skyExits、seaExits。</li>
+        </ul>
+
+        <h3>房间更新的一致性保护</h3>
+        <p>AbstractRoom.Update 用一个 while 循环 + evenUpdate 标志，处理“实体在更新过程中移动或离开导致列表变化”的情况：</p>
+<pre><code class="language-csharp">public void Update(int timePassed)
+{
+    evenUpdate = !evenUpdate;
+    bool flag = false;
+    while (!flag)
+    {
+        flag = true;
+        for (int i = 0; i < entities.Count; i++)
+        {
+            if (entities[i].evenUpdate != evenUpdate)
+            {
+                int room = entities[i].pos.room;
+                entities[i].evenUpdate = evenUpdate;
+                entities[i].Update(timePassed);
+                if (i >= entities.Count || entities[i].pos.room != room || entities[i].InDen)
+                {
+                    flag = false; // 列表变了，重新遍历
+                    break;
+                }
+            }
+        }
+    }
+    UpdateCreaturesInDens(timePassed);
+}</code></pre>
+        <div class="callout callout-warning">
+            <p><strong>为什么要这么谨慎</strong>：抽象实体的 Update 可能触发跨房间移动（如生物走进快捷通道），这会修改 entities 列表，普通 for 循环会跳过元素或越界。while 重扫保证每个实体恰好更新一次，是典型的“遍历中修改集合”的防御写法。</p>
+        </div>
+
+        <h2>4.8 抽象房间的轮转更新</h2>
+        <p>一个区域可能有几十个房间，每帧更新全部抽象房间开销太大。RainWorldGame 采用<strong>轮转</strong>策略，每帧只更新一个抽象房间：</p>
+<pre><code class="language-csharp">// RainWorldGame.Update
+abstractRoomToUpdate++;
+if (abstractRoomToUpdate >= world.NumberOfRooms)
+    abstractRoomToUpdate = 0;
+world.GetAbstractRoom(abstractRoomToUpdate).Update(timePassed);</code></pre>
+        <p>这意味着单个抽象房间的更新频率是 <code>40 / NumberOfRooms</code> FPS。离屏生物的逻辑因此是“离散、低频”推进的，这在性能上是必要的取舍，也解释了为什么离屏 AI 的移动用时间系数换算（见第 9 章）。</p>
+
+        <h2>4.9 序列化机制总览</h2>
+        <p>抽象层的存档完全基于分隔字符串（用 <code>.</code> 或 <code>-</code> 分段），核心约定：</p>
+        <ul>
+            <li><strong>名称优先于索引</strong>：房间、类型都用字符串名，避免索引随版本漂移。</li>
+            <li><strong>每类对象自带 Save/From 方法</strong>：自己负责序列化与反序列化，工厂按标签分派。</li>
+            <li><strong>unrecognized 字段兜底</strong>：读到不认识的属性不报错、不丢弃，原样存回，实现向前/向后兼容。</li>
+        </ul>
+        <div class="callout callout-tip">
+            <p><strong>这是模组能长期共存的关键</strong>：玩家可能在不同模组组合、不同版本间切换存档。未识别字段机制让存档在“看不懂某段数据”时仍能保留它，等对应模组/版本回来后再次生效，避免数据被静默抹除。</p>
+        </div>
+
+        <h2>4.10 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：假设抽象层每帧更新</summary>
+            <div class="details-content"><p>抽象房间是轮转更新的，离屏逻辑频率远低于 40 FPS。写离屏行为时要基于 timePassed 做时间换算，不能假设每帧都被调用。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：在抽象层使用像素坐标或物理状态</summary>
+            <div class="details-content"><p>抽象层只有瓦片坐标与逻辑数据，BodyChunk、vel 等物理状态在房间卸载后已不存在。需要跨房间保留的信息必须存到抽象字段，不能依赖物理对象。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：忽略 EntityID 导致生物“变脸”</summary>
+            <div class="details-content"><p>重建现实对象时若没有沿用原 EntityID，RandomSeed 会变，生物颜色与人格随之改变。Realize 必须由抽象对象驱动以保留身份。</p></div>
+        </details>
+
+        <h2>4.11 练习与思考</h2>
+        <ol>
+            <li>假设一个区域有 20 个抽象房间，计算单个抽象房间的更新频率。若某生物的离屏移动速度需要与现实 40 FPS 一致，应如何换算每步位移？</li>
+            <li>追踪一只被玩家用矛刺穿的蜥蜴在房间卸载、再加载后的完整流程，说明 AbstractSpearStick 如何保证矛与生物的关系不丢失。</li>
+            <li>思考：unknownName 与 unrecognizedAttributes 分别解决哪一类“数据缺失”问题？为什么两者缺一不可？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>抽象层支撑生态连续、房间卸载与确定性存档，与物理渲染完全解耦。</li>
+            <li>WorldCoordinate 用房间+瓦片+节点定位，EntityID 用 number 唯一标识并提供确定性种子。</li>
+            <li>AbstractPhysicalObject 通过 Realize / Abstractize 双向转换，AbstractObjectStick 表达对象间关系。</li>
+            <li>AbstractRoom 用 while 重扫保证遍历一致性，抽象房间按帧轮转更新。</li>
+            <li>序列化名称优先、未识别字段兜底，是跨版本与模组共存的基础。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="03-主循环与进程系统.html">← 上一章：主循环与进程系统</a>
+            <a href="05-世界加载与房间系统.html">下一章：世界加载与房间系统 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

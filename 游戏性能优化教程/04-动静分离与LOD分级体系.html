@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动静分离与 LOD 分级体系 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-渲染管线与线程模型.html">← 上一章</a>
+        <a href="05-DrawCall与合批优化.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>动静分离与 LOD 分级体系</h1>
+        <p class="chapter-meta">模块二 · 优化策略实战 ｜ 对应原文策略 1，以及 LOD 泛化与设备分档</p>
+
+        <p>这是本教程的第一个具体策略，也是最能体现“不做不必要的工作”这条逻辑的策略。它的出发点非常朴素：<strong>场景和 UI 里的元素，变化频率差异巨大，却常被同一套更新与渲染逻辑对待</strong>。一个全程不动的背景面板和一个每帧变化的冷却计时器，如果每帧都重绘，前者就是纯浪费。</p>
+
+        <h2>4.1 动静分离：按变化频率拆分</h2>
+
+        <p>当静态内容与动态内容共用更新策略时，会产生三类不必要开销：CPU 端的逻辑遍历、GPU 端的重绘，以及本可合并却被动态元素“打散”的 Draw Call。优化方法包括：</p>
+
+        <ul>
+            <li><strong>动态 UI 与静态 UI 分离</strong>：静态区域放入独立 Canvas，避免一处变化导致整个画布重建（Canvas 重建机制详见第 6 章）。</li>
+            <li><strong>低频更新区域减少重绘</strong>：计时器、数值类显示不必每帧刷新，按 0.1～0.5 秒间隔或仅在数值变化时更新。</li>
+            <li><strong>静态场景对象走静态合批</strong>，动态对象单独组织，避免动态物体破坏静态批次。</li>
+            <li><strong>低端机关闭非关键 UI 特效、降低字体描边质量、删除玩家感知弱的功能</strong>。</li>
+        </ul>
+
+        <div class="definition">
+            <h4>核心思想</h4>
+            <p>不要让所有设备、所有场景、所有元素执行相同的计算和渲染。更新频率、设备档位、元素重要性都应该成为区别对待的依据。</p>
+        </div>
+
+        <h2>4.2 模型 LOD：距离换面数</h2>
+
+        <p>LOD（Level of Detail，细节层次）最经典的用法是模型分级：为同一物体准备面数递减的多套网格，摄像机远时用低面数版本，近时才用高面数版本。远处物体在屏幕上只占几个像素，高模的细节根本无法被分辨，这些顶点处理就是浪费。</p>
+
+        <table>
+            <thead>
+                <tr><th>层级</th><th>触发距离（示意）</th><th>相对面数</th><th>典型处理</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>LOD 0</td><td>0–20 m</td><td>100%</td><td>完整材质与细节</td></tr>
+                <tr><td>LOD 1</td><td>20–45 m</td><td>约 50%</td><td>合并小部件</td></tr>
+                <tr><td>LOD 2</td><td>45–80 m</td><td>约 20%</td><td>简化轮廓</td></tr>
+                <tr><td>LOD 3（Culled）</td><td>&gt; 80 m</td><td>0</td><td>直接剔除不渲染</td></tr>
+            </tbody>
+        </table>
+
+        <h2>4.3 LOD 不是资源专属：全系统分级</h2>
+
+        <p>原文特别强调，LOD 可以从模型扩展到整个游戏的计算与表现体系。这是“分级”思想的泛化：</p>
+
+        <div class="mermaid">
+flowchart LR
+    ROOT["LOD 分级体系"] --> R["资源：模型/纹理 Mipmap"]
+    ROOT --> P["渲染管线：不同档位不同管线"]
+    ROOT --> B["业务系统：逻辑更新频率"]
+    ROOT --> A["动画：距离驱动更新频率"]
+    ROOT --> E["特效：等级裁剪与粒子数"]
+    ROOT --> F["渲染特性：阴影/后处理/抗锯齿"]
+    style ROOT fill:#e7f3ff,stroke:#007acc,color:#14395a
+        </div>
+
+        <p>同一个“远处降质量”的原则，落在动画上是远处角色降帧更新（第 11 章），落在特效上是远处粒子减少数量甚至不播（第 7 章），落在管线上是低端机直接裁剪整条渲染特性（第 11 章）。把它们统一理解为 LOD，就能在架构上用同一套分级框架驱动，而不是各模块各写一套开关。</p>
+
+        <h2>4.4 设备分档：把硬件能力映射到质量档</h2>
+
+        <p>除了按距离，还要按设备能力分档。常见做法是根据 GPU 型号、内存、屏幕分辨率等信息，在启动时把设备归入高、中、低档位，再由档位决定默认 LOD 策略：</p>
+
+        <table>
+            <thead>
+                <tr><th>档位</th><th>目标帧率</th><th>渲染特性</th><th>表现取舍</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>高端</td><td>60/120 FPS</td><td>实时阴影、后处理、高分辨率</td><td>全特性</td></tr>
+                <tr><td>中端</td><td>30/60 FPS</td><td>简化阴影、关闭部分后处理</td><td>降描边与特效密度</td></tr>
+                <tr><td>低端</td><td>30 FPS</td><td>面片阴影、管线裁剪</td><td>删弱感知功能、降字体描边</td></tr>
+            </tbody>
+        </table>
+
+        <p>建立完整的 LOD 体系不是只做几档资源就够，还需要七项配套支撑：<strong>制作工具、性能监测工具、制作规范、标准化管线、剔除算法、场景管理、绘制与渲染顺序优化</strong>。缺少工具和规范，分档会随着版本迭代失控——没人知道某个开关在低端机上是否还生效。</p>
+
+        <h2>4.5 工程实现：带滞回的 LOD 切换</h2>
+
+        <p>LOD 切换最典型的工程陷阱是<strong>临界抖动</strong>：物体恰好在阈值距离附近时，摄像机轻微移动就会在两个 LOD 间反复横跳，产生肉眼可见的闪烁，并可能触发资源反复加载。解决办法是引入<strong>滞回区间（Hysteresis）</strong>：升档和降档使用不同阈值，中间留一段缓冲带。</p>
+
+<pre><code class="language-csharp">using UnityEngine;
+
+[System.Serializable]
+public class LodLevel
+{
+    public GameObject visual;
+    public float distance;
+}
+
+public class HysteresisLod : MonoBehaviour
+{
+    [SerializeField] private Transform cameraTransform;
+    [SerializeField] private LodLevel[] levels;
+    [SerializeField] private float hysteresis = 2f;
+    [SerializeField] private float checkInterval = 0.2f;
+
+    private int current;
+    private float timer;
+
+    void Awake()
+    {
+        current = 0;
+        Apply(0);
+    }
+
+    void Update()
+    {
+        timer += Time.deltaTime;
+        if (timer < checkInterval) return;
+        timer = 0f;
+
+        float d = Vector3.Distance(transform.position, cameraTransform.position);
+        int target = current;
+
+        if (d > levels[current].distance + hysteresis && current < levels.Length - 1)
+        {
+            target = current + 1;
+        }
+        else if (current > 0 && d < levels[current - 1].distance - hysteresis)
+        {
+            target = current - 1;
+        }
+
+        if (target != current)
+        {
+            Apply(target);
+            current = target;
+        }
+    }
+
+    private void Apply(int index)
+    {
+        for (int i = 0; i < levels.Length; i++)
+        {
+            levels[i].visual.SetActive(i == index);
+        }
+    }
+}
+</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>两个实现细节</strong>：
+            <ul>
+                <li>距离判断不必每帧执行，按固定间隔（示例 0.2 秒）批量检查即可，大量物体同时每帧做距离计算本身就是可观的 CPU 开销。</li>
+                <li>滞回要分别作用于“升档”和“降档”两个方向，单向缓冲无法消除另一侧的抖动。</li>
+            </ul>
+        </div>
+
+        <h2>4.6 常见陷阱清单</h2>
+
+        <details>
+            <summary>LOD 突跳（Popping）：切换瞬间模型突变</summary>
+            <div class="details-content">
+                <p>相邻 LOD 网格差异过大时，切换会被肉眼捕捉。缓解方式包括让相邻 LOD 面数平滑过渡、对切换做短暂的交叉淡入淡出，或在引擎中使用 LOD 过渡（Dithering Fade）。</p>
+            </div>
+        </details>
+        <details>
+            <summary>阈值一刀切：所有物体共用同一组距离</summary>
+            <div class="details-content">
+                <p>不同物体在屏幕上的重要性不同，主角与远景植被应使用不同阈值。阈值应按物体类型分别配置，并结合屏幕占比而非仅用绝对距离。</p>
+            </div>
+        </details>
+        <details>
+            <summary>只做模型 LOD，逻辑仍全量运行</summary>
+            <div class="details-content">
+                <p>视觉降级了，但隐藏对象的 Update、动画、粒子逻辑仍在执行，CPU 开销没有减少。LOD 必须同时驱动逻辑更新频率，否则只省了 GPU。</p>
+            </div>
+        </details>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">基础练习</span>频率分离</h3>
+            <p>改造一个每帧刷新的金币数量 UI，使其仅在数值变化时刷新，并说明这种改动同时减少了哪几类开销。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">进阶挑战</span>统一分级框架</h3>
+            <p>设计一个 <code>QualityTier</code> 枚举与运行时配置，让动画、特效、阴影三个模块都从同一档位读取参数。思考如何避免新增模块时忘记接入分档。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>滞回的代价</h3>
+            <p>滞回区间是否越大越好？请分析滞回过大时会牺牲什么，以及你会如何确定 hysteresis 的取值。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>动静分离按变化频率拆分更新与渲染，消除静态元素的无效重绘与批次破坏。</li>
+            <li>LOD 从模型面数分级，泛化到资源、管线、业务、动画、特效、渲染特性的全系统分级。</li>
+            <li>设备分档把硬件能力映射为质量档，需要工具、规范、剔除与场景管理七项配套。</li>
+            <li>切换逻辑必须带滞回防抖、按间隔批量检查，并同时驱动视觉与逻辑两层降级。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章</strong>：动静分离里提到“动态元素会打散批次”，下一章深入 Draw Call 与合批机制，讲清楚为什么合批能省成本，以及自定义动态合批怎么实现。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="03-渲染管线与线程模型.html">← 上一章：渲染管线与线程模型</a>
+            <a href="05-DrawCall与合批优化.html">下一章：Draw Call 与合批优化 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

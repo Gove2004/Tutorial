@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>持续优化体系与综合实战 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="13-微观分析四板斧与八大维度.html">← 上一章</a>
+        <span></span>
+    </nav>
+
+    <main>
+        <h1>持续优化体系与综合实战</h1>
+        <p class="chapter-meta">模块四 · 分析方法与体系 ｜ 对应原文第五部分核心总结</p>
+
+        <p>最后一章解决第三层能力问题：当团队和项目规模大到无法靠某个人盯完全部场景时，如何把性能优化固化成一套自动运转的工程体系。随后用一个完整的团战卡顿案例，把前面所有章节的方法串起来。</p>
+
+        <h2>14.1 持续优化体系的五个组成</h2>
+
+        <p>原文把成熟的性能工程归纳为五个环节，它们首尾相接形成闭环：</p>
+
+        <div class="mermaid">
+flowchart LR
+            A["性能标准<br/>预算与目标"] --> B["数据采集<br/>脚本化真机测量"]
+            B --> C["分析工具<br/>Profiler/对比/上报"]
+            C --> D["分析方法<br/>四板斧/八维度"]
+            D --> E["优化管线<br/>分档/裁剪/回归门禁"]
+            E --> A
+            style A fill:#e7f3ff,stroke:#007acc,color:#14395a
+            style E fill:#e9f7ec,stroke:#2e7d32,color:#14395a
+        </div>
+
+        <p>这个闭环的意义，是让性能优化从依赖个人经验，变成<strong>可量化、可分析、可复用、可持续</strong>的常规动作：标准告诉我们什么算超标，采集提供客观数据，工具降低分析门槛，方法保证排查路径，管线让优化结果不被后续版本破坏。</p>
+
+        <h2>14.2 自动化性能测试与 CI 接入</h2>
+
+        <p>手动点开 Profiler 跑场景的方式无法支撑高频版本迭代，需要把测试自动化：</p>
+
+        <ol>
+            <li><strong>脚本化测试场景</strong>：用固定回放（录制输入或 AI 脚本）复现主城、野外、团战等标准场景，保证每次操作路径一致。</li>
+            <li><strong>自动真机采集</strong>：构建后在目标代表机上自动运行，采集帧时间分布、DC、内存等指标并落盘。</li>
+            <li><strong>数据上报与对比</strong>：结果写入数据库，自动与基线版本对比，标注回归项。</li>
+            <li><strong>CI 门禁</strong>：关键指标超过预算或较基线恶化超过阈值时，阻断合并或发布，并自动通知责任人。</li>
+        </ol>
+
+        <div class="callout callout-warning">
+            <strong>门禁阈值要留容错</strong>：真机测量存在噪声，阈值应基于多次采样的统计分布（如 P95 连续 N 次超标才告警），单次抖动就拦截会让团队对告警失去信任。
+        </div>
+
+        <h2>14.3 综合实战：一次团战卡顿的完整排查</h2>
+
+        <p>下面用一个典型案例演示完整方法链。<strong>现象</strong>：玩家反馈每次团战刚开打的瞬间画面会“冻”一下，平时帧率正常，问题偶发、难以稳定复现。</p>
+
+        <h3>第一步：复现并固定现场</h3>
+        <p>用脚本化回放把五个角色同时释放技能的场景固定下来，多次运行确认尖峰可复现。在 Profiler 中定位到尖峰帧：单帧 CPU 耗时约 82 ms，远超 16.6 ms 预算，且尖峰总出现在首个技能生效的那一帧。</p>
+
+        <h3>第二步：宏观定位</h3>
+        <p>查看时间线，GPU 段在该帧并不紧张，是<strong>主线程被一段同步操作占满</strong>，渲染线程与 Worker 都在等待。判定为 CPU 侧、单帧尖峰，而非持续 GPU 瓶颈。</p>
+
+        <h3>第三步：隔离与相关性</h3>
+        <p>用排除法逐个关闭模块：关闭动画、粒子后尖峰仍在；当屏蔽“技能首次触发的特效加载”时，尖峰消失。相关性数据显示尖峰与“是否为该特效首次出现”强相关，第二次释放同一技能则不再卡顿。</p>
+
+        <h3>第四步：确认根因</h3>
+        <div class="callout callout-danger">
+            <strong>根因</strong>：该特效 Prefab 没有提前加载，技能首次释放时代码同步调用资源加载并实例化，主线程被 IO 与实例化阻塞，造成 82 ms 尖峰。第二次因已缓存才不卡。这是典型的“运行时同步加载”问题，而非渲染或算力不足。
+        </div>
+
+        <h3>第五步：方案与验证</h3>
+        <p>方案：把该特效纳入战斗前的预热清单，进入对局时异步加载并放入对象池，技能触发时直接从池中取用。随后用<strong>完全相同的回放场景与口径</strong>复测：</p>
+
+        <table>
+            <thead><tr><th>指标</th><th>改造前</th><th>改造后</th></tr></thead>
+            <tbody>
+                <tr><td>尖峰帧 CPU 耗时</td><td>约 82 ms</td><td>≤ 16 ms</td></tr>
+                <tr><td>P99 帧时间</td><td>明显超标</td><td>回到预算内</td></tr>
+                <tr><td>团战 Jank 次数</td><td>每次首触发 1 次</td><td>0</td></tr>
+            </tbody>
+        </table>
+
+        <p>同时确认预热没有显著推高内存峰值、对象池容量合理，没有引入新副作用，才关闭该问题。</p>
+
+        <div class="mermaid">
+flowchart TD
+            P["玩家反馈卡顿"] --> R["脚本复现 + 定位尖峰帧"]
+            R --> M{"CPU 还是 GPU?"}
+            M -->|CPU 单帧尖峰| I["排除法隔离模块"]
+            I --> C["相关性锁定首触发特效"]
+            C --> G["根因：同步加载+实例化"]
+            G --> F["预热 + 对象池异步化"]
+            F --> V["同口径复测验证"]
+            style G fill:#fdecea,stroke:#e53935,color:#14395a
+            style V fill:#e9f7ec,stroke:#2e7d32,color:#14395a
+        </div>
+
+        <h2>14.4 效果验证的常见误判</h2>
+        <ul>
+            <li><strong>把噪声当收益</strong>：只对比单次运行，前后差异可能只是波动，必须多次采样看分布。</li>
+            <li><strong>温控降频干扰</strong>：长时间测试后设备降频，复测数据天然偏低，应控制机身温度或在相同热状态下对比。</li>
+            <li><strong>只看帧率不看内存</strong>：缓存、预热可能把尖峰转化为持续高内存，需同时确认内存峰值没越过杀线。</li>
+            <li><strong>场景不一致</strong>：优化前后跑的不是同一回放，对比没有意义。</li>
+        </ul>
+
+        <h2>14.5 课程总回顾</h2>
+
+        <p>回到第 1 章的三层能力模型，走完本课程你应当具备：</p>
+        <ul>
+            <li><strong>第一层（怎么优化）</strong>：掌握动静分离、LOD、合批、裁剪、异步、多线程、管线定制、阴影/动画/内存优化等手段，并清楚每个手段的代价与边界。</li>
+            <li><strong>第二层（哪里值得优化）</strong>：能从八大模块的架构特征出发，判断冗余、缓存、异步、分级与离线化机会。</li>
+            <li><strong>第三层（持续优化）</strong>：理解性能标准、采集、工具、方法与门禁如何组成自动化闭环。</li>
+        </ul>
+
+        <h2>结业大作业</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">综合项目</span>完整性能专项</h3>
+            <p>在你自己的工程中独立完成一次性能专项：① 制定目标机型与性能预算；② 脚本化采集三个标准场景的帧时间分布与八大维度数据；③ 用四板斧定位一个真实瓶颈并给出根因；④ 实施优化并同口径复测，产出含前后数据对比的报告；⑤ 提出一条可加入 CI 的回归门禁规则。</p>
+        </div>
+
+        <h2>深入学习路径</h2>
+        <ul>
+            <li><a href="https://docs.unity3d.com/Manual/performance-testing.html" target="_blank">Unity Performance Testing 包与自动化测试</a></li>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.entities@latest" target="_blank">DOTS / Job System：大规模并行计算</a></li>
+            <li><a href="https://developer.arm.com/solutions/graphics-and-gaming" target="_blank">ARM 移动游戏图形与性能优化</a></li>
+            <li><a href="https://developer.android.com/topic/performance" target="_blank">Android 官方性能与 Vitals 文档</a></li>
+            <li><a href="https://gameprogrammingpatterns.com/" target="_blank">Game Programming Patterns</a></li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>结语</strong>：性能优化没有“银弹”，只有一条朴素纪律——先测量、再假设、用隔离确认因果、最后用数据验证收益。把这条纪律坚持下去，优化就不再是少数专家的专利。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="13-微观分析四板斧与八大维度.html">← 上一章：微观分析四板斧与八大维度</a>
+            <a href="index.html">返回课程目录 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

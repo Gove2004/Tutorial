@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 世界加载与房间系统 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-抽象世界层.html">← 上一章</a>
+        <a href="06-自研物理引擎.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>05 世界加载与房间系统</h1>
+        <p>第 4 章讲了抽象世界如何组织，本章解决一个工程问题：抽象房间如何被“准备”、“实现”为可玩的现实房间，又如何在玩家离开后被卸载。核心是两个协作类——后台线程跑的 RoomPreparer，以及按性能预算动态加载/卸载房间的 RoomRealizer。</p>
+
+        <h2>5.1 房间的完整生命周期</h2>
+<pre class="mermaid">
+stateDiagram-v2
+    [*] --> 抽象存在: AbstractRoom
+    抽象存在 --> 准备中: RoomPreparer 后台线程
+    准备中 --> 已实现: ActivateRoom / Realize
+    已实现 --> 完全加载: loadingProgress=3
+    完全加载 --> 抽象化: Abstractize（卸载）
+    抽象化 --> 已实现: 再次进入（冷却后）
+    抽象化 --> [*]
+</pre>
+
+        <h2>5.2 RoomPreparer：后台线程状态机</h2>
+        <p>房间的几何解析、快捷通道映射、AI 地图生成都是 CPU 密集工作，被放进独立后台线程，避免阻塞主线程。构造时先读房间数据文件：</p>
+<pre><code class="language-csharp">public RoomPreparer(Room room, bool loadAiHeatMaps, bool falseBake, bool shortcutsOnly)
+{
+    string text = WorldLoader.FindRoomFile(
+        WorldLoader.RoomNameManipulator(room.abstractRoom.FileName, room.game),
+        includeRootDirectory: false, ".txt");
+    if (text == null)            // 房间文件缺失：标记失败而非抛异常
+    {
+        done = true;
+        failed = true;
+        return;
+    }
+    string[] array = File.ReadAllLines(text);
+    room.LoadFromDataString(array);
+    scMapper = new ShortcutMapper(room);
+}</code></pre>
+        <p>后台线程用一个整数 status 驱动状态机，依次完成三个计算阶段：</p>
+<pre><code class="language-csharp">private void UpdateThread()
+{
+    CultureInfo.CurrentCulture = CultureInfo.GetCultureInfoByIetfLanguageTag("en-US");
+    switch (status)
+    {
+    case 0:
+        scMapper.Update();                       // 快捷通道映射
+        if (scMapper.done) {
+            aiMapper = new AImapper(room);       // 接着准备 AI 地图
+            requestShortcutsReady = true;        // 通知主线程
+        }
+        break;
+    case 1:
+        aiMapper.Update();                       // AI 地图生成（第 9 章详述）
+        if (aiMapper.done) { room.aimap = aiMapper.ReturnAIMap(); status++; }
+        break;
+    case 2:
+        aiDataPreprocessor = new AIdataPreprocessor(room.aimap, falseBake);
+        status++;
+        break;
+    case 3:
+        aiDataPreprocessor.Update();             // 数据预处理/连通性
+        if (aiDataPreprocessor.done) status++;
+        break;
+    case 4:
+        requestReadyForAI = true;                // 通知主线程
+        break;
+    }
+}</code></pre>
+
+        <h3>主线程与后台线程如何协作</h3>
+        <p>后台线程不能直接调用涉及 Unity 资源的方法（必须在主线程），所以它只置请求标志，主线程在 Update 里检查并执行：</p>
+<pre><code class="language-csharp">public void Update()
+{
+    lock (this)
+    {
+        if (requestShortcutsReady) { requestShortcutsReady = false; status++; flag = true; }
+        if (requestReadyForAI) { requestReadyForAI = false; status++; flag2 = true; }
+    }
+    if (flag) room.ShortCutsReady();    // 回到主线程执行
+    if (flag2) room.ReadyForAI();
+}</code></pre>
+        <div class="callout callout-info">
+            <p>这是典型的“后台计算、主线程应用”生产者模式：共享状态用 <code>lock</code> 保护，线程强制 en-US 文化保证文本/数字解析一致，Unity 相关动作永远只在主线程发生。</p>
+        </div>
+
+        <h2>5.3 loadingProgress：三阶段加载标志</h2>
+        <p>房间对外暴露 loadingProgress，其它系统据此判断它能不能被 AI 使用、是否完全就绪：</p>
+<pre><code class="language-csharp">public int loadingProgress;
+public bool readyForAI => loadingProgress >= 2;
+public bool fullyLoaded => loadingProgress >= 3;</code></pre>
+        <p>它在三个固定位置被赋值，对应“物品实现 → 生物实现 → 收尾”：</p>
+<table>
+    <thead><tr><th>loadingProgress</th><th>发生位置</th><th>含义</th></tr></thead>
+    <tbody>
+        <tr><td>1</td><td>ShortCutsReady 末尾（2844）</td><td>非生物物品已实现</td></tr>
+        <tr><td>2</td><td>ReadyForAI 开头（2940）</td><td>生物开始实现，readyForAI 为真</td></tr>
+        <tr><td>3</td><td>ReadyForAI 末尾（2961）</td><td>全部完成，fullyLoaded 为真</td></tr>
+    </tbody>
+</table>
+
+        <h3>为什么物品先于生物实现</h3>
+        <p>ShortCutsReady 遍历房间实体，先实现非生物的物理对象：</p>
+<pre><code class="language-csharp">public void ShortCutsReady()
+{
+    foreach (AbstractWorldEntity entity in abstractRoom.entities)
+    {
+        if (entity is AbstractCreature) continue;        // 生物暂不实现
+        if (!entity.InDen && entity.pos.room == abstractRoom.index)
+            (entity as AbstractPhysicalObject).RealizeInRoom();
+    }
+    loadingProgress = 1;
+}</code></pre>
+        <p>ReadyForAI 才实现生物：</p>
+<pre><code class="language-csharp">public void ReadyForAI()
+{
+    loadingProgress = 2;
+    foreach (AbstractCreature creature in abstractRoom.creatures)
+        if (creature.realizedCreature == null && creature.AllowedToExistInRoom(this))
+            creature.RealizeInRoom();                   // 生物此时才现实化
+    loadingProgress = 3;
+    readyForNonAICreaturesToEnter = true;
+}</code></pre>
+        <p>先有地形与物品，再放入生物，保证生物现实化时物理环境已就绪，不会出现生物先于地面生成的问题。</p>
+
+        <h2>5.4 RoomRealizer：性能预算驱动的加载</h2>
+        <p>玩家不会只待在一个房间，RoomRealizer 跟随相机目标，在固定性能预算（1500）内决定同时保留哪些现实房间：</p>
+<pre><code class="language-csharp">private float performanceBudget = 1500f;
+private List<RealizedRoomTracker> realizedRooms;
+
+public void Update()
+{
+    followCreature = world.game.cameras[0].followAbstractCreature;
+    // 玩家进入新房间：立即实现当前房间
+    if (lastFrameFollowCreatureRoom != followCreature.pos.room)
+    {
+        RealizeAndTrackRoom(followCreature.Room, actuallyEntering: true);
+    }
+    float perf = CurrentPerformanceEstimation();
+    if (perf > performanceBudget)
+        ShaveDownPerformanceTo(perf, performanceBudget, ref realizedRooms); // 超预算就卸载
+}</code></pre>
+
+        <h3>预测下一个房间并预加载</h3>
+        <p>RoomRealizer 会根据各连接出口到玩家的距离，找出最可能进入的相邻房间，提前实现：</p>
+<pre><code class="language-csharp">for (int j = 0; j < followCreature.Room.connections.Length; j++)
+{
+    int dist = followCreature.realizedCreature.room.aimap
+        .ExitDistanceForCreatureAndCheckNeighbours(followCreature.pos.Tile, j, ...);
+    if (dist < nearest) { nearest = dist; probableNextRoom = 相邻房间; }
+}
+if (probableNextRoom.realizedRoom == null
+    && perf + RoomPerformanceEstimation(probableNextRoom) < performanceBudget)
+    RealizeAndTrackRoom(probableNextRoom, actuallyEntering: false);</code></pre>
+        <p>这样玩家穿过房间门时，目标房间往往已在后台加载，过渡几乎无停顿。</p>
+
+        <h3>性能如何估算</h3>
+        <p>每个房间的性能开销由其尺寸、水体、生物构成决定，每种生物有固定权重：</p>
+<pre><code class="language-csharp">public float RoomPerformanceEstimation(AbstractRoom testRoom)
+{
+    float num = Mathf.Lerp(2080f, testRoom.size.x * testRoom.size.y, 0.25f) / 40f;
+    foreach (AbstractCreature c in testRoom.creatures)
+        if (c.state.alive) num += GetCreaturePerformanceEstimation(c);
+    return num;
+}
+// 例如 Scavenger 300、蜥蜴 50、苍蝇 10、水蛭 10</code></pre>
+
+        <h2>5.5 房间卸载：Abstractize 与防抖动</h2>
+        <p>超预算时，RoomRealizer 按 DeletionFactor 选最该卸载的房间，并保护当前房间与预测房间：</p>
+<pre><code class="language-csharp">public float DeletionFactor()
+{
+    return (float)timeSinceVisited / 2400f
+        + roomChangesSinceVisited
+        + (hasBeenVisited ? 0f : 24000f);   // 从未访问的房间优先卸载
+}
+public void KillRoom(AbstractRoom room)
+{
+    room.Abstractize();                     // 现实房间回收，抽象房间保留
+    recentlyAbstractedRooms.Add(new RoomAndInt(room));
+}</code></pre>
+        <p>卸载的房间进入 recentlyAbstractedRooms，在 80 帧内不会被立即重新实现，避免“刚卸载又加载”的抖动。合作模式下，只要还有玩家在房间内，CanAbstractizeRoom 就返回 false，防止队友所在房间被回收。</p>
+
+        <h2>5.6 全流程回顾</h2>
+<pre class="mermaid">
+sequenceDiagram
+    participant RR as RoomRealizer
+    participant RP as RoomPreparer
+    participant T as 后台线程
+    participant R as Room
+    RR->>RP: 需要某房间
+    RP->>T: 启动线程（快捷/AI 地图/预处理）
+    T-->>RP: requestShortcutsReady
+    RP->>R: ShortCutsReady（物品，progress=1）
+    T-->>RP: requestReadyForAI
+    RP->>R: ReadyForAI（生物，progress=2→3）
+    RR->>RR: 超预算时 Abstractize 卸载
+</pre>
+
+        <h2>5.7 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：在后台线程直接操作 Unity 对象</summary>
+            <div class="details-content"><p>Unity 资源只能在主线程访问。后台线程应只做计算并置请求标志，由主线程 Update 执行实际实现。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：在 readyForAI 之前就让生物使用房间</summary>
+            <div class="details-content"><p>loadingProgress &lt; 2 时 AI 地图与物理环境未就绪，生物提前进入会卡住或判定异常。应检查 readyForAI/fullyLoaded。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：卸载房间不做冷却导致反复加载</summary>
+            <div class="details-content"><p>刚 Abstractize 的房间立刻又被预加载会造成抖动。应保留 recentlyAbstracted 冷却窗口。</p></div>
+        </details>
+
+        <h2>5.8 练习与思考</h2>
+        <ol>
+            <li>结合 RoomPreparer 的 status 状态机，列出从房间文件读取到 fullyLoaded 的完整阶段，并标注每阶段的产出与线程归属。</li>
+            <li>解释为什么物品在 loadingProgress=1 实现、生物在 2 实现，颠倒顺序会引发什么问题。</li>
+            <li>思考：RoomRealizer 用固定性能预算而非固定房间数来管理加载，这种设计在不同尺寸/生物密度的房间组合下有什么优势？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>RoomPreparer 在后台线程分阶段完成快捷通道、AI 地图与数据预处理，通过 lock 与请求标志让主线程应用结果。</li>
+            <li>loadingProgress 三阶段（1 物品、2 生物就绪、3 完全加载），readyForAI 与 fullyLoaded 是对外的就绪判据。</li>
+            <li>RoomRealizer 在性能预算内预加载预测房间、按 DeletionFactor 卸载远房间，并加冷却防止抖动。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-抽象世界层.html">← 上一章：抽象世界层</a>
+            <a href="06-自研物理引擎.html">下一章：自研物理引擎 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

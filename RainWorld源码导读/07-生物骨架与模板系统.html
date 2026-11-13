@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 生物骨架与模板系统 - Rain World 源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-自研物理引擎.html">← 上一章</a>
+        <a href="08-AI感知与效用决策.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>07 生物骨架与模板系统</h1>
+        <p>Rain World 里有几十种生物，但它们共享同一套骨架设计。本章先建立“一只生物由哪些对象组合而成”的全景，再深入三个数据层面的核心：状态对象、模板系统与人格。理解了这套骨架，任何具体生物都能按图索骥。</p>
+
+        <h2>7.1 一只生物的组合全景</h2>
+        <p>再次强调组合优先：一只生物不是一个包揽一切的巨型类，而是由五个各司其职的对象协作，分布在抽象层与现实层：</p>
+
+<pre class="mermaid">
+flowchart TD
+    AC["AbstractCreature（抽象身份）"] --> TPL["CreatureTemplate（静态模板）"]
+    AC --> CST["CreatureState（逻辑状态）"]
+    AC --> AAI["AbstractCreatureAI（离屏 AI）"]
+    AC -.Realize.-> CR["Creature（物理对象）"]
+    CR --> BC["BodyChunk[] + 弹簧（身体）"]
+    CR --> GM["GraphicsModule（表现）"]
+    CR --> AI["ArtificialIntelligence（现实 AI）"]
+</pre>
+
+        <table>
+            <thead><tr><th>组件</th><th>层</th><th>职责</th></tr></thead>
+            <tbody>
+                <tr><td>AbstractCreature</td><td>抽象</td><td>身份、人格、模板引用、现实对象引用</td></tr>
+                <tr><td>CreatureTemplate</td><td>静态数据</td><td>该物种的全部静态属性、关系、品种树</td></tr>
+                <tr><td>CreatureState</td><td>抽象</td><td>存活、剩余肉量、社交记忆等可保存状态</td></tr>
+                <tr><td>Creature</td><td>现实</td><td>物理身体、握持、伤害，现实层逻辑</td></tr>
+                <tr><td>GraphicsModule / AI</td><td>现实</td><td>表现绘制与现场决策</td></tr>
+            </tbody>
+        </table>
+
+        <h2>7.2 从 PhysicalObject 到 Creature</h2>
+        <p>Creature 继承 PhysicalObject，因此天然拥有身体（bodyChunks）、连接（bodyChunkConnections）、碰撞层等物理能力，并在此之上增加生物特有的概念。核心字段：</p>
+<pre><code class="language-csharp">public AbstractCreature abstractCreature;
+public CreatureTemplate Template => abstractCreature.creatureTemplate;
+public CreatureState State => abstractCreature.state;
+public Grasp[] grasps;          // 握持槽
+public bool dead;
+public bool blind; public bool deaf;
+public bool inSmallNarrowSpace;</code></pre>
+
+        <h3>Grasp：握持系统</h3>
+        <p>生物能抓多少东西由模板的 <code>grasps</code> 决定，每个 Grasp 记录被抓对象、共享性与支配度：</p>
+<pre><code class="language-csharp">public class Grasp
+{
+    public PhysicalObject grabbed;
+    public int graspUsed;
+    public float shareability;
+    public float dominance;
+    public bool pacified;
+}</code></pre>
+        <p>Grasp 是实现捕食、携带、社交安抚的统一机制：蜥蜴咬住猎物、拾荒者握住长矛、玩家拿起石头，都走 Grasp。第 4 章的 CreatureGripStick 则是它在抽象层的可序列化对应物。</p>
+
+        <h2>7.3 CreatureState：可保存的逻辑状态</h2>
+        <p>CreatureState 是抽象类，承载需要跨房间、跨周期保留的状态，与物理身体解耦：</p>
+<pre><code class="language-csharp">public abstract class CreatureState
+{
+    public SocialMemory socialMemory;
+    public int meatLeft;
+    public bool alive { get; private set; }
+    public bool dead => !alive;
+    public Dictionary<string, string> unrecognizedSaveStrings;
+}</code></pre>
+        <ul>
+            <li><strong>alive / dead</strong>：生物的生死标记，Die() 翻转，死亡后身体仍可作为肉存在（meatLeft）。</li>
+            <li><strong>socialMemory</strong>：仅当模板 socialMemory 为 true 时创建，记录对其他个体的长期记忆（如拾荒者的恩怨）。</li>
+        </ul>
+        <p>状态自身负责序列化，用 <code>&lt;cB&gt;</code>、<code>&lt;cC&gt;</code> 分段标签组织：</p>
+<pre><code class="language-csharp">if (dead) text += "Dead<cB>";
+if (alive && socialMemory != null && socialMemory.relationShips.Count > 0)
+    text += "Social<cC>" + socialMemory.ToString() + "<cB>";
+if (meatLeft != creature.creatureTemplate.meatPoints)
+    text += string.Format("MeatLeft<cC>{0}<cB>", meatLeft);</code></pre>
+        <div class="callout callout-info">
+            <p><strong>DLC 条件序列化</strong>：读取时若当前未启用对应 DLC（如 ExtractKarma 需要 MSC），该字段不会被丢弃，而是转入 <code>unrecognizedSaveStrings</code> 保留。等 DLC 启用后再读，数据依然有效。这是 DLC 与模组能安全共存的又一体现。</p>
+        </div>
+
+        <h2>7.4 CreatureTemplate：静态模板系统</h2>
+        <p>CreatureTemplate 是纯静态数据，描述一个物种“是什么样”，不随个体变化。它的字段非常多，可归为几大类：</p>
+
+        <h3>身体与移动</h3>
+        <table>
+            <thead><tr><th>字段</th><th>含义</th></tr></thead>
+            <tbody>
+                <tr><td>bodySize / grasps / meatPoints</td><td>体型、握持槽数、可提供的肉量</td></tr>
+                <tr><td>canFly / canSwim / lungCapacity</td><td>飞行、游泳能力与肺活量</td></tr>
+                <tr><td>offScreenSpeed / abstractedLaziness</td><td>离屏移动速度与离屏懒惰系数</td></tr>
+                <tr><td>waterRelationship</td><td>与水的关系：AirOnly / Amphibious / WaterOnly 等</td></tr>
+            </tbody>
+        </table>
+
+        <h3>感知与威胁</h3>
+        <table>
+            <thead><tr><th>字段</th><th>含义</th></tr></thead>
+            <tbody>
+                <tr><td>visualRadius / waterVision / throughSurfaceVision</td><td>视野半径及水中、隔墙、运动相关的视觉系数</td></tr>
+                <tr><td>dangerousToPlayer / scaryness / deliciousness</td><td>对玩家的危险度、威慑度、被猎食的美味度</td></tr>
+            </tbody>
+        </table>
+
+        <h3>免疫与特殊</h3>
+        <p>wormGrassImmune、daddyCorruptionImmune、ghostSedationImmune 等标记该物种对特定环境危害是否免疫；BlizzardAdapted 标记暴雪适应；shortcutAversion、NPCTravelAversion 是 PathCost，影响寻路时对快捷通道/NPC 运输的偏好。</p>
+
+        <h3>Relationship：物种间关系</h3>
+        <p>模板用 <code>relationships</code> 数组按其他物种的类型索引，定义默认关系。Relationship 是结构体：</p>
+<pre><code class="language-csharp">public struct Relationship
+{
+    public Type type;        // Eats / Afraid / Attacks / Ignores / Pack / PlaysWith ...
+    public float intensity;
+    public bool GoForKill =>
+        (type == Type.Eats || type == Type.Attacks) && intensity > 0f;
+}</code></pre>
+        <p>关系类型覆盖了生态互动的全部基调：吃（Eats）、怕（Afraid）、攻击（Attacks）、避让（StayOutOfWay）、敌对竞争（AgressiveRival）、一起玩（PlaysWith）、群体（Pack）、社交依赖（SocialDependent）。这些<strong>默认关系会被个体的动态关系与社交记忆覆盖</strong>，但提供了行为基线。</p>
+<pre><code class="language-csharp">public Relationship CreatureRelationship(CreatureTemplate crit)
+{
+    if (crit == null || crit.type.Index == -1)
+        return new Relationship(Relationship.Type.Ignores, 0f);
+    return relationships[crit.type.Index];
+}</code></pre>
+
+        <h2>7.5 品种树：ancestor 与 TopAncestor</h2>
+        <p>CreatureTemplate 的 Type 是 ExtEnum，所有品种（如 PinkLizard、CyanLizard、RedLizard）构成一棵以祖先链组织的树。模板构造时接收 ancestor 参数，<code>TopAncestor</code> 递归回溯到根：</p>
+<pre><code class="language-csharp">public CreatureTemplate TopAncestor()
+{
+    if (ancestor == null) return this;
+    return ancestor.TopAncestor();
+}</code></pre>
+        <p>这解释了第 4 章实例工厂为何按 TopAncestor 分派：所有蜥蜴品种共享同一个现实类 Lizard，差异来自模板继承链与品种参数，而不是为每个品种写一个子类。模板还提供 IsLizard、IsVulture、IsCicada 等便捷属性，通过祖先类型判断归属。</p>
+
+        <h3>BreedParameters：品种参数</h3>
+        <p>模板持有 <code>BreedParameters</code> 字段（如 LizardBreedParams），把同一现实类下不同品种的数值差异（速度、咬合力、特殊能力阈值）集中配置。新增品种通常只需准备新模板与 BreedParameters，无需改动生物类本体。</p>
+
+        <h2>7.6 Personality：确定性人格</h2>
+        <p>模板决定物种共性，人格则决定个体差异。AbstractCreature.Personality 是含六个维度的结构体，<strong>完全由 EntityID 的随机种子确定性生成</strong>：</p>
+<pre><code class="language-csharp">public Personality(EntityID ID)
+{
+    Random.State state = Random.state;
+    Random.InitState(ID.RandomSeed);
+    sympathy = Random.value; energy = Random.value; bravery = Random.value;
+    sympathy = Custom.PushFromHalf(sympathy, 1.5f);
+    // ... 派生 nervous / aggression / dominance
+    Random.state = state;   // 恢复全局随机流，不污染外部
+}</code></pre>
+        <table>
+            <thead><tr><th>维度</th><th>影响</th></tr></thead>
+            <tbody>
+                <tr><td>energy 能量</td><td>活跃程度与行动倾向</td></tr>
+                <tr><td>bravery 勇气</td><td>面对威胁时是迎战还是逃跑</td></tr>
+                <tr><td>sympathy 同情</td><td>社交与攻击的抑制</td></tr>
+                <tr><td>nervous 神经质</td><td>警觉与受惊程度</td></tr>
+                <tr><td>aggression 攻击性</td><td>主动攻击的倾向</td></tr>
+                <tr><td>dominance 支配度</td><td>群体互动中的地位</td></tr>
+            </tbody>
+        </table>
+        <div class="callout callout-tip">
+            <p><strong>两个工程细节值得学</strong>：一是 <code>PushFromHalf</code> 把均匀随机值从 0.5 推向两端，避免所有个体性格中庸，让生态里出现明显的胆小鬼与亡命徒；二是生成前后保存/恢复 <code>Random.state</code>，确定性地使用独立种子而不打乱全局随机序列，保证其他随机结果可复现。</p>
+        </div>
+
+        <h2>7.7 抽象与现实生物的协作</h2>
+        <p>把整个生命周期串起来：AbstractCreature 在世界生成时创建，携带模板、人格与状态；房间加载时 Realize 出 Creature，构建物理身体并启动现实 AI；房间卸载时 Abstractize，物理身体销毁但抽象状态与人格保留；跨周期时 CreatureState 与社交记忆被序列化。<strong>身份（EntityID）始终不变，保证同一只生物可被反复实现而不“换人”</strong>。</p>
+
+        <h2>7.8 常见陷阱</h2>
+        <details>
+            <summary>陷阱一：把个体状态写进 Creature 而非 CreatureState</summary>
+            <div class="details-content"><p>Creature 在房间卸载时销毁，存在其中的个体数据会丢失。需要跨房间保留的信息必须放到 CreatureState 或 AbstractCreature 字段。</p></div>
+        </details>
+        <details>
+            <summary>陷阱二：为新品种新建现实类而非复用模板</summary>
+            <div class="details-content"><p>若新生物与某祖先机制相同，应通过模板继承 + BreedParameters 扩展，新建子类会割裂机制并增加维护成本。先判断 TopAncestor 再决定。</p></div>
+        </details>
+        <details>
+            <summary>陷阱三：在人格生成中使用全局 Random</summary>
+            <div class="details-content"><p>不保存 Random.state 会污染全局随机流，使后续世界生成结果不可复现。确定性个体数据应基于 EntityID 种子并恢复状态。</p></div>
+        </details>
+
+        <h2>7.9 练习与思考</h2>
+        <ol>
+            <li>挑选任意一种生物（如 Centipede），用 IDE 追踪它的 AbstractCreature、Creature、State、GraphicsModule、AI 五个具体类名，验证 7.1 的组合全景。</li>
+            <li>结合模板字段，解释一只“高 bravery、低 nervous”的蜥蜴与一只“低 bravery、高 nervous”的蜥蜴在遭遇玩家时的行为差异。</li>
+            <li>思考：为什么用“模板继承树 + 共享现实类”而非“类继承 + 每品种一个类”？这种设计在新增 DLC 生物时带来了什么好处？</li>
+        </ol>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>生物由抽象身份、模板、状态、离屏 AI，以及现实的物理身体、表现、现场 AI 组合而成。</li>
+            <li>Grasp 统一处理握持，CreatureState 保存存活/肉量/社交记忆并支持 DLC 条件序列化。</li>
+            <li>CreatureTemplate 集中静态属性与物种关系，品种通过 ancestor 树与 BreedParameters 扩展。</li>
+            <li>Personality 由 EntityID 种子确定性生成六维人格，PushFromHalf 与随机状态恢复是关键工程细节。</li>
+        </ul>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="06-自研物理引擎.html">← 上一章：自研物理引擎</a>
+            <a href="08-AI感知与效用决策.html">下一章：AI 感知与效用决策 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

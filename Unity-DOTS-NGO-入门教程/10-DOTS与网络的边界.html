@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 DOTS 与网络的边界 - Unity DOTS 与 NGO 入门教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-网络变量与RPC.html">← 上一章</a>
+        <a href="11-迁移调试与性能.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>10　DOTS 与网络的边界：NGO、Netcode for Entities 与混合工作流</h1>
+
+        <p>前九章分别学了 ECS 模拟和 NGO 网络，这一章回答三个落地问题：两套网络栈到底怎么选、GameObject 和实体怎么在一个项目里互相调用、Netcode for Entities 到底是什么。理解了边界，你才不会在架构选型时走弯路。</p>
+
+        <h2>10.1 先把两套网络栈彻底分清</h2>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>Netcode for GameObjects</th><th>Netcode for Entities</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>数据模型</td><td>GameObject + NetworkBehaviour</td><td>Entity + System</td></tr>
+                <tr><td>同步模型</td><td>NetworkVariable 状态 + RPC 消息</td><td>Ghost 快照（snapshot）+ 输入命令</td></tr>
+                <tr><td>客户端预测</td><td>需自己实现，框架不内建</td><td>内建预测与回滚（rollback）体系</td></tr>
+                <tr><td>更新节奏</td><td>按帧/可配置，高层抽象</td><td>固定网络 tick（常见 60Hz），确定性导向</td></tr>
+                <tr><td>设计目标</td><td>快速上手、中小规模房间</td><td>大规模、高 tick、竞技级同步</td></tr>
+                <tr><td>学习曲线</td><td>平缓，MonoBehaviour 思维</td><td>陡峭，需要 ECS 与网络双重基础</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>一个关键事实</strong>：NGO 3.x 底层已经依赖 Netcode for Entities 包（安装时自动拉入 Entities、Burst、Collections）。这说明 Unity 的长期方向是让高层 GameObject API 与底层 ECS 网络融合，而不是维持两套互不相干的实现。但 3.x 标准的 NetworkBehaviour/RPC 工作流仍然照旧，融合层目前是实验性的。
+        </div>
+
+        <h2>10.2 NGO 3.x 的混合预制体（实验性）</h2>
+
+        <p>NGO 3.x 引入了连接 Netcode for Entities 的“统一 GameObject 层”基础，称为混合预制体（hybrid prefab）概念。它的目标是让一个对象既能在 GameObject 层用 NetworkBehaviour 写高层逻辑，又能在 ECS 层被系统处理。官方明确标注：<strong>该集成是实验性的，不建议用于生产，标准 GameObject 工作流默认不启用它</strong>。</p>
+
+        <p>对你现阶段的意义是：知道这条路存在、方向明确，但不要把项目的核心架构押在实验特性上。生产项目仍以“NGO 管网络 + 独立 ECS 模拟”的清晰边界为主。</p>
+
+        <h2>10.3 混合工作流：GameObject 与实体互操作</h2>
+
+        <p>真实项目常见的架构是分层：<strong>GameObject 负责 UI、输入入口、网络连接、过场；ECS 负责大规模模拟（战斗单位、子弹、粒子级实体）</strong>。两层之间需要双向通道。</p>
+
+        <div class="mermaid-wrapper">
+            <pre class="mermaid">
+flowchart TB
+    subgraph GO["GameObject 层"]
+        UI["UI / 菜单"]
+        NM["NetworkManager / NGO 连接"]
+        BRIDGE["托管桥接 SystemBase"]
+    end
+    subgraph ECS["ECS 层"]
+        SIM["模拟系统 ISystem + Burst"]
+        DATA["实体 / Chunk 数据"]
+    end
+    UI --&gt; NM
+    NM --&gt; BRIDGE
+    BRIDGE --&gt;|"读写实体数据"| DATA
+    DATA --&gt; SIM
+    SIM --&gt;|"结果回写"| BRIDGE
+    BRIDGE --&gt; UI
+            </pre>
+        </div>
+
+        <h3>从 GameObject 侧访问实体：EntityId</h3>
+        <p>Unity 6.5 引入的 <code>EntityId</code> 是 64 位结构体，作为 GameObject 与实体之间共享的标识，替代旧的 InstanceID 机制。它解决的是“一个 GameObject 概念如何对应到一个实体”的解析问题。注意不要把它和 ECS 内部的 <code>Entity</code>（Index + Version）混用：EntityId 用于互操作层，Entity 用于 ECS 内部。</p>
+
+        <div class="callout callout-danger">
+            <strong>64 位带来的硬性影响</strong>：如果你有代码把这类标识存成 <code>int</code> 或做序列化，转换会截断 64 位值，导致无法解析回对象。迁移时必须把存储类型改为对应的 64 位结构，不能图省事保留 int。
+        </div>
+
+        <h3>用托管系统做桥接</h3>
+        <p>从 ECS 侧主动访问 GameObject，标准做法是写一个继承 <code>SystemBase</code> 的托管系统（class，而非 ISystem struct），它可以访问托管对象、调用 GameObject API，同时通过 EntityManager/查询读写实体数据：</p>
+
+<pre><code class="language-csharp">using Unity.Entities;
+using UnityEngine;
+
+// 托管桥接系统：能同时接触 GameObject 与实体
+public partial class PresentationBridgeSystem : SystemBase
+{
+    private UIManager ui;
+
+    protected override void OnUpdate()
+    {
+        // 读取 ECS 模拟结果
+        foreach (var (score, entity) in
+            SystemAPI.Query&lt;RefRO&lt;SimulatedScore&gt;&gt;())
+        {
+            // 调用 GameObject 世界的 UI（托管操作，无法 Burst）
+            if (ui != null)
+                ui.UpdateScore(score.ValueRO.Value);
+        }
+    }
+
+    public void BindUI(UIManager manager) =&gt; ui = manager;
+}
+</code></pre>
+
+        <p>桥接系统天然是性能边界：它无法 Burst、有托管开销，所以只承担“搬运与转换”，重计算留在 ISystem + Burst 里。引用引擎资源用第六章的 <code>UnityObjectRef&lt;T&gt;</code>，保持模拟组件非托管。</p>
+
+        <h3>从 NGO 网络事件驱动 ECS</h3>
+        <p>NGO 收到 RPC 后，把数据写进实体组件或 DynamicBuffer，再由 ECS 系统在下一阶段处理；ECS 模拟结果通过桥接系统读回，需要广播时再调用 NGO 发送。这样网络框架和模拟框架通过数据解耦，互不直接依赖内部实现。</p>
+
+        <h2>10.4 Netcode for Entities 概念预览</h2>
+
+        <p>当你将来需要“上万个实体在客户端预测下同步”时，会进入 Netcode for Entities。先建立核心词汇，不要求现在掌握：</p>
+
+        <div class="definition">
+            <h4>Ghost（幽灵）</h4>
+            <p>被网络同步的实体。通过 Ghost 配置决定哪些字段（GhostField）同步、以及该实体在客户端是<strong>插值（Interpolated）</strong>还是<strong>预测（Predicted）</strong>模式。服务器周期性发送快照，客户端据此重建实体状态。</p>
+        </div>
+
+        <div class="definition">
+            <h4>Command（命令）与客户端预测</h4>
+            <p>客户端把输入打包成命令（IInputComponentData/ICommandData）发送给服务器，同时在本地立即预测移动以掩盖延迟；服务器权威结果回来后，如果预测与服务器不一致，客户端做回滚与重放纠正。这是竞技射击游戏“手感不延迟且防作弊”的底层机制。</p>
+        </div>
+
+        <ul>
+            <li><strong>固定 tick</strong>：网络与预测按固定时间步推进，是确定性模拟的基础；</li>
+            <li><strong>快照同步</strong>：与 NGO 的“字段变化即推”不同，它按 tick 发送整个相关状态快照，配合插值缓冲；</li>
+            <li><strong>带宽优化</strong>：通过 Ghost 优先级、 relevancy（相关性，决定哪些实体对某客户端可见）控制大规模场景的带宽。</li>
+        </ul>
+
+        <div class="sidebar-note">
+            <strong>学习前置</strong>：碰 Netcode for Entities 之前，确保 ECS（第 2–7 章）已经熟练，并且理解固定时间步与确定性。否则会同时在两个陌生维度上受挫，这也是本教程把它放在“预览”而非主线的原因。
+        </div>
+
+        <h2>10.5 选型决策路径</h2>
+
+        <div class="mermaid-wrapper">
+            <pre class="mermaid">
+flowchart TD
+    A["需要多人联机？"] --&gt; B{"同步对象规模与类型"}
+    B --&gt;|"少量玩家、房间制、快速上线"| C["NGO（GameObject 工作流）"]
+    B --&gt;|"海量实体 / 竞技级预测"| D["Netcode for Entities"]
+    B --&gt;|"重模拟在 ECS、网络入口简单"| E["NGO + ECS 混合架构"]
+    C --&gt; F{"项目已用 Unity 6.7+？"}
+    F --&gt;|"是"| G["NGO 3.x"]
+    F --&gt;|"否"| H["NGO 2.x"]
+            </pre>
+        </div>
+
+        <h2>10.6 一个混合架构的最小骨架</h2>
+
+<pre><code class="language-csharp">// 1) NGO 收到玩家输入请求，写入 ECS 输入缓冲
+public class InputNetwork : NetworkBehaviour
+{
+    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
+    private void InputRpc(InputData data, RpcParams rpcParams)
+    {
+        var world = World.DefaultGameObjectInjectionWorld;
+        var entity = world.EntityManager.CreateEntity();
+        world.EntityManager.AddComponentData(entity, new NetworkInput
+        {
+            ClientId = rpcParams.Receive.SenderClientId,
+            Horizontal = data.Horizontal,
+            Vertical = data.Vertical
+        });
+        // 实际项目用 ECB + 缓冲，避免每帧 CreateEntity
+    }
+}
+
+// 2) ECS 系统消费输入、做 Burst 模拟（略，见第 5-7 章）
+
+// 3) 托管桥接系统把结果回读，交 NGO 广播或更新 UI（见 10.3）
+</code></pre>
+
+        <div class="callout callout-warning">
+            上面骨架为突出流程做了简化，真实实现不要在 RPC 里每帧 CreateEntity，应通过单例实体 + DynamicBuffer 收集输入、ECB 在安全时机处理，沿用第七章的纪律。
+        </div>
+
+        <div class="exercise">
+            <h3>思考与练习</h3>
+            <ol>
+                <li>为你自己想做的游戏画一张架构图，明确标出哪些部分用 GameObject/NGO、哪些用 ECS、边界在哪。</li>
+                <li>解释 EntityId 与 Entity 的区别，以及为什么互操作层需要 64 位标识。</li>
+                <li>用 SystemBase 写一个桥接系统，把 ECS 里统计的击杀数同步到一个 MonoBehaviour UI。</li>
+                <li>用自己的话讲清 Ghost 快照预测模型与 NGO 的 NetworkVariable 模型在同步哲学上的差异。</li>
+            </ol>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>NGO 面向 GameObject、高层易上手；Netcode for Entities 面向 ECS、内建预测回滚、面向大规模高 tick。</li>
+                <li>NGO 3.x 底层依赖 Netcode for Entities，混合预制体融合层目前实验性，勿用于生产核心。</li>
+                <li>混合架构用托管 SystemBase 桥接，EntityId 处理 GameObject↔实体标识，重计算留在 Burst ISystem。</li>
+                <li>Netcode for Entities 的核心是 Ghost、快照、命令与客户端预测，需 ECS 基础牢固后再学。</li>
+                <li>按规模与工作流走决策树选型，网络与模拟通过数据解耦。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav">
+            <a href="09-网络变量与RPC.html">← 上一章：网络变量与 RPC</a>
+            <a href="11-迁移调试与性能.html">下一章：迁移、调试与性能 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

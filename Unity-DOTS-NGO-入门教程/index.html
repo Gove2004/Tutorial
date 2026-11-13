@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unity DOTS 与 Netcode for GameObjects 入门教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <main>
+        <h1>Unity DOTS 与 Netcode for GameObjects 入门教程</h1>
+        <p class="intro">写给已经熟悉 MonoBehaviour 与面向对象、但从未动手写过 ECS 的 Unity 开发者：从思维转换讲起，一路写到可运行的实体系统与多人联机代码。</p>
+
+        <div class="callout callout-info">
+            <strong>本教程的定位</strong>
+            <ul>
+                <li><strong>读者画像</strong>：你不是 Unity 新手，写过 MonoBehaviour、懂类与继承，但对 ECS 的认知停留在“听说很快”的层面。</li>
+                <li><strong>核心目标</strong>：完成从“对象 + 方法”到“数据 + 系统”的思维转换，并能独立写出可运行的 DOTS 代码与 NGO 联机代码。</li>
+                <li><strong>深度</strong>：系统掌握级。不只讲 API 怎么调，还讲为什么这样设计、什么时候不该用、生产环境怎么排查问题。</li>
+                <li><strong>视觉风格</strong>：技术蓝主题，C# 代码带语法高亮与一键复制。</li>
+            </ul>
+        </div>
+
+        <div class="version-info">
+            <strong>版本基准（2026 年 11 月核对）</strong>
+            <ul>
+                <li><strong>Unity 编辑器</strong>：Unity 6.4 及以上（示例按 6.7 文档核对）。从 Unity 6.4 起，Entities、Collections、Mathematics、Entities Graphics 转为随编辑器分发的<strong>核心包</strong>，包版本号跟随编辑器版本（如 Unity 6.6 对应 Entities 6.6.0），不再使用旧的 1.x 版本号。</li>
+                <li><strong>Entities API</strong>：基于 6.x 的 <code>ISystem</code>、<code>SystemAPI.Query</code>、<code>IJobEntity</code>、Baker 工作流。旧的 <code>Entities.ForEach</code>、Aspects 已在 6.5 移除，教程不会出现这些过时写法。</li>
+                <li><strong>Netcode for GameObjects</strong>：基于 3.x（3.0 于 2026 年 9 月发布，要求 Unity 6.7+）。运行时命名空间仍是 <code>Unity.Netcode</code>，RPC 采用统一的 <code>[Rpc(SendTo.*)]</code> 写法；2.x 的差异会在对应章节注明。</li>
+            </ul>
+        </div>
+
+        <h2>这份教程怎么学</h2>
+        <p>全程建议开一个空项目边读边敲。前七章解决 DOTS，第八、九章解决 NGO 网络，第十章把两条线合起来讲边界与选型，第十一章讲迁移与性能分析。章节之间有明确递进，不要跳过第二、三章直接写 Job——大多数 DOTS 的困惑都来自没建立“数据布局”的直觉。</p>
+
+        <div class="mermaid-wrapper">
+            <pre class="mermaid">
+flowchart LR
+    A[OOP 思维<br/>MonoBehaviour] --> B[第 1-2 章<br/>DOD 思维与 ECS 概念]
+    B --> C[第 3-4 章<br/>Baking 与第一个 System]
+    C --> D[第 5-7 章<br/>Jobs/Burst 与结构变更]
+    D --> E[第 8-9 章<br/>NGO 联机]
+    E --> F[第 10-11 章<br/>边界选型与迁移调试]
+            </pre>
+        </div>
+
+        <h2>课程目录</h2>
+
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-全景与思维转换.html">01　全景与思维转换：从 OOP 到 DOD</a></h3>
+                <p>DOTS 到底解决什么问题；缓存未命中、GC、单线程瓶颈三大痛点；DOTS 组成；为什么 NGO 不等于 DOTS 网络。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-ECS核心概念.html">02　ECS 核心概念：Entity、Component、System 与 Chunk</a></h3>
+                <p>实体为什么只是一个 ID；原型（Archetype）与内存块（Chunk）如何决定性能；World 与 EntityId；对照 MonoBehaviour 建立心智模型。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-作者工作流与Baking.html">03　作者工作流与 Baking：GameObject 如何变成实体</a></h3>
+                <p>子场景、Authoring 组件、Baker、TransformUsageFlags；包安装与项目设置；完整跑通一个 Cube 示例。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="04-编写第一个System.html">04　编写第一个 System：行为属于系统，不属于对象</a></h3>
+                <p>ISystem 与 SystemState、SystemAPI.Query、RefRO/RefRW、查询过滤、时间；把一个 MonoBehaviour 重构为 ECS。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-JobSystem与Burst.html">05　Job System 与 Burst：让数据跑满多核</a></h3>
+                <p>C# Job System、IJob 与 IJobEntity、调度方式、Burst 编译原理与限制、Job 安全系统与典型报错。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-数据组织与访问进阶.html">06　数据组织与访问进阶</a></h3>
+                <p>EntityQuery、ComponentLookup、DynamicBuffer、Tag、Enableable Component、BlobAsset、UnityObjectRef、实体预制体实例化。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="07-结构变更与系统调度.html">07　结构变更与系统调度</a></h3>
+                <p>EntityCommandBuffer 与 ECBSystem、并行写入、系统组与更新顺序、生成销毁实体的实战模式。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="08-NGO网络入门.html">08　Netcode for GameObjects 入门：拓扑、权威与 NetworkManager</a></h3>
+                <p>主机/服务器/客户端模型、权威服务器、NetworkManager、UnityTransport、NetworkObject、NetworkBehaviour 生命周期。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="09-网络变量与RPC.html">09　网络变量与 RPC：状态同步与消息传递</a></h3>
+                <p>NetworkVariable、NetworkList、统一 [Rpc] 写法、所有权、NetworkTransform、连接与场景管理。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="10-DOTS与网络的边界.html">10　DOTS 与网络的边界：NGO、Netcode for Entities 与混合工作流</a></h3>
+                <p>两套网络栈对比、NGO 3.x 与 Entities 的关系、GameObject 与实体互操作、Netcode for Entities 概念预览。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="11-迁移调试与性能.html">11　迁移、调试与性能：从 OOP 项目渐进落地</a></h3>
+                <p>Profiler 与 Burst 检查器、常见坑清单、渐进迁移策略、什么时候不该用 DOTS、综合练习与深入路径。</p>
+            </div>
+        </div>
+
+        <h2>官方与权威资源</h2>
+        <ul>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.entities@6.7/manual/" target="_blank">Entities 包官方手册（6.7）</a></li>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.burst@latest/" target="_blank">Burst 编译器官方文档</a></li>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.netcode.gameobjects@3.0/manual/" target="_blank">Netcode for GameObjects 官方手册（3.0）</a></li>
+            <li><a href="https://docs.unity3d.com/Packages/com.unity.netcode@latest/manual/" target="_blank">Netcode for Entities 官方手册</a></li>
+            <li><a href="https://learn.unity.com/tutorial/learn-entities-with-hellocube" target="_blank">Unity Learn：HelloCube 实体入门示例</a></li>
+        </ul>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

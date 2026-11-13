@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI4Animation 深度教程 - 数据驱动角色动画与神经运动控制</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<main>
+    <section class="hero">
+        <h1>AI4Animation 深度教程</h1>
+        <p>数据驱动角色动画与神经运动控制 —— 从 PFNN 到类别码本匹配，从 Unity 工程到 AI4AnimationPy</p>
+        <span class="pill">Sebastian Starke 团队</span>
+        <span class="pill">7 篇 SIGGRAPH 系论文</span>
+        <span class="pill">Unity / Python 双框架</span>
+    </section>
+
+    <p class="intro">
+        AI4Animation 是爱丁堡大学 Sebastian Starke 团队维护的开源研究框架，目标是为角色动画与控制提供一套覆盖
+        <strong>数据处理、神经网络训练、运行时控制</strong>的完整数据驱动管线，涉及双足/四足运动、角色-场景交互、
+        武术格斗、体育竞技以及 AR/VR 具身化身等任务。本教程以该仓库为中心，逐篇拆解其七项核心研究，并给出两套框架的
+        工程架构与实战路径。
+    </p>
+
+    <div class="callout callout-info">
+        <span class="callout-title">关于本教程</span>
+        <ul>
+            <li><strong>面向读者</strong>：从事角色动画生成、运动合成、具身智能方向的研究生与工程师；默认读者具备 Python 与深度学习基础</li>
+            <li><strong>学习深度</strong>：系统掌握级，含设计动机、公式推导、工程权衡、故障排查与研究选题线索</li>
+            <li><strong>视觉风格</strong>：tech 技术蓝，架构图全部使用 Mermaid 绘制，代码块支持一键复制</li>
+            <li><strong>使用方式</strong>：双击本文件即可在浏览器中离线学习，无需任何工具链</li>
+        </ul>
+    </div>
+
+    <h2>项目速览</h2>
+    <table>
+        <tr><th>维度</th><th>内容</th></tr>
+        <tr><td>仓库定位</td><td>Deep Learning for Character Control —— 数据驱动角色动画的综合研究框架</td></tr>
+        <tr><td>主仓库</td><td><a href="https://github.com/sebastianstarke/AI4Animation">github.com/sebastianstarke/AI4Animation</a>（Unity 版，C#）</td></tr>
+        <tr><td>Python 版</td><td><a href="https://github.com/sebastianstarke/AI4AnimationPy">AI4AnimationPy</a>（NumPy / PyTorch，2026 年发布）</td></tr>
+        <tr><td>研究跨度</td><td>2017 – 2026，七篇 SIGGRAPH / SIGGRAPH Asia 论文，其中 DeepPhase 获 SIGGRAPH 2022 最佳论文奖</td></tr>
+        <tr><td>许可</td><td>仅限研究与教育用途；动捕数据采用 CC BY-NC 4.0，禁止商用与再分发</td></tr>
+    </table>
+
+    <h2 class="part-title">第一篇 · 基础与全景</h2>
+    <div class="chapter-list">
+        <div class="chapter-item">
+            <span class="chapter-badge basic">基础</span>
+            <h3><a href="01-AI4Animation全景与技术定位.html">01　AI4Animation 全景与技术定位</a></h3>
+            <p>项目要解决什么问题、研究脉络时间线、两套框架的关系与选型、许可边界</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge basic">基础</span>
+            <h3><a href="02-问题定义与运动数据基础.html">02　问题定义与运动数据基础</a></h3>
+            <p>角色动画技术路线对比、数据驱动方法的形式化、骨骼层级、坐标系与动捕数据组织</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge basic">基础</span>
+            <h3><a href="03-数据管线与特征工程.html">03　数据管线与特征工程</a></h3>
+            <p>端到端管线、轨迹窗口与关节特征、相位与接触标签、归一化与镜像增强</p>
+        </div>
+    </div>
+
+    <h2 class="part-title">第二篇 · 七项核心研究逐层拆解</h2>
+    <div class="chapter-list">
+        <div class="chapter-item">
+            <span class="chapter-badge intermediate">进阶</span>
+            <h3><a href="04-PFNN相位函数神经网络.html">04　PFNN：相位函数神经网络（SIGGRAPH 2017）</a></h3>
+            <p>相位标注、Catmull-Rom 相位函数、四控制点权重、运行时轨迹混合</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge intermediate">进阶</span>
+            <h3><a href="05-MANN模式自适应神经网络.html">05　MANN：模式自适应神经网络（SIGGRAPH 2018）</a></h3>
+            <p>门控网络混合专家权重、四足步态建模、6D 旋转表示、专家不平衡问题</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge intermediate">进阶</span>
+            <h3><a href="06-NSM神经状态机.html">06　NSM：神经状态机（SIGGRAPH Asia 2019）</a></h3>
+            <p>多编码器结构、体积环境表示、Kronecker 门控、自我中心/目标中心双向推理</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge intermediate">进阶</span>
+            <h3><a href="07-局部运动相位.html">07　局部运动相位（SIGGRAPH 2020）</a></h3>
+            <p>接触信号处理、进化策略相位拟合、振幅调制、生成式控制模型</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge intermediate">进阶</span>
+            <h3><a href="08-神经动画分层.html">08　神经动画分层 NAL（SIGGRAPH 2021）</a></h3>
+            <p>运动流形生成器、控制模块解耦、覆盖/叠加/混合三种分层算子</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge advanced">高级</span>
+            <h3><a href="09-DeepPhase周期自编码器.html">09　DeepPhase：周期自编码器（SIGGRAPH 2022，最佳论文）</a></h3>
+            <p>时序卷积自编码器、FFT 层、周期参数化、无监督相位流形及其下游应用</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge advanced">高级</span>
+            <h3><a href="10-类别码本匹配.html">10　类别码本匹配（SIGGRAPH 2024）</a></h3>
+            <p>VQ 与 Gumbel-Softmax、双码本匹配损失、三点 VR 追踪、混合控制模式</p>
+        </div>
+    </div>
+
+    <h2 class="part-title">第三篇 · 工程架构与实战</h2>
+    <div class="chapter-list">
+        <div class="chapter-item">
+            <span class="chapter-badge advanced">高级</span>
+            <h3><a href="11-Unity框架架构与代码走读.html">11　Unity 框架架构与代码走读</a></h3>
+            <p>仓库目录、ECS 设计、C# 神经网络与训练器、Eigen 原生插件、运行时组件</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge advanced">高级</span>
+            <h3><a href="12-AI4AnimationPy框架详解.html">12　AI4AnimationPy 框架详解</a></h3>
+            <p>ECS 生命周期、双后端 Tensor、网络模型清单、三种执行模式与目录结构</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge advanced">高级</span>
+            <h3><a href="13-环境搭建与实战演练.html">13　环境搭建与实战演练</a></h3>
+            <p>Conda 环境、Demo 跑通、数据批量转换、训练流程、ONNX 导出与报错排查</p>
+        </div>
+        <div class="chapter-item">
+            <span class="chapter-badge advanced">高级</span>
+            <h3><a href="14-评估方法与研究前沿.html">14　评估方法与研究前沿</a></h3>
+            <p>定量评估指标、公开数据集、领域全景、开放问题与研究选题建议</p>
+        </div>
+    </div>
+
+    <h2>配套资源</h2>
+    <ul>
+        <li>主仓库：<a href="https://github.com/sebastianstarke/AI4Animation">AI4Animation（Unity）</a></li>
+        <li>Python 仓库：<a href="https://github.com/sebastianstarke/AI4AnimationPy">AI4AnimationPy</a> ｜ 官方文档：<a href="https://facebookresearch.github.io/ai4animationpy/">facebookresearch.github.io/ai4animationpy</a></li>
+        <li>作者主页：<a href="https://www.sebastian-starke.com/">sebastian-starke.com</a> ｜ <a href="https://paulxstarke.com/">paulxstarke.com</a></li>
+    </ul>
+
+    <div class="callout callout-warning">
+        <span class="callout-title">版权提示</span>
+        AI4Animation 仅授权研究与教育用途，动捕数据为 CC BY-NC 4.0。任何商用、再分发或论文中使用数据前，
+        都应回到原始仓库核对最新许可条款。
+    </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,14 @@
+:root {
+    --primary: #3b6ea5;
+    --primary-dark: #2d5683;
+    --accent: #6a93bb;
+    --bg-main: #ffffff;
+    --bg-aside: #eef0f3;
+    --text: #23272e;
+}
+
+body { background: var(--bg-aside); color: var(--text); }
+main { background: var(--bg-main); }
+h1 { color: var(--primary-dark); border-bottom-color: var(--primary); }
+h2 { color: #1c2530; }
+a { color: var(--primary-dark); }

@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>09 网络变量与 RPC - Unity DOTS 与 NGO 入门教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-NGO网络入门.html">← 上一章</a>
+        <a href="10-DOTS与网络的边界.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>09　网络变量与 RPC：状态同步与消息传递</h1>
+
+        <p>NGO 里跨端通信有两条主线，对应两种不同性质的信息：<strong>NetworkVariable 同步“持续状态”，RPC 传递“瞬时事件”</strong>。这一章把两者都写透，并给出一个完整的服务器权威玩家移动示例。</p>
+
+        <h2>9.1 NetworkVariable：自动同步的状态</h2>
+
+        <p><code>NetworkVariable&lt;T&gt;</code> 是一个包裹值的网络字段，服务器对它的修改会自动同步给所有客户端，你不需要手动收发消息。泛型 T 必须是值类型或实现 <code>INetworkSerializable</code>。</p>
+
+<pre><code class="language-csharp">using Unity.Netcode;
+using UnityEngine;
+
+public class PlayerState : NetworkBehaviour
+{
+    // 声明并给初始值
+    private readonly NetworkVariable&lt;int&gt; score =
+        new NetworkVariable&lt;int&gt;(0);
+
+    private readonly NetworkVariable&lt;float&gt; health =
+        new NetworkVariable&lt;float&gt;(100f);
+
+    public override void OnNetworkSpawn()
+    {
+        // 订阅值变化，参数为旧值与新值
+        score.OnValueChanged += OnScoreChanged;
+        health.OnValueChanged += OnHealthChanged;
+
+        // 新加入客户端先读取当前值
+        if (IsClient)
+        {
+            OnScoreChanged(0, score.Value);
+        }
+    }
+
+    private void OnScoreChanged(int previous, int current)
+    {
+        Debug.Log($"分数变化：{previous} → {current}");
+    }
+
+    private void OnHealthChanged(float previous, float current)
+    {
+        Debug.Log($"血量变化：{previous} → {current}");
+    }
+
+    public void AddScore(int amount)
+    {
+        // 只有服务器能写，客户端写会被拒绝
+        if (!IsServer) return;
+        score.Value += amount;
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        score.OnValueChanged -= OnScoreChanged;
+        health.OnValueChanged -= OnHealthChanged;
+    }
+}
+</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>读写权限要记牢</strong>：默认服务器权威配置下，<strong>只有服务器能修改 NetworkVariable.Value</strong>，客户端只读。客户端想改变状态，要通过 RPC 请求服务器，由服务器决定是否写入。订阅/退订放在 OnNetworkSpawn/OnNetworkDespawn，避免泄漏回调。
+        </div>
+
+        <h2>9.2 NetworkList：同步的集合</h2>
+
+        <p>需要同步一组数据时用 <code>NetworkList&lt;T&gt;</code>，用法类似 List，带列表变化回调：</p>
+
+<pre><code class="language-csharp">using Unity.Netcode;
+
+public struct InventoryItem : System.IEquatable&lt;InventoryItem&gt;
+{
+    public int ItemId;
+    public int Count;
+
+    public bool Equals(InventoryItem other)
+        =&gt; ItemId == other.ItemId &amp;&amp; Count == other.Count;
+}
+
+public class Inventory : NetworkBehaviour
+{
+    private readonly NetworkList&lt;InventoryItem&gt; items =
+        new NetworkList&lt;InventoryItem&gt;();
+
+    public override void OnNetworkSpawn()
+    {
+        items.OnListChanged += OnItemsChanged;
+    }
+
+    private void OnItemsChanged(NetworkListEvent&lt;InventoryItem&gt; change)
+    {
+        // change.Type 区分添加/删除/修改/清空
+        Debug.Log($"列表变更：{change.Type}");
+    }
+
+    public void AddItemServer(int itemId)
+    {
+        if (!IsServer) return;
+        items.Add(new InventoryItem { ItemId = itemId, Count = 1 });
+    }
+
+    public override void OnNetworkDespawn()
+        =&gt; items.OnListChanged -= OnItemsChanged;
+}
+</code></pre>
+
+        <p>NGO 还提供 NetworkDictionary、NetworkHashSet 等同步集合，按数据形态选择，同样由服务器写入。</p>
+
+        <h2>9.3 RPC：传递瞬时事件</h2>
+
+        <p>状态适合 NetworkVariable，但“开了一枪”“按下按钮”“播放音效”这类一次性事件不适合用持续字段表达，用 RPC。NGO 3.x 采用统一的 <code>[Rpc(SendTo.*)]</code> 特性，方法名必须以 <code>Rpc</code> 结尾。</p>
+
+<pre><code class="language-csharp">using Unity.Netcode;
+using UnityEngine;
+
+public class Combat : NetworkBehaviour
+{
+    // 客户端 → 服务器：请求开火
+    [Rpc(SendTo.Server)]
+    public void FireRpc(Vector3 origin, Vector3 direction)
+    {
+        // 这段逻辑在服务器执行：校验、计算命中
+        if (!IsServer) return;
+
+        bool hit = Physics.Raycast(origin, direction, out var hitInfo);
+        if (hit)
+        {
+            // 服务器 → 所有客户端：播放命中特效
+            PlayHitEffectRpc(hitInfo.point);
+        }
+    }
+
+    // 服务器 → 所有非服务器端（客户端）
+    [Rpc(SendTo.NotServer)]
+    private void PlayHitEffectRpc(Vector3 position)
+    {
+        // 各客户端播放本地特效、音效
+        Debug.Log($"在 {position} 播放命中特效");
+    }
+
+    void Update()
+    {
+        // 只有拥有者响应自己的开火输入
+        if (!IsOwner || !Input.GetMouseButtonDown(0)) return;
+
+        var origin = transform.position;
+        var direction = transform.forward;
+        FireRpc(origin, direction);
+    }
+}
+</code></pre>
+
+        <h3>SendTo 常用目标</h3>
+        <table>
+            <thead>
+                <tr><th>目标</th><th>含义</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>SendTo.Server</code></td><td>发往服务器，替代旧 ServerRpc</td></tr>
+                <tr><td><code>SendTo.NotServer</code></td><td>发往所有客户端，替代旧 ClientRpc</td></tr>
+                <tr><td><code>SendTo.Everyone</code></td><td>含服务器在内的所有端</td></tr>
+                <tr><td><code>SendTo.Owner</code> / <code>NotOwner</code></td><td>对象拥有者 / 除拥有者外</td></tr>
+                <tr><td><code>SendTo.Me</code> / <code>NotMe</code></td><td>本机 / 除本机外</td></tr>
+            </tbody>
+        </table>
+
+        <h3>调用权限 InvokePermission</h3>
+        <p>控制谁有权调用这个 RPC，防止客户端越权：</p>
+
+<pre><code class="language-csharp">// 只有对象拥有者能调用，服务器端执行
+[Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
+private void SubmitInputRpc(InputData input) { /* ... */ }
+
+// 任何连接的客户端都可调用
+[Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+private void RequestJoinRpc() { /* ... */ }
+</code></pre>
+
+        <div class="callout callout-info">
+            <strong>与 2.x/旧写法的对照</strong>：旧的 <code>[ServerRpc]</code>、<code>[ClientRpc]</code> 在 2.x 仍可用，但 3.x 中带 <code>RequireOwnership</code> 的旧写法会编译错误，需按上面的 <code>InvokePermission</code> 改写。新代码直接统一用 <code>[Rpc(SendTo.*)]</code>。
+        </div>
+
+        <h2>9.4 完整示例：服务器权威的玩家移动</h2>
+
+        <p>把输入、RPC、状态串起来。先定义可序列化的输入结构：</p>
+
+<pre><code class="language-csharp">using Unity.Netcode;
+
+public struct InputData : INetworkSerializable
+{
+    public float Horizontal;
+    public float Vertical;
+
+    public void NetworkSerialize&lt;T&gt;(BufferSerializer&lt;T&gt; serializer)
+        where T : IReaderWriter
+    {
+        serializer.SerializeValue(ref Horizontal);
+        serializer.SerializeValue(ref Vertical);
+    }
+}
+</code></pre>
+
+<pre><code class="language-csharp">using Unity.Netcode;
+using Unity.Netcode.Components;
+using UnityEngine;
+
+[RequireComponent(typeof(CharacterController))]
+public class PlayerMovement : NetworkBehaviour
+{
+    [SerializeField] private float moveSpeed = 5f;
+    private CharacterController controller;
+
+    void Awake() =&gt; controller = GetComponent&lt;CharacterController&gt;();
+
+    void Update()
+    {
+        // 拥有者采集输入并上报服务器
+        if (!IsOwner) return;
+
+        var input = new InputData
+        {
+            Horizontal = Input.GetAxis("Horizontal"),
+            Vertical = Input.GetAxis("Vertical")
+        };
+        MoveRpc(input);
+    }
+
+    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
+    private void MoveRpc(InputData input)
+    {
+        // 服务器权威：在服务器上计算位移
+        var move = new Vector3(input.Horizontal, 0f, input.Vertical);
+        move = Vector3.ClampMagnitude(move, 1f) * (moveSpeed * Time.deltaTime);
+        controller.Move(move);
+        // 位置由 NetworkTransform 同步回各客户端
+    }
+}
+</code></pre>
+
+        <h2>9.5 NetworkTransform：位置同步组件</h2>
+
+        <p>移动逻辑在服务器跑完后，位置怎么回到客户端？在预制体上加 <code>NetworkTransform</code> 组件，它自动同步位置、旋转、缩放，并内置插值让画面平滑。</p>
+        <ul>
+            <li>可配置同步哪些轴、发送阈值、是否使用半浮点精度；</li>
+            <li>3.x 半浮点精度提升到约 1 毫米分辨率且不增加带宽，插值改为与帧率无关，不同帧率下表现一致；</li>
+            <li>权威端移动，客户端通过插值呈现，不要在客户端直接强行改位置。</li>
+        </ul>
+
+        <div class="sidebar-note">
+            <strong>NetworkTransform 与自己写 RPC 同步的取舍</strong>：常规移动直接用 NetworkTransform，省事且经过优化；只有需要特殊压缩、复杂物理或自定义同步节奏时才手写。不要重复造轮子。
+        </div>
+
+        <h2>9.6 对象的生成与销毁</h2>
+
+        <p>运行时创建网络对象必须由服务器发起，且预制体已注册到 NetworkPrefabs：</p>
+
+<pre><code class="language-csharp">// 服务器生成
+var instance = Instantiate(prefab, position, rotation);
+instance.GetComponent&lt;NetworkObject&gt;().Spawn();
+
+// 带所有权生成（指定归属客户端）
+instance.GetComponent&lt;NetworkObject&gt;()
+    .SpawnWithOwnership(clientId);
+
+// 服务器销毁，客户端自动同步消失
+networkObject.Despawn();
+</code></pre>
+
+        <p>客户端私自 Instantiate 只会在本地出现、不会同步。记住“谁生成、谁销毁、谁负责”的服务器原则。</p>
+
+        <h2>9.7 场景同步</h2>
+
+        <p>服务器调用场景切换，NGO 自动让所有客户端加载同一场景：</p>
+
+<pre><code class="language-csharp">NetworkManager.Singleton.SceneManager.LoadScene(
+    "GameScene", UnityEngine.SceneManagement.LoadSceneMode.Single);
+</code></pre>
+
+        <p>需要在 NetworkManager 里启用场景管理，并处理加载期间的客户端就绪回调。</p>
+
+        <h2>9.8 决策：什么时候用 Variable，什么时候用 RPC</h2>
+
+        <table>
+            <thead>
+                <tr><th>信息性质</th><th>工具</th><th>例子</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>持续存在、需要晚加入者也能拿到当前值</td><td>NetworkVariable / NetworkList</td><td>血量、分数、库存、状态</td></tr>
+                <tr><td>瞬时发生、不需要保留历史</td><td>RPC</td><td>开火、按键、特效、音效、请求</td></tr>
+                <tr><td>位置/旋转等变换</td><td>NetworkTransform</td><td>角色移动、载具</td></tr>
+            </tbody>
+        </table>
+
+        <div class="exercise">
+            <h3>思考与练习</h3>
+            <ol>
+                <li>实现一个可拾取道具：玩家靠近时通过 RPC 请求，服务器校验距离后写入玩家 NetworkList 并 Despawn 道具。</li>
+                <li>给 9.4 的移动加上跳跃，用 NetworkVariable 同步一个简单的“是否着地”状态，体会状态与事件的分工。</li>
+                <li>故意在客户端直接写 NetworkVariable.Value，观察运行时行为，再改写成正确的 RPC 请求流程。</li>
+                <li>用 RpcTarget 相关 API 实现“服务器只给发起者回一条消息”，而不是广播给所有人。</li>
+            </ol>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>NetworkVariable/NetworkList 自动同步持续状态，默认仅服务器可写，用 OnValueChanged/OnListChanged 响应。</li>
+                <li>统一 [Rpc(SendTo.*)] 传递瞬时事件，InvokePermission 控制调用权限，方法名必须以 Rpc 结尾。</li>
+                <li>标准移动模式：拥有者上报输入 → 服务器权威计算 → NetworkTransform 同步回客户端并插值。</li>
+                <li>网络对象由服务器 Spawn/Despawn，预制体需注册；场景切换由服务器 SceneManager 统一驱动。</li>
+                <li>按“持续状态 vs 瞬时事件”选择同步工具，不要混用。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav">
+            <a href="08-NGO网络入门.html">← 上一章：NGO 网络入门</a>
+            <a href="10-DOTS与网络的边界.html">下一章：DOTS 与网络的边界 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

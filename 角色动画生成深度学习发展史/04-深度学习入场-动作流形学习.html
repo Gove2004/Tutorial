@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 - 深度学习入场：动作流形学习 - 角色动画生成的深度学习发展史</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-传统方法-运动图与运动匹配.html">← 上一章</a>
+        <a href="05-实时控制-相位函数网络.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>深度学习入场：动作流形学习</h1>
+
+        <p>这一章是整个深度学习路线的"原点"。2015-2016 年，<strong>Daniel Holden</strong> 用自编码器证明了一件事：动作可以被压缩进一个低维连续空间，并且在这个空间里做插值、编辑、重建——从此"合成新动作"从"搜索拼接"变成了"流形上取点"。</p>
+
+        <h2>4.1 核心思想：动作流形（Motion Manifold）</h2>
+
+        <div class="definition">
+            <h4>动作流形</h4>
+            <p>假设所有"合理的动作"（自然、符合人体运动规律的动作）并不是充满整个高维空间，而是分布在某个<strong>低维的、连续的</strong>子空间里，这个子空间就叫动作流形。流形上的每一个点，都对应一个合理的姿态。</p>
+        </div>
+
+        <p>用大白话说：</p>
+        <ul>
+            <li>一个动作有几十个关节 × 多个旋转分量 = 几十上百维</li>
+            <li>但"合理的姿态"远没有那么多——人类关节是连锁的，手臂抬高肘部必然弯曲，骨盆前倾膝盖必然微屈</li>
+            <li>所以高维空间里 99.99% 的区域是"畸形姿态"，真正合理的姿态集中在少数几个低维"曲面"上</li>
+        </ul>
+
+        <div class="sidebar-note">
+            <strong>类比</strong>：把动作想象成人的脸。人脸照片是高维像素，但"看起来像人"的脸只占像素空间的一小片区域——这个区域就是"人脸流形"。GAN 生成人脸就是在人脸流形上采样。动作流形完全同理。
+        </div>
+
+        <h2>4.2 里程碑论文：Holden 2016</h2>
+
+        <div class="definition">
+            <h4>Holden, Saito, Komura. "A Deep Learning Framework for Character Motion Synthesis and Editing." SIGGRAPH 2016</h4>
+            <p>用<strong>卷积自编码器（Convolutional Autoencoder）</strong>把动作压缩成潜在向量（latent vector），在潜在空间做插值/编辑，再解码回动作序列。网络逐帧处理动作，把"一帧姿态"压成几百维的向量。</p>
+        </div>
+
+        <h3>方法拆解</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>编码（Encoder）</h4>
+                    <p>输入一帧姿态（用指数映射表示关节旋转 + 根节点信息），经过多层卷积/全连接，压成一个低维向量 z。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>潜在空间操作</h4>
+                    <p>在 z 空间做算术：插值（两个姿态之间）、编辑（加一个方向向量）、风格迁移……</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>解码（Decoder）</h4>
+                    <p>把操作后的 z 解码回完整姿态。</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>它证明了什么（划重点）</h3>
+        <table>
+            <thead>
+                <tr><th>结论</th><th>为什么重要</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>动作可以被压缩</strong></td>
+                    <td>几十上百维的姿态可以压到几十维，信息损失可接受</td>
+                </tr>
+                <tr>
+                    <td><strong>潜在空间是连续的</strong></td>
+                    <td>两个合理动作的插值，解码出来还是合理动作——这就是"流形"的实证</td>
+                </tr>
+                <tr>
+                    <td><strong>编辑 = 向量运算</strong></td>
+                    <td>在潜在空间做加减，就能实现"把走路的摆臂幅度加大"这类编辑，不用动原数据</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>一句话总结它的地位</strong>：Holden 2016 是整个"深度学习做动作"的基石。后面 PFNN、Local Motion Phases、扩散模型生成动作，本质上都在做同一件事——<strong>在动作流形上建模和采样</strong>。你先把"流形"这个概念吃透，后面所有章节都是它的变体。
+        </div>
+
+        <h2>4.3 关键细节：动作怎么喂给网络</h2>
+
+        <p>上一章提过"动作表示"问题，这里看 Holden 2016 的具体选择，这是工程上最值得抄的作业：</p>
+
+        <table>
+            <thead>
+                <tr><th>选择</th><th>做法</th><th>理由</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>关节旋转表示</strong></td>
+                    <td>指数映射（exponential map）</td>
+                    <td>3 维无约束、无万向锁，比欧拉角/四元数更适合网络回归</td>
+                </tr>
+                <tr>
+                    <td><strong>局部坐标</strong></td>
+                    <td>把姿态转成以根节点为原点的局部坐标</td>
+                    <td>消除全局位置/朝向的冗余，网络不用学"角色站在哪"</td>
+                </tr>
+                <tr>
+                    <td><strong>输入结构</strong></td>
+                    <td>把一帧所有关节拼接成一个向量，过全连接/1D 卷积</td>
+                    <td>简单直接，把姿态当成一个"高维点"处理</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>一个经典坑</strong>：直接回归欧拉角是动作生成里的"新手必踩"——网络会把三个角度当独立变量学，结果产生万向锁附近的诡异旋转。Holden 用指数映射绕开了这个坑。<strong>做动作方向的项目，第一件事就是选对旋转表示</strong>。
+        </div>
+
+        <h2>4.4 它解决了什么，留下了什么</h2>
+
+        <h3>解决的</h3>
+        <ul>
+            <li>✅ 覆盖度：潜在空间是连续的，两个动作之间可以生成"没见过的"过渡动作</li>
+            <li>✅ 可编辑性：编辑从"改数据"变成"改向量"，好做且可微</li>
+            <li>✅ 内存：模型参数固定，不随动作库线性增长</li>
+        </ul>
+
+        <h3>没解决的（下一章的动机）</h3>
+        <ul>
+            <li>❌ <strong>实时控制</strong>：自编码器做的是"编辑/插值"，不能直接响应"玩家摇杆往左推 30°"这种实时控制信号</li>
+            <li>❌ <strong>时序建模</strong>：逐帧处理丢掉了动作的时序结构——走路不是一堆独立姿态，而是有节奏的序列</li>
+            <li>❌ <strong>训练数据要求</strong>：需要大量干净动捕数据，数据质量直接决定流形质量</li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>衔接预告</strong>：下一章 PFNN 要解决的就是"实时控制 + 时序节奏"——它引入了一个很聪明的概念：<strong>相位（Phase）</strong>，把"走路到哪一步"这个时序状态变成网络的输入。这是从"编辑器"到"实时控制器"的关键一跃，也是你老师推荐的 AI4Animation 系列的核心。
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>动作流形 = 合理动作所在的低维连续子空间；深度学习路线的一切都建立在这个假设上</li>
+            <li>Holden 2016 = 用卷积自编码器实证了流形存在，并展示了插值/编辑能力</li>
+            <li>工程要点：旋转表示选指数映射（或后来的 6D 旋转），输入用局部坐标</li>
+            <li>遗留问题：实时控制、时序结构、数据依赖</li>
+        </ul>
+
+        <h2>思考题</h2>
+        <ol>
+            <li>为什么"两个合理动作在潜在空间的插值，解码出来依然是合理动作"能证明流形是连续的？如果插值结果畸形，说明什么？</li>
+            <li>Holden 2016 用指数映射而不是四元数，请从"网络输出约束"的角度解释原因。</li>
+            <li>如果让你用自编码器做一个"动作去噪"工具（动捕数据有抖动），你会怎么设计输入输出？</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="03-传统方法-运动图与运动匹配.html">← 上一章：运动图与运动匹配</a>
+            <a href="05-实时控制-相位函数网络.html">下一章：实时控制 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

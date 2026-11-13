@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>12 - AI 赛道、首届总决赛与 8 周备赛路线</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="11-2025-final-security.html">← 上一章</a>
+    <a href="index.html">下一章 →</a>
+</nav>
+
+<main>
+    <h1>AI 赛道、首届总决赛与 8 周备赛路线</h1>
+
+    <p>
+        这一章处理两件「信息不全」的事：第二届总决赛的 AI 日到底考什么，以及首届总决赛的题为什么完全查不到。
+        最后给一份可以照着执行的 8 周备赛清单。
+    </p>
+
+    <h2>AI 日：模型轻量化挑战</h2>
+
+    <div class="definition">
+        <h4>已能确认的信息（B/C 级混合）</h4>
+        <ul style="margin:0.4em 0 0">
+            <li>第二届总决赛设 AI 赛道，方向包含「模型轻量化挑战」，涉及 ViT 量化、医学图像分类等任务；</li>
+            <li>赛道还包含「AI 与游戏交互」「大模型与 Vibe Coding」等方向（来自赛后媒体报道）；</li>
+            <li>具体题面、数据、评分脚本<strong>没有公开版本</strong>。</li>
+        </ul>
+    </div>
+
+    <p>
+        虽然题面未知，但「模型轻量化」这个方向的可考内容是收敛的，无外乎下面几类：
+    </p>
+
+    <table>
+        <thead><tr><th>任务</th><th>典型做法</th><th>评测指标</th></tr></thead>
+        <tbody>
+            <tr><td>训练后量化（PTQ）</td><td>把 FP32 权重/激活量化到 INT8，校准 min/max 或 percentile</td><td>精度下降幅度、模型体积、推理延迟</td></tr>
+            <tr><td>量化感知训练（QAT）</td><td>插入伪量化节点，微调若干 epoch</td><td>精度、训练耗时</td></tr>
+            <tr><td>结构化剪枝</td><td>按通道/注意力头的重要性剪枝，再微调</td><td>FLOPs、精度</td></tr>
+            <tr><td>知识蒸馏</td><td>用大模型软标签训练小模型</td><td>小模型精度</td></tr>
+            <tr><td>推理加速</td><td>算子融合、KV Cache、批处理</td><td>吞吐、显存</td></tr>
+        </tbody>
+    </table>
+
+    <div class="callout callout-warning">
+        <strong>AI 赛道和算法赛道的评分逻辑不一样</strong>
+        <p style="margin:0.5em 0 0">
+            算法题是「对/错」，AI 题通常是「精度 × 体积/延迟」的加权。也就是说，
+            <strong>把模型压到很小但精度崩掉，分数可能不如「压得适中、精度保住」</strong>。
+            这和 T5 工程题是同一套思路：先看指标怎么加权，再决定往哪个方向优化。
+        </p>
+    </div>
+
+    <p>如果你要准备这个方向，最低成本的练手路径是：</p>
+
+    <ol>
+        <li>用 torchvision 的 ViT/ResNet 在一个小数据集（CIFAR-10 或医学影像小样本）上跑通训练；</li>
+        <li>做一次 PTQ（<code>torch.quantization</code> 或 <code>torch.ao.quantization</code>），记录精度与体积变化；</li>
+        <li>做一次通道剪枝（按 L1 范数排序），再微调 3–5 个 epoch；</li>
+        <li>把「精度 / 体积 / 延迟」三个指标做成一张表，观察取舍曲线。</li>
+    </ol>
+
+    <h2>首届总决赛：题面为什么查不到</h2>
+
+    <div class="callout callout-danger">
+        <strong>公开信息只有赛制，没有题目</strong>
+        <p style="margin:0.5em 0 0">
+            首届总决赛（2025-04-18 ~ 04-19，宁波海曙）公开的信息是：16 小时、6–7 题、两个赛道
+            （人工智能 / 区块链安全）、技术答辩、500 名选手、企业真实场景命题（腾讯、百度、阿里云、蚂蚁、滴滴、民生银行等）。
+            <strong>没有一道题的完整题面被公开</strong>。
+        </p>
+        <p style="margin:0.5em 0 0">
+            网上任何标注「首届总决赛真题」的内容，如果没有样例和数据范围，都不能当作原题使用。
+        </p>
+    </div>
+
+    <p>能确认的还有这些：</p>
+
+    <ul>
+        <li>奖项规模：AI 赛道一等奖 5 人、二等奖 14 人、三等奖 30 人；安全赛道一等奖 5 人、二等奖 16 人、三等奖 29 人。</li>
+        <li>双赛道一等奖获得者是浙江大学的陈君林、吕耀维；清华大学蒙瑞俊参赛（另有报道写作「蒙瑞杰」，名字不一致，不作定论）。</li>
+        <li>赛事配套 CCF 算法大会、企业内推、暑期训练营（50 人）。</li>
+    </ul>
+
+    <p>
+        从「16 小时 6–7 题 + 企业命题 + 技术答辩」这个结构看，首届总决赛更接近「项目实战 + 答辩」，
+        而不是纯 OJ。第二届把它拆成「算法日 + 安全日 + AI 日」，其实是在把这种模糊结构标准化——
+        这也是为什么第二届的题面信息反而更多。
+    </p>
+
+    <h2>第二届新增的两个方向</h2>
+
+    <p>媒体报道提到「AI 与游戏交互」「大模型与 Vibe Coding」。这两个词的信息量很低，但可以合理推断考察点：</p>
+
+    <table>
+        <thead><tr><th>方向</th><th>可能考什么</th><th>可以怎么准备</th></tr></thead>
+        <tbody>
+            <tr>
+                <td>AI 与游戏交互</td>
+                <td>用模型驱动 NPC 行为、对话生成、状态机与模型结合</td>
+                <td>做一个「状态机 + LLM 决策」的小 demo，重点在可控性与延迟</td>
+            </tr>
+            <tr>
+                <td>大模型与 Vibe Coding</td>
+                <td>用自然语言驱动代码生成/修改，考察工程判断与验证</td>
+                <td>练「让模型改代码 + 自己写测试验证」的闭环，不要盲信生成结果</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p class="sidebar-note">
+        这两项是推断，不是官方题面。写在这里是为了让你知道「如果考到，大概长什么样」，而不是让你押题。
+    </p>
+
+        <h2>8 周备赛清单</h2>
+
+    <p>
+        按区域赛的题面结构倒推。每周约 10–12 小时，重点是「每种能力都练到能上手」，而不是刷题量。
+        每周最后一栏是验收标准——做不到就别进下一周。
+    </p>
+
+    <div class="steps">
+        <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+                <h4>第 1 周：基础模型（签到题 + 前缀和）</h4>
+                <p>
+                    练模拟、排序、二分、前缀和/差分、双指针。把第一届 T2（宝藏探险）和第二届 T2（魔法森林）各手写两遍，
+                    不看解析。
+                </p>
+                <p><strong>验收：</strong>20 分钟内独立写出「前后缀极值」版本，且能解释哨兵值为什么不能设为 0。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+                <h4>第 2 周：DP</h4>
+                <p>
+                    线性 DP、网格 DP、背包、区间 DP。重点练「起点/终点显式初始化」和「遍历顺序由依赖决定」。
+                    用第二届 T2 的 LCG 生成器自己造数据，验证滚动数组版本。
+                </p>
+                <p><strong>验收：</strong>能写出网格 DP 的滚动数组版本，并解释更新前/更新后 <code>dp[j]</code> 各代表什么。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+                <h4>第 3 周：数据结构（模板 + 观察）</h4>
+                <p>
+                    树状数组、线段树（区间加/区间和、区间赋值/最大子段和）、分块。这一周的核心不是背模板，
+                    是练「模板上加一个限制，信息怎么合并」——第一届 T3 和第九章训练题 A 都是这个模式。
+                </p>
+                <p><strong>验收：</strong>不看代码写出「区间赋值 + 最大子段和」，并说明负值时 <code>best</code> 为什么只能取单元素。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">4</span>
+            <div class="step-content">
+                <h4>第 4 周：树与图</h4>
+                <p>
+                    DFS 序（子树转区间）、LCA、并查集、拓扑排序、树上差分、启发式合并。
+                    练到「看到子树问题能立刻想到 Euler 序」。
+                </p>
+                <p><strong>验收：</strong>能口述总决赛 C 题的 50 分 bitset 做法，并说出满分方向的两种可能。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">5</span>
+            <div class="step-content">
+                <h4>第 5 周：搜索与贪心</h4>
+                <p>
+                    剪枝、折半搜索、状压 DP、贪心 + 交换论证。重点是「先写暴力，再想剪枝」，而不是一上来就想最优。
+                </p>
+                <p><strong>验收：</strong>n ≤ 40 的子集和问题，20 分钟内写出折半搜索并通过 1000 组随机对拍。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">6</span>
+            <div class="step-content">
+                <h4>第 6 周：对拍与读题</h4>
+                <p>
+                    这一周不学新算法。每天挑一道陌生题，只做三件事：读题并写下「输入/输出/边界」、写暴力、
+                    写正解并对拍。练的是「不读错题」和「写挂能查出来」。
+                </p>
+                <p><strong>验收：</strong>连续 5 天，每天的对拍都能在 30 分钟内定位到差异用例。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">7</span>
+            <div class="step-content">
+                <h4>第 7 周：工程题</h4>
+                <p>
+                    完整做一遍虚拟机装箱：first-fit → best-fit → 多策略选优，记录 20 组数据的主机数。
+                    如果你走 AI 方向，改做一次 PTQ + 剪枝，记录精度/体积/延迟。
+                </p>
+                <p><strong>验收：</strong>有一份「基线与改进」的对比表，能说出每个改动带来的具体收益。</p>
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">8</span>
+            <div class="step-content">
+                <h4>第 8 周：全真模拟</h4>
+                <p>
+                    按 8 小时、5 题（4 算法 + 1 工程）做一次完整模拟，严格按「3 小时算法 + 5 小时工程」分配。
+                    结束后只做一件事：复盘时间花在哪、哪道题本该拿更多部分分。
+                </p>
+                <p><strong>验收：</strong>能写出「如果重来一次，时间怎么分配」的具体调整，而不是「下次更努力」。</p>
+            </div>
+        </div>
+    </div>
+
+    <h2>资源与入口</h2>
+
+    <table>
+        <thead><tr><th>用途</th><th>地址</th></tr></thead>
+        <tbody>
+            <tr><td>CACC 官网</td><td><a href="https://cacc.ccf.org.cn" target="_blank">cacc.ccf.org.cn</a>（赛制、报名、通知）</td></tr>
+            <tr><td>已公开原题</td><td>17noi 题库：#1717、#1718、#1719、#1720</td></tr>
+            <tr><td>第一届区域赛回忆版题解</td><td>CSDN「仲舟」的赛后文章</td></tr>
+            <tr><td>第二届总决赛全题面</td><td>博客园「我就是蓬蒿人」的《CACC 2025 Final》</td></tr>
+            <tr><td>选手游记与踩坑</td><td>silent-sure 的《my trips to 1st CACC》</td></tr>
+            <tr><td>赛制口径</td><td>各高校转发的 CCF 报名通知（如西北农林科技大学）</td></tr>
+        </tbody>
+    </table>
+
+    <div class="callout callout-info">
+        <strong>关于「刷题量」</strong>
+        <p style="margin:0.5em 0 0">
+            这套清单刻意没有给「刷 200 题」这类指标。区域赛 4 道算法题的题型分布很集中，
+            把每类练到「能独立写出 + 能对拍」比刷量有效。真正的分差来自第 5 题工程题和 T3/T4 的部分分策略。
+        </p>
+    </div>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>AI 赛道考「指标加权下的取舍」：精度、体积、延迟，三者不能同时最优。</li>
+        <li>首届总决赛题面完全未公开，只有赛制信息；不要相信任何没有样例的「真题」。</li>
+        <li>第二届新增的游戏交互、Vibe Coding 方向信息有限，准备重点是「可控性 + 验证闭环」。</li>
+        <li>8 周清单的核心是「每周一个可验收的能力」，而不是刷题数量。</li>
+    </ul>
+
+    <div class="callout callout-tip">
+        <strong>全教程到此结束</strong>
+        <p style="margin:0.5em 0 0">
+            回到目录，按「赛制 → 真题 → 缺口说明 → 总决赛 → 备赛」的顺序复习一遍。
+            如果你只想要一份最短路径：第 1、3、7 章 + 第 8 章的 LCG + 第 10 章的 A/B，
+            这五处覆盖了区域赛 4 题里最常见的模型。
+        </p>
+    </div>
+
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav bottom">
+        <a href="11-2025-final-security.html">← 上一章：安全赛道 Q1–Q5</a>
+        <a href="index.html">返回目录</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

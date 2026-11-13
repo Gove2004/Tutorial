@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>寻路优化 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="07-动态自适应与特效分级.html">← 上一章</a>
+        <a href="09-距离场碰撞优化.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>寻路优化</h1>
+        <p class="chapter-meta">模块二 · 优化策略实战 ｜ 对应原文策略 5</p>
+
+        <p>寻路是游戏逻辑里少有的“可能在一次调用内展开成百上千节点”的计算，小兵、怪物、玩家点击移动都依赖它。当几十个单位在同一帧发起寻路，CPU 会出现明显尖峰。本章先理解 A* 的成本结构，再讲原文给出的四个优化方向。</p>
+
+        <h2>8.1 A* 的成本从哪来</h2>
+
+        <p>A* 在网格上维护开放列表（待探索）与关闭列表（已探索），每个节点用 <code>f = g + h</code> 排序，g 是起点到该节点的实际代价，h 是到终点的启发式估计。它的开销主要有三块：</p>
+        <ul>
+            <li><strong>节点扩展数量</strong>：搜索区域越大、障碍越复杂，遍历的节点越多，开放列表的插入/排序越频繁。</li>
+            <li><strong>列表数据结构开销</strong>：朴素列表每次取最小 f 都要线性扫描，应使用最小堆。</li>
+            <li><strong>路径后处理</strong>：网格上的原始路径常带锯齿，需要平滑、漏斗算法（funnel）再处理。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>网格寻路的对称性问题</strong>：在开阔网格上，从 A 到 B 存在大量长度完全相同、只是绕行顺序不同的等价路径，A* 会把它们都探索一遍。这是后面跳点寻路（JPS）要消除的核心浪费。
+        </div>
+
+        <h2>8.2 方向一：路径权重优化</h2>
+
+        <p>通过调整节点代价权重，让寻路结果更合理、更平滑：</p>
+        <ul>
+            <li>为不同地形设置不同通过代价（沼泽、道路），引导单位选择更高效路线。</li>
+            <li>加入转弯惩罚、贴墙惩罚，减少原地折返和沿障碍物边缘的锯齿路径。</li>
+            <li>权重需要结合实际玩法调校，权重失真会让单位“舍近求远”。</li>
+        </ul>
+
+        <h2>8.3 方向二：区域分块（分层寻路）</h2>
+
+        <p>把整个寻路空间划分为若干区域，<strong>先在大区域之间做粗粒度搜索，确定要经过哪些区域，再只在目标区域内做细粒度搜索</strong>。这正是 HPA*（分层路径搜索）的思想：用两层图替代一张巨大的网格，把全局搜索规模从“整张地图的格子数”降到“区域数 + 局部格子数”。</p>
+
+        <div class="mermaid">
+flowchart TB
+            S["起点"] --> R1["区域间粗搜：区域A → 区域B → 区域C"]
+            R1 --> R2["区域内细搜：仅在途经区域内逐格搜索"]
+            R2 --> E["终点"]
+            style R1 fill:#e7f3ff,stroke:#007acc,color:#14395a
+            style R2 fill:#e9f7ec,stroke:#2e7d32,color:#14395a
+        </div>
+
+        <h2>8.4 方向三：离线路径计算</h2>
+
+        <p>对于固定的常用导航点（出生点、兵线交汇点、野区入口），路径不依赖运行时状态，可以在离线阶段或加载时预先计算好并缓存，运行时直接读取结果。这同时消除了重复计算和帧内尖峰。缓存键需要包含起点、终点与影响路径的状态（如某扇门是否开启）。</p>
+
+        <h2>8.5 方向四：跳点寻路（JPS）</h2>
+
+        <p>JPS（Jump Point Search）是 A* 在均匀代价网格上的高效优化，核心是两个概念：</p>
+
+        <div class="definition">
+            <h4>强制邻居与跳点</h4>
+            <p><strong>强制邻居（Forced Neighbor）</strong>：由于旁边存在障碍物，某个邻居若不经过当前节点就无法到达，它“迫使”搜索在此停留。</p>
+            <p><strong>跳点（Jump Point）</strong>：沿一个方向递归跳跃前进，直到遇到终点、强制邻居或需要分叉的点，才把该点作为节点加入开放列表；中间的普通节点全部跳过。</p>
+        </div>
+
+        <p>因为开阔直线上的大量中间节点被一次性跳过，JPS 典型情况下比 A* 快一个数量级，且<strong>找到的路径与 A* 完全等价（保证最优）</strong>，不牺牲质量。这些关键拐点也可以在离线阶段预算好。下面是跳点判定的简化骨架（仅直线方向，省略对角线与边界处理）：</p>
+
+<pre><code class="language-csharp">using UnityEngine;
+
+public class JumpPointSearch
+{
+    private bool blocked;
+    private Vector2Int goal;
+
+    public Vector2Int? Jump(Vector2Int node, Vector2Int direction)
+    {
+        Vector2Int next = node + direction;
+        if (IsBlocked(next)) return null;
+        if (next == goal) return next;
+
+        if (HasForcedNeighbor(next, direction))
+        {
+            return next;
+        }
+
+        return Jump(next, direction);
+    }
+
+    private bool HasForcedNeighbor(Vector2Int node, Vector2Int dir)
+    {
+        Vector2Int side = new Vector2Int(-dir.y, dir.x);
+        Vector2Int sidePos = node + side;
+        Vector2Int behindSide = node - dir + side;
+
+        return IsBlocked(behindSide) && !IsBlocked(sidePos);
+    }
+
+    private bool IsBlocked(Vector2Int cell)
+    {
+        return blocked;
+    }
+}
+</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>边界说明</strong>：完整 JPS 需分别处理水平/垂直与对角线跳跃、地图边界、动态障碍，且依赖“均匀代价网格”这一前提；地形代价差异很大时剪枝规则会失效。上面的代码用于理解判定逻辑，不能直接作为生产实现。
+        </div>
+
+        <h2>8.6 工程层面：请求排队与分帧</h2>
+
+        <p>即使单次寻路变快，也要避免所有单位同帧发起。常见做法是用一个寻路队列，每帧只处理固定数量的请求，其余分摊到后续帧；单位在拿到路径前先用直线移动或等待，把尖峰削平。配合距离分级，远处单位可以降低重新规划频率。</p>
+
+        <h2>常见陷阱清单</h2>
+        <details>
+            <summary>预计算路径被动态障碍击穿</summary>
+            <div class="details-content">
+                <p>离线缓存假设了静态场景，运行时出现新增障碍（可破坏物、玩家技能）时必须让相关缓存失效并重新规划，否则单位会卡在障碍前。</p>
+            </div>
+        </details>
+        <details>
+            <summary>路径贴墙、单位互相卡位</summary>
+            <div class="details-content">
+                <p>网格路径没有体积概念，多个单位沿同一贴墙路径会互相阻挡。需要结合局部避让（RVO/转向）与路径间距，而不是只优化全局寻路。</p>
+            </div>
+        </details>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">基础练习</span>请求削峰</h3>
+            <p>实现一个每帧最多处理 N 个请求的寻路队列，对比改造前后同帧的 CPU 峰值与总处理时长。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>JPS 前提</h3>
+            <p>为什么 JPS 在高度动态、代价不均的地形上优势会缩小？请从“剪枝规则依赖什么假设”的角度解释。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">进阶挑战</span>路径缓存</h3>
+            <p>为常用导航点设计带失效条件的路径缓存，并验证动态障碍出现时缓存能正确作废。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>A* 成本来自节点扩展、列表操作与路径后处理，网格对称性导致大量等价路径被重复探索。</li>
+            <li>四个方向：权重调校、区域分块分层、离线路径缓存、JPS 跳点剪枝。</li>
+            <li>JPS 靠强制邻居与跳点跳过中间节点，路径与 A* 等价，但依赖均匀代价网格。</li>
+            <li>工程上用请求队列分帧削峰，并处理动态障碍失效与局部避让。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>延伸阅读</strong>：
+            <ul>
+                <li><a href="https://harablog.wordpress.com/2011/09/07/jump-point-search/" target="_blank">JPS 作者 Harabor 的原始介绍</a></li>
+                <li><a href="https://docs.unity3d.com/Manual/nav-BuildingNavMesh.html" target="_blank">Unity 手册：NavMesh 导航网格</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="07-动态自适应与特效分级.html">← 上一章：动态自适应与特效分级</a>
+            <a href="09-距离场碰撞优化.html">下一章：距离场碰撞优化 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

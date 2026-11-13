@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 MANN 模式自适应神经网络 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="04-PFNN相位函数神经网络.html">← 上一章：PFNN</a>
+    <a href="06-NSM神经状态机.html">下一章：NSM →</a>
+</nav>
+
+<main>
+    <h1>05　MANN：模式自适应神经网络</h1>
+
+    <div class="paper-meta">
+        <dl>
+            <dt>论文</dt><dd>Mode-Adaptive Neural Networks for Quadruped Motion Control</dd>
+            <dt>作者</dt><dd>He Zhang, Sebastian Starke, Taku Komura, Jun Saito（共同一作）</dd>
+            <dt>发表</dt><dd>ACM Transactions on Graphics 37(4), Article 145, SIGGRAPH 2018</dd>
+            <dt>仓库位置</dt><dd>AI4Animation/SIGGRAPH_2018</dd>
+        </dl>
+    </div>
+
+    <h2>5.1 四足运动为什么让 PFNN 失效</h2>
+    <p>把 PFNN 直接搬到四足动物上会暴露两个结构性问题：四足存在 walk、pace、trot、canter 等多种步态，四条腿的摆动/支撑
+    相对相位在步态间显著变化，<strong>无法用单一全局相位对齐</strong>；而相位标注本身在这种复杂度下几乎不可行。
+    MANN 的目标是：不做任何相位标注，从非结构化动捕中端到端学出控制器。</p>
+
+    <h2>5.2 核心思想：门控网络混合专家权重</h2>
+    <p>系统由两个网络组成：</p>
+    <ul>
+        <li><strong>运动预测网络</strong>：给定上一帧状态与控制信号，预测当前帧状态；其权重不固定，由 K 份"专家权重"混合得到</li>
+        <li><strong>门控网络</strong>：根据当前运动特征，输出 K 个混合系数（softmax 归一化），决定每份专家权重的贡献</li>
+    </ul>
+
+    <pre class="mermaid">
+flowchart LR
+    Xhat["门控输入 x̂（19 维）"] --> Gate["门控网络 Ω<br/>3 层 · 32 单元 · softmax"]
+    Gate --> Omega["混合系数 ω"]
+    Omega --> Blend["专家权重混合<br/>α = Σ ωᵢ αᵢ"]
+    Experts["K 份专家权重 α₁…αK"] --> Blend
+    X["完整输入 x"] --> Pred["运动预测网络 Θ"]
+    Blend -->|"当前权重 α"| Pred
+    Pred --> Y["当前帧状态 y"]
+    style Gate fill:#fff2dd,stroke:#f08c1a
+    style Pred fill:#eaf7ed,stroke:#38a152
+    </pre>
+    <p class="mermaid-caption">图 5-1　MANN 双网络结构</p>
+
+    <h2>5.3 运动预测网络</h2>
+    <p>预测网络 Θ 仍是三层 ELU 结构、隐藏层 512 单元，与 PFNN 回归网络同构。关键区别在权重来源：</p>
+    <div class="formula">
+        α = Σ<sub>i=1..K</sub> ω<sub>i</sub> α<sub>i</sub>
+        <span class="formula-label">每份 αᵢ 是完整的网络权重配置，ω 由门控网络给出</span>
+    </div>
+    <p>K 是可按数据复杂度调整的超参数：论文发现 K=4 已能生成高质量运动，K=8 动作更锐利、效果更好。</p>
+
+    <h2>5.4 门控网络及其输入设计</h2>
+    <p>门控网络 Ω 为三层结构、隐藏层仅 32 单元，输出经 softmax 归一化保证系数和为 1。它的输入 x̂ 只有 19 维，
+    是完整输入的一个精选子集：<strong>足部末端执行器速度、当前动作变量、角色期望速度</strong>。</p>
+    <div class="callout callout-info">
+        <span class="callout-title">为什么是这 19 维</span>
+        <p>论文测试了完整 x、末端位置、位置+速度、旋转等多种输入，发现这组特征效果最好。原因是足部速度与运动相位高度相关，
+        起到了类似 PFNN 相位函数的作用，从而避免不同相位动作被混合；动作变量与期望速度则提升可控性与响应度。</p>
+    </div>
+
+    <h2>5.5 与经典混合专家（MoE）的区别</h2>
+    <table>
+        <thead><tr><th>维度</th><th>经典 MoE</th><th>MANN</th></tr></thead>
+        <tbody>
+            <tr><td>混合发生位置</td><td>输出级：各专家分别输出，再加权输出结果</td><td>权重级：先把专家的网络权重混合成一套，再做一次前向</td></tr>
+            <tr><td>结果</td><td>输出空间加权，易出现平均化</td><td>等效于在权重空间平滑切换模式，动作更锐利</td></tr>
+        </tbody>
+    </table>
+
+    <h2>5.6 输入侧的关键改进：6D 关节旋转</h2>
+    <p>PFNN 的关节旋转只出现在输出端，MANN 在输入中也加入关节旋转（6D 双正交轴形式，配合 3D 位置与 3D 速度）。
+    论文明确记录：加入后四足动作立刻变得更锐利。此外输入轨迹还包含 6 维 one-hot 动作类型标签，该项目使用 27 个关节。</p>
+
+    <h2>5.7 训练细节</h2>
+    <table>
+        <thead><tr><th>项目</th><th>设置</th></tr></thead>
+        <tbody>
+            <tr><td>优化器</td><td>AdamWR（带热重启的 Adam，权重衰减内置，损失函数不再含正则项）</td></tr>
+            <tr><td>初始学习率/权重衰减</td><td>η = 1×10⁻⁴，λ = 2.5×10⁻³</td></tr>
+            <tr><td>热重启</td><td>Tᵢ 初始 10 个 epoch，每轮 ×2（T_mult=2），重启发生在第 11、31、71 epoch</td></tr>
+            <tr><td>总轮数</td><td>150 epochs（共 3 次重启），实现基于 TensorFlow</td></tr>
+        </tbody>
+    </table>
+
+    <h2>5.8 专家学到了什么</h2>
+    <p>论文绘制了 K=4/8 时混合系数随动作类型的变化曲线，得到几个可验证的观察：低速运动时各系数等权循环，门控网络
+    行为与 PFNN 相位函数一致；速度提高后，个别专家持续激活、专门负责快速/跳跃动作。通过选择性禁用单个专家，
+    论文确认某些专家对应特定能力：</p>
+    <table>
+        <thead><tr><th>被禁用专家</th><th>观察到的能力缺失</th></tr></thead>
+        <tbody>
+            <tr><td>专家 5</td><td>canter 与 trot 无法完成</td></tr>
+            <tr><td>专家 7</td><td>右转失效，其余正常</td></tr>
+            <tr><td>专家 8</td><td>模式难以激活，肢体僵硬</td></tr>
+        </tbody>
+    </table>
+
+    <div class="callout callout-warning">
+        <span class="callout-title">专家不平衡（expert imbalance）</span>
+        <p>经典 MoE 训练中常见少数专家被门控偏爱、越训越强、其余专家闲置。论文复现原始 MoE 时确实观察到只有一个专家被训好；
+        但在 MANN 的权重级混合、专家数量较少（4–8）的设置下，使用相对均衡，无需额外负载均衡惩罚。</p>
+    </div>
+
+    <h2>5.9 局限</h2>
+    <ul>
+        <li>门控系数虽隐式编码相位，但仍依赖足部速度等手工挑选的输入子集，数据量小时网络难以自行提取</li>
+        <li>专家对应关系不可控——无法预先指定某个专家负责某类动作，只能训练后观察</li>
+        <li>尚未处理需要精确目标定位的场景交互任务，这是下一章 NSM 的目标</li>
+    </ul>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>架构对比</h4>
+                    <p>用一张表对比 PFNN 与 MANN 在"相位/门控信号来源、是否需要人工标注、混合发生位置、适用运动"四个维度的差异。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>表示增益</h4>
+                    <p>解释输入侧 6D 旋转为什么能让动作更锐利；如果去掉它只保留位置和速度，预期会出现什么退化？</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>调参判断</h4>
+                    <p>K 从 4 增至 8 的收益与代价各是什么？结合门控输入仅 19 维、数据规模有限这一前提分析。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>MANN 用门控网络输出 softmax 系数，在权重级混合 K 份专家权重，免除相位标注</li>
+        <li>门控输入仅 19 维（足部速度+动作变量+期望速度），足部速度起到隐式相位作用</li>
+        <li>输入引入 6D 关节旋转使动作更锐利；AdamWR 热重启训练 150 epochs</li>
+        <li>专家会自发特化到具体动作，权重级混合下专家使用均衡，无需负载均衡惩罚</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://dl.acm.org/doi/pdf/10.1145/3197517.3201366">MANN 论文原文</a></li>
+            <li>Jacobs et al., <em>Adaptive Mixtures of Local Experts</em>, 1991（MoE 源头）</li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="04-PFNN相位函数神经网络.html">← 上一章：PFNN</a>
+        <a href="06-NSM神经状态机.html">下一章：NSM 神经状态机 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

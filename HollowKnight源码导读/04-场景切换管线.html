@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 4 章 场景切换管线 - 空洞骑士源码导读</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="03-单例体系与启动流程.html">← 上一章：单例体系与启动流程</a>
+    <a href="05-场景配置与场景管理器.html">下一章：场景配置与场景管理器 →</a>
+</nav>
+<main>
+    <h1>第 4 章　场景切换管线</h1>
+    <p>场景切换是《空洞骑士》运行时最复杂的一条管线，它把异步 IO、相机淡入淡出、主角移动、对象池清理、垃圾回收全部编排进一条协程。理解它之后，全书其他子系统的调用时机几乎都能挂到这条管线的某个阶段上。</p>
+
+    <h2>4.1 两个层次：机制类 SceneLoad 与编排类 GameManager</h2>
+    <p>管线代码分两层，先把边界划清：</p>
+    <table>
+        <thead><tr><th>层次</th><th>类</th><th>职责</th></tr></thead>
+        <tbody>
+            <tr><td>机制层</td><td><code>SceneLoad</code>（普通 C# 类，不是 MonoBehaviour）</td><td>封装一次 additive 异步加载的八个阶段，暴露阶段事件；由外部传入的 runner 协程驱动</td></tr>
+            <tr><td>编排层</td><td><code>GameManager.BeginSceneTransitionRoutine</code></td><td>创建 SceneLoad、订阅它的事件、控制相机和主角、决定两个门控何时打开</td></tr>
+            <tr><td>触发层</td><td><code>TransitionPoint</code>（门口）等</td><td>检测主角碰撞，构造 SceneLoadInfo 参数对象，调用 BeginSceneTransition</td></tr>
+        </tbody>
+    </table>
+
+    <h2>4.2 SceneLoad 的八阶段</h2>
+    <p>SceneLoad 定义了八个阶段枚举，每个阶段记录起止时间（用于性能分析），并在关键节点触发事件：</p>
+    <table>
+        <thead><tr><th>#</th><th>阶段</th><th>做什么</th><th>事件</th></tr></thead>
+        <tbody>
+            <tr><td>0</td><td>FetchBlocked</td><td>空转等待，直到 IsFetchAllowed 打开</td><td>—</td></tr>
+            <tr><td>1</td><td>Fetch</td><td>LoadSceneAsync（Additive，禁止激活），等到 progress 达到 0.9</td><td>FetchComplete</td></tr>
+            <tr><td>2</td><td>ActivationBlocked</td><td>空转等待，直到 IsActivationAllowed 打开</td><td>—</td></tr>
+            <tr><td>3</td><td>Activation</td><td>allowSceneActivation=true，等待场景真正激活</td><td>WillActivate / ActivationComplete</td></tr>
+            <tr><td>4</td><td>UnloadUnusedAssets</td><td>按需执行 Resources.UnloadUnusedAssets</td><td>—</td></tr>
+            <tr><td>5</td><td>GarbageCollect</td><td>按需执行 GCManager.Collect</td><td>—</td></tr>
+            <tr><td>6</td><td>StartCall</td><td>等一帧，触发 StartCalled</td><td>StartCalled</td></tr>
+            <tr><td>7</td><td>LoadBoss</td><td>按需加载 Boss 附加场景</td><td>BossLoaded</td></tr>
+        </tbody>
+    </table>
+
+    <h3>核心机制：两个门控布尔</h3>
+    <p>Fetch 阶段的加载循环长这样：</p>
+<pre><code class="language-csharp">while (!IsFetchAllowed)
+{
+    yield return null;
+}
+AsyncOperation loadOperation = SceneManager.LoadSceneAsync(targetSceneName, LoadSceneMode.Additive);
+loadOperation.allowSceneActivation = false;
+while (loadOperation.progress < 0.9f)
+{
+    yield return null;
+}</code></pre>
+    <div class="definition">
+        <h4>为什么 progress 停在 0.9？</h4>
+        <p>Unity 的异步加载在 <code>allowSceneActivation=false</code> 时，进度最多到 0.9 并停住——剩下 0.1 是"激活场景"。这给了编排层一个精确的同步点：场景资源已经在后台加载完，但何时切换由 GameManager 决定。两个门控（Fetch 控制何时开始加载、Activation 控制何时允许激活）把"加载速度"和"演出节奏"彻底解耦。</p>
+    </div>
+
+    <h2>4.3 编排层：事件订阅与门控配合</h2>
+    <p>GameManager 在协程里创建 SceneLoad 后，通过订阅四个事件把自己的逻辑插进管线，而不是修改 SceneLoad 本身：</p>
+<pre><code class="language-csharp">sceneLoad.WillActivate += delegate
+{
+    if (DestroyPersonalPools != null) DestroyPersonalPools();  // 清理场景对象池
+    entryDelay = info.EntryDelay;
+};
+sceneLoad.ActivationComplete += delegate
+{
+    SceneManager.UnloadScene(lastSceneName);                   // 卸载旧场景
+    RefreshTilemapInfo(info.SceneName);
+    sceneLoad.IsUnloadAssetsRequired = /* 卸载策略 */;
+    sceneLoad.IsGarbageCollectRequired = /* GC 策略 */;
+};
+sceneLoad.Complete += delegate
+{
+    SetupSceneRefs(refreshTilemapInfo: false);
+    BeginScene();                                             // 新场景正式开始
+    gameMap.GetComponent<GameMap>().LevelReady();
+};
+sceneLoad.Finish += delegate
+{
+    sceneLoad = null;
+    isLoading = false;
+    info.NotifyFinished();
+    OnFinishedSceneTransition?.Invoke();
+};</code></pre>
+
+    <h3>门控何时打开：等相机淡出</h3>
+    <p>协程末尾有一段等待循环，把"激活新场景"和"相机淡出完成"对齐：</p>
+<pre><code class="language-csharp">sceneLoad.IsFetchAllowed = !info.forceWaitFetch &&
+    (Platform.Current.FetchScenesBeforeFade || info.PreventCameraFadeOut);
+sceneLoad.IsActivationAllowed = false;
+sceneLoad.Begin();
+
+float cameraFadeTimer = 0.5f;
+while (true)
+{
+    bool keepWaiting = false;
+    cameraFadeTimer -= Time.unscaledDeltaTime;
+    if (info.WaitForSceneTransitionCameraFade && cameraFadeTimer > 0f)
+        keepWaiting = true;
+    if (!info.IsReadyToActivate())
+        keepWaiting = true;
+    if (!keepWaiting) break;
+    yield return null;
+}
+sceneLoad.IsFetchAllowed = true;
+sceneLoad.IsActivationAllowed = true;   // 屏幕全黑后才放行激活</code></pre>
+    <p>注意这里用的是 <code>Time.unscaledDeltaTime</code>——切换期间可能已经修改了 timeScale，等待逻辑必须不受时间缩放影响。</p>
+
+    <h2>4.4 触发层：TransitionPoint 门口</h2>
+    <p>门口是场景里的 Trigger Collider，主角走进来触发 <code>OnTriggerEnter2D</code>。它的 TryDoTransition 做了三件事：</p>
+    <div class="steps">
+        <div class="step"><div class="step-number">1</div><div class="step-content"><strong>资格校验</strong>：碰撞对象必须是 9 号层（主角）、gameState 必须是 PLAYING，门不能是需要交互的 isADoor。</div></div>
+        <div class="step"><div class="step-number">2</div><div class="step-content"><strong>方向处理</strong>：根据 GatePosition（从物体名里的 left/right/top/bot 解析）和主角朝向，决定是先把主角推出碰撞区还是直接切换。</div></div>
+        <div class="step"><div class="step-number">3</div><div class="step-content"><strong>切换音频快照并构造参数</strong>：过渡四个 AudioMixerSnapshot，然后构造 SceneLoadInfo 调用 BeginSceneTransition。</div></div>
+    </div>
+<pre><code class="language-csharp">gm.BeginSceneTransition(new GameManager.SceneLoadInfo
+{
+    SceneName = targetScene,
+    EntryGateName = entryPoint,
+    HeroLeaveDirection = GetGatePosition(),
+    EntryDelay = entryDelay,
+    WaitForSceneTransitionCameraFade = true,
+    PreventCameraFadeOut = (customFadeFSM != null),
+    Visualization = sceneLoadVisualization,
+    AlwaysUnloadUnusedAssets = alwaysUnloadUnusedAssets
+});</code></pre>
+    <div class="callout callout-warning">
+        <p><strong>命名约定即配置</strong>：门口的位置不是单独字段，而是 <code>GetGatePosition()</code> 从物体名字里找 "left/right/top/bot" 字符串解析的。这意味着门口物体一旦改名，切换逻辑就会报错返回 unknown。这是读这份代码时必须适应的"约定大于配置"风格。</p>
+    </div>
+
+    <h2>4.5 完整时序</h2>
+    <div class="mermaid-wrap">
+<div class="mermaid">
+sequenceDiagram
+    participant TP as TransitionPoint
+    participant GM as GameManager
+    participant SL as SceneLoad
+    participant Cam as 相机
+    participant U as Unity SceneManager
+
+    TP->>GM: BeginSceneTransition(SceneLoadInfo)
+    GM->>GM: SaveLevelState，hero.LeaveScene
+    GM->>Cam: FadeOut 淡出
+    GM->>SL: new SceneLoad 并 Begin()
+    Note over SL: FetchBlocked 等待
+    GM-->>SL: IsFetchAllowed=true（淡出对齐后）
+    SL->>U: LoadSceneAsync additive, 禁止激活
+    U-->>SL: progress 到 0.9
+    SL-->>GM: FetchComplete
+    GM-->>SL: IsActivationAllowed=true
+    SL->>SL: WillActivate：清理对象池
+    SL->>U: allowSceneActivation=true
+    U-->>SL: 新场景激活
+    SL-->>GM: ActivationComplete
+    GM->>U: UnloadScene 旧场景
+    SL->>SL: 按需 UnloadAssets / GC
+    SL-->>GM: Complete → BeginScene
+    SL-->>GM: Finish → 管线收尾
+</div>
+    </div>
+
+    <h2>4.6 两个值得学习的工程细节</h2>
+
+    <h3>细节一：所有事件回调都包 try-catch</h3>
+    <p>SceneLoad 触发每个事件时都这样写：</p>
+<pre><code class="language-csharp">try { this.FetchComplete(); }
+catch (Exception exception)
+{
+    Debug.LogError("Exception in responders to SceneLoad.FetchComplete. Attempting to continue load regardless.");
+    Debug.LogException(exception);
+}</code></pre>
+    <p>场景切换期间任何外部订阅者抛异常，都<strong>只记录、不中断加载</strong>。否则一个物件的 bug 会让玩家永久卡在黑屏。这是把"加载必须完成"作为最高优先级的防御性设计。</p>
+
+    <h3>细节二：非关键 GC 的条件跳过</h3>
+    <p>每次切换都做完整 GC 会造成卡顿，ActivationComplete 里有一套节流逻辑：加载耗时短、且连续切换次数没超阈值时，允许跳过这次非关键 GC，由 <code>sceneLoadsWithoutGarbageCollect</code> 计数，到上限强制回收。这是在内存占用和帧率之间做的量化权衡，阈值由 Platform 层按平台性能提供。</p>
+
+    <div class="exercise">
+        <h3>思考与练习</h3>
+        <ol>
+            <li>用自己的话解释 0.9 进度门控：如果把 allowSceneActivation 一直设为 true，会失去什么能力？</li>
+            <li>追踪一次梦境传送（WarpToDreamGate）：它和普通进门在 SceneLoadInfo 参数上有哪些差异？为什么 PreventCameraFadeOut 不同？</li>
+            <li>说明 SceneLoad 为什么设计成普通 C# 类而不是 MonoBehaviour，它的协程是靠什么跑起来的。</li>
+            <li>假设某个订阅了 ActivationComplete 的物件抛异常，管线会怎样？玩家会卡住吗？依据是哪段代码？</li>
+        </ol>
+    </div>
+</main>
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="03-单例体系与启动流程.html">← 上一章：单例体系与启动流程</a>
+        <a href="05-场景配置与场景管理器.html">第 5 章：场景配置与场景管理器 →</a>
+    </nav>
+</footer>
+<script src="assets/script.js"></script>
+</body>
+</html>

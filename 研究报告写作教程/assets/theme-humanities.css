@@ -1,0 +1,38 @@
+/* ============================================================
+   theme-humanities：人文/写作类主题
+   暖色纸感 + 衬线标题，降低长时间阅读的视觉疲劳
+   ============================================================ */
+
+:root {
+  --primary: #8c5a3c;
+  --primary-dark: #5f3b23;
+  --accent: #b8873a;
+  --bg-body: #efe9df;
+  --bg-main: #fdfbf7;
+  --text: #2b2621;
+  --text-soft: #5b5147;
+  --line: #e5dccb;
+}
+
+body {
+  background-color: var(--bg-body);
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(184, 135, 58, .05) 0, transparent 42%),
+    radial-gradient(circle at 88% 92%, rgba(140, 90, 60, .05) 0, transparent 40%);
+  background-attachment: fixed;
+}
+
+main { background: var(--bg-main); }
+
+h1 {
+  color: var(--primary-dark);
+  border-bottom-color: var(--primary);
+}
+
+h2 { color: var(--primary-dark); }
+
+blockquote, .pull-quote { border-left-color: var(--accent); }
+
+th { background: #f6f0e5; color: var(--primary-dark); }
+
+.chapter-badge.basic { background: #edf0e3; color: #5b743f; }

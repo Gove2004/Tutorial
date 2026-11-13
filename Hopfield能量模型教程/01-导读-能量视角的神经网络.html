@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 导读：能量视角的神经网络 - Hopfield 与能量生成模型教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-math.css">
+    <script>
+        MathJax = {
+            tex: { inlineMath: [['$','$'],['\\(','\\)']], displayMath: [['$$','$$'],['\\[','\\]']] },
+            svg: { fontCache: 'global' }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <span></span>
+        <a href="02-历史背景与Hopfield网络的诞生.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>01 ｜ 导读：能量视角的神经网络</h1>
+
+        <h2>1.1 这套教程要回答什么</h2>
+        <p>今天的主流深度学习叙事通常从反向传播和多层感知机讲起，Hopfield 网络往往被当作历史名词一笔带过。但如果把视角拉长，会发现当代深度学习中若干看似无关的组件——联想记忆、玻尔兹曼机、深度信念网络、注意力机制、扩散模型——共享同一条思想主线。这条主线的起点就是 Hopfield 在 1982 年提出的一个想法：<strong>给网络的每一个整体状态赋予一个标量能量，让网络的动力学始终朝能量降低的方向运行</strong>。</p>
+        <p>本教程围绕三个具体问题展开：</p>
+        <ol>
+            <li><strong>记忆问题</strong>：一个没有外部监督、没有损失函数梯度下降的网络，如何把若干模式「写」进权重，又如何从残缺输入中把完整模式「读」出来？</li>
+            <li><strong>原理问题</strong>：为什么一个标量能量函数就能同时解释网络的收敛性、记忆的稳定性和生成分布的形状？能量、自由能、概率分布三者之间的数学关系是什么？</li>
+            <li><strong>当代问题</strong>：1980 年代的这条老线与今天的 Transformer、扩散模型到底是什么关系？「Hopfield 网络就是注意力」这一说法在什么意义下严格成立？</li>
+        </ol>
+
+        <h2>1.2 能量视角的统一图景</h2>
+        <p>先给出一张全景图，后续所有章节都是在填充这张图的某个局部。设网络状态为向量 $\mathbf{x}$，存在一个标量函数 $E(\mathbf{x})$ 称为能量。整个理论体系由三个对应关系构成：</p>
+
+        <div class="definition">
+            <h4>能量视角的三个对应关系</h4>
+            <ul>
+                <li><strong>动力学 ↔ 能量最小化</strong>：网络的状态更新规则等价于在能量地形上做（离散或连续的）梯度下降，稳定记忆 = 能量的局部极小值（吸引子）。</li>
+                <li><strong>学习 ↔ 重塑地形</strong>：修改权重 $\mathbf{W}$ 就是修改能量函数的形状，使期望的模式落在吸引子盆地中（Hebbian 规则），或使数据对应的能量低于其他状态（EBM 学习）。</li>
+                <li><strong>生成 ↔ 从能量分布采样</strong>：引入温度后，状态服从玻尔兹曼分布 $p(\mathbf{x}) \propto e^{-\beta E(\mathbf{x})}$，能量低的状态以更高概率出现；生成新样本就是按此分布采样。</li>
+            </ul>
+        </div>
+
+        <p>这三个对应关系解释了为什么 Hopfield 网络能开启一整个模型家族：它第一次把「计算（动力学）」「记忆（学习）」「不确定性（概率）」统一在同一个标量函数之下。后续的玻尔兹曼机只是给确定性动力学加入了随机温度，RBM 只是限制了连接结构以便推断，现代 Hopfield 只是把二次能量换成了 log-sum-exp 形式的能量，而扩散模型则给出了绕开配分函数的采样与训练方案。</p>
+
+        <table>
+            <thead>
+                <tr><th>模型</th><th>状态空间</th><th>能量函数核心形式</th><th>学习方式</th><th>对应章节</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>离散 Hopfield（1982）</td><td>二值 $\{-1,+1\}^N$</td><td>二次型 $-\frac12\mathbf{x}^\top\mathbf{W}\mathbf{x}$</td><td>Hebbian 外积</td><td>第 3、4 章</td></tr>
+                <tr><td>连续 Hopfield（1984）</td><td>连续有界</td><td>二次型 + 积分项</td><td>外积 / 手工设计</td><td>第 5 章</td></tr>
+                <tr><td>玻尔兹曼机（1985）</td><td>二值 + 隐单元</td><td>二次型，随机动力学</td><td>最大似然 + Gibbs 采样</td><td>第 7 章</td></tr>
+                <tr><td>RBM（1986/2002）</td><td>二值二分图</td><td>$-\mathbf{v}^\top\mathbf{W}\mathbf{h}$</td><td>对比散度</td><td>第 8 章</td></tr>
+                <tr><td>通用 EBM（2006）</td><td>任意</td><td>任意可微 $E_\theta(\mathbf{x})$</td><td>能量损失 + 正则</td><td>第 9 章</td></tr>
+                <tr><td>现代 Hopfield（2016–2020）</td><td>连续</td><td>$-\beta^{-1}\log\sum_i e^{\beta\,\boldsymbol{\xi}^\top\mathbf{x}_i}$</td><td>梯度下降 / 即注意力</td><td>第 10 章</td></tr>
+            </tbody>
+        </table>
+
+        <h2>1.3 符号约定</h2>
+        <p>全教程统一使用以下符号，遇到特殊用法会在当章另行说明。</p>
+        <table>
+            <thead><tr><th>符号</th><th>含义</th></tr></thead>
+            <tbody>
+                <tr><td>$N$</td><td>神经元（状态分量）总数</td></tr>
+                <tr><td>$P$</td><td>存储的记忆模式数量</td></tr>
+                <tr><td>$\mathbf{x}=(x_1,\dots,x_N)$</td><td>网络状态向量；上标 $\mathbf{x}^\mu$ 表示第 $\mu$ 个记忆模式</td></tr>
+                <tr><td>$\mathbf{W}=(w_{ij})$</td><td>权重矩阵，约定对称且对角元为零</td></tr>
+                <tr><td>$b_i$</td><td>第 $i$ 个单元的偏置（阈值项）</td></tr>
+                <tr><td>$h_i$</td><td>第 $i$ 个单元的局部场（净输入）</td></tr>
+                <tr><td>$E$</td><td>能量函数</td></tr>
+                <tr><td>$\beta=1/T$</td><td>逆温度参数，$T$ 为温度</td></tr>
+                <tr><td>$Z$</td><td>配分函数（归一化常数）</td></tr>
+                <tr><td>$\mathbf{v},\mathbf{h}$</td><td>RBM 中的可见层、隐层状态</td></tr>
+                <tr><td>$\sigma(\cdot)$</td><td>sigmoid 函数；softmax 会明确写出</td></tr>
+            </tbody>
+        </table>
+        <div class="sidebar-note">
+            二值状态有两种常见编码：$\{-1,+1\}$（自旋编码，本教程主线采用）与 $\{0,1\}$（开关编码）。二者在能量函数写法和更新规则上有细微差别，第 3 章会专门对照；涉及玻尔兹曼机时通常使用 $\{0,1\}$ 编码，因为隐单元「关闭」的语义更自然。
+        </div>
+
+        <h2>1.4 前置知识自查</h2>
+        <p>以下清单用于判断你是否需要先补课。注意：<strong>不需要</strong>事先懂统计力学，第 6 章会从零建立所需概念。</p>
+        <ul>
+            <li>线性代数：矩阵乘法、外积 $\mathbf{x}\mathbf{y}^\top$ 与内积 $\mathbf{x}^\top\mathbf{y}$、对称矩阵、二次型。</li>
+            <li>概率论：条件概率与独立性、贝叶斯公式、期望与方差、随机变量和的方差（独立情形可加）。</li>
+            <li>微积分：偏导数、链式法则、定积分的基本含义；第 5 章会用到常微分方程的稳定性概念，只做直觉解释。</li>
+            <li>编程：第 12 章实战使用 PyTorch，需要看懂张量形状变换与基本的自动微分；不用 PyTorch 的读者可跳过该章，不影响理论主线。</li>
+        </ul>
+
+        <h2>1.5 三条阅读路线</h2>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">A</span>
+                <div class="step-content">
+                    <h4>快速理解路线（约 4 小时）</h4>
+                    <p>第 2 章 → 第 3 章（3.1–3.4 节）→ 第 4 章（4.1–4.3 节）→ 第 10 章（10.3–10.4 节）。目标是理解「吸引子记忆」和「注意力即 Hopfield 检索」两个核心结论，跳过统计力学细节。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">B</span>
+                <div class="step-content">
+                    <h4>系统学习路线（推荐，顺序阅读全部 13 章）</h4>
+                    <p>按章节顺序推进。每章结尾的练习用于自检，建议至少完成标注「基础」的题目再进入下一章。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">C</span>
+                <div class="step-content">
+                    <h4>带着问题的查阅路线</h4>
+                    <p>如果你在做生成模型研究、想弄清扩散模型与能量模型的关系，直接读第 9、11 章；如果你在复现 RBM 或排查 CD 训练问题，直接读第 8、12 章。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>1.6 练习与思考</h2>
+        <div class="exercise">
+            <h4>思考题 1-1</h4>
+            <p>一个标量函数 $E(\mathbf{x})$ 要成为合格的「能量」，网络的更新规则必须满足什么性质？如果允许能量偶尔上升，网络还能保证收敛吗？请先凭直觉给出答案，第 3 章证明结束后再回看这个问题。</p>
+        </div>
+        <div class="exercise">
+            <h4>思考题 1-2</h4>
+            <p>「记忆是能量的局部极小值」这句话隐含了一个要求：记忆模式在受到小扰动后必须能自发回到原状态。用你已有的微分方程或优化知识描述：什么样的极小值满足这种「抗扰动」性质？</p>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>能量视角用一个标量函数统一了三件事：动力学是能量最小化，学习是重塑能量地形，生成是从 $p\propto e^{-\beta E}$ 采样。</li>
+                <li>本教程主线采用 $\{-1,+1\}$ 自旋编码、对称零对角权重，逆温度记为 $\beta$。</li>
+                <li>统计力学不是前置知识；真正需要的是线性代数、概率论和微积分基础。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <span></span>
+            <a href="02-历史背景与Hopfield网络的诞生.html">下一章：历史背景与 Hopfield 网络的诞生 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

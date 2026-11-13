@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 - 传统方法（下）：运动图与运动匹配 - 角色动画生成的深度学习发展史</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-传统方法-关键帧与动作捕捉.html">← 上一章</a>
+        <a href="04-深度学习入场-动作流形学习.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>传统方法（下）：运动图与运动匹配</h1>
+
+        <p>上一章说了传统方法的瓶颈是"覆盖度问题"。这一章看行业的两波自救尝试——<strong>运动图（Motion Graphs）</strong>和<strong>运动匹配（Motion Matching）</strong>。它们代表了一个重要的思维范式：<strong>不生成新动作，而是把已有动作"拼"起来</strong>。理解为什么"拼"到头了，才能理解为什么后来要"学"。</p>
+
+        <h2>3.1 运动图（Motion Graphs, 2002）</h2>
+
+        <div class="definition">
+            <h4>运动图</h4>
+            <p>把动作库中的每个片段看作图的一个节点，把"可以无缝衔接的两个片段"用边连接起来，构成一张图。运行时根据用户输入，在图上搜索一条"动作路径"，依次播放节点上的片段。</p>
+        </div>
+
+        <p>核心论文：<strong>Kovar, Gleicher, Pighin. "Motion Graphs." SIGGRAPH 2002</strong>。</p>
+
+        <h3>它怎么工作</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>离线：构建图</h4>
+                    <p>对动作库里的所有片段做两两比较，找出"结束姿势和开始姿势足够接近"的片段对，用过渡帧把它们连起来，形成图的边。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>离线：定义边权重</h4>
+                    <p>给每条边打分（过渡自然度、是否满足用户意图），方便在线搜索时选路。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>在线：搜索路径</h4>
+                    <p>玩家摇杆输入后，在当前可达节点里搜索一条"最符合输入 + 过渡最自然"的路径，逐段播放。</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>它的致命缺陷</h3>
+        <table class="comparison">
+            <thead>
+                <tr><th>问题</th><th>后果</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="bad"><strong>只能走图里的路径</strong></td>
+                    <td>动作组合受限于图结构，玩家自由度被"路线"限制</td>
+                </tr>
+                <tr>
+                    <td class="bad"><strong>过渡质量参差</strong></td>
+                    <td>两个片段"姿势接近"不代表过渡自然，会产生奇怪的小碎步/滑步</td>
+                </tr>
+                <tr>
+                    <td class="bad"><strong>构建成本高</strong></td>
+                    <td>两两比较片段需要定义"接近度"度量，参数调起来是玄学</td>
+                </tr>
+                <tr>
+                    <td class="bad"><strong>仍是"搜索"而非"生成"</strong></td>
+                    <td>图里没有的动作，永远生成不出来——覆盖度问题没有根治</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>一个深刻教训</strong>：运动图暴露了"拼接派"的哲学缺陷——<strong>动作是连续空间，片段是离散采样</strong>。你在有限片段上做文章，永远只能逼近、不能覆盖。这为后来的"连续动作流形"思想埋下了伏笔。
+        </div>
+
+        <h2>3.2 运动匹配（Motion Matching, 2016）</h2>
+
+        <div class="definition">
+            <h4>运动匹配</h4>
+            <p>不预先建图。每一帧，把"当前角色状态 + 目标状态（用户输入导致的期望位移/朝向）"作为查询，在动作库中实时搜索"下一段最匹配的片段"播放。代表作：EA 的 <strong>Clavet, "Motion Matching and The Road to Next Gen Animation" (GDC 2016)</strong>。</p>
+        </div>
+
+        <p>你熟悉的游戏里，《对马岛之魂》、《艾尔登法环》（部分）、育碧的很多开放世界都用过或演化自这套思路。</p>
+
+        <h3>它怎么工作</h3>
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>数据准备</h4>
+                    <p>动捕片段按固定间隔切成短 clip，每个 clip 抽出一组特征：根节点速度、朝向、脚的位置、关节姿态向量……</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>在线查询</h4>
+                    <p>每一帧计算"当前姿态 + 期望未来姿态"的特征向量，在数据库里做最近邻搜索，找出最匹配的 clip。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>播放 + 迭代</h4>
+                    <p>播放该 clip，下一帧再搜索下一个。因为每帧都在重搜，角色会自然"追随"用户输入。</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>为什么它比运动图好</h3>
+        <ul>
+            <li><strong>实现简单粗暴</strong>：没有复杂的建图，核心就是一个"最近邻搜索"（KD-tree / 暴力搜索），工程上好落地</li>
+            <li><strong>质量上限高</strong>：每一帧都从原始动捕数据里找，不做插值拼接，自然度接近原始数据</li>
+            <li><strong>可控性强</strong>：特征里可以直接编码"想往左转 30°"，搜索直接响应</li>
+        </ul>
+
+        <h3>它的瓶颈（非常重要）</h3>
+        <table>
+            <thead>
+                <tr><th>瓶颈</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>内存/搜索成本</strong></td>
+                    <td>数据库动辄数小时动捕数据、数百万 clip 特征。主机内存和 CPU 都要扛不住，需要降采样、剪枝、LOD</td>
+                </tr>
+                <tr>
+                    <td><strong>覆盖度天花板仍在</strong></td>
+                    <td>动作库没有的动作，Motion Matching 也变不出来。想让角色"跳舞 + 拿武器 + 上坡 + 向左转"，组合空间爆炸，数据量指数增长</td>
+                </tr>
+                <tr>
+                    <td><strong>特征工程玄学</strong></td>
+                    <td>特征怎么选、权重怎么配，全靠调参经验</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="sidebar-note">
+            <strong>行业视角</strong>：Motion Matching 是"传统路线的最后巅峰"——它把搜索拼接做到了极致，至今仍是很多 3A 游戏的主力方案。但也正因为它"以数据量换质量"的天花板，学术界开始思考：能不能让模型<strong>学会动作的分布</strong>，而不是存一个巨大的动作库？
+        </div>
+
+        <h2>3.3 从"拼"到"学"的思维转变</h2>
+
+        <p>运动图和 Motion Matching 的共同点：<strong>先有数据，再检索数据</strong>。它们都是"记忆派"。</p>
+
+        <p>深度学习的到来改变了一个根本假设：</p>
+
+        <table class="comparison">
+            <thead>
+                <tr><th>传统拼接派</th><th>深度学习生成派</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>动作 = 库里片段的组合</td>
+                    <td>动作 = 一个连续分布/流形上的采样</td>
+                </tr>
+                <tr>
+                    <td>查询：搜最近邻</td>
+                    <td>查询：网络前向传播</td>
+                </tr>
+                <tr>
+                    <td>覆盖度 = 数据量</td>
+                    <td>覆盖度 = 模型的泛化能力</td>
+                </tr>
+                <tr>
+                    <td>内存开销随数据线性增长</td>
+                    <td>模型参数固定，内存不随数据增长</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-tip">
+            <strong>下一章的伏笔</strong>：如果动作能被压缩进一个<strong>低维连续空间</strong>（流形），那么"合成新动作"就变成了"在流形上取点/插值"——这就是 Holden 2016 做的事情，也是整个深度学习路线的起点。
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>运动图（2002）：建图 + 图上搜索，首次让动作库"可组合"</li>
+            <li>运动匹配（2016）：每帧最近邻搜索，把拼接派做到极致，至今仍是 3A 主力</li>
+            <li>拼接派的天花板：覆盖度由数据量决定，内存/成本爆炸，组合空间无法穷举</li>
+            <li>根本转变：从"记忆 + 检索"到"学习 + 生成"</li>
+        </ul>
+
+        <h2>思考题</h2>
+        <ol>
+            <li>Motion Matching 的"特征向量"至少应该包含哪些信息？如果漏掉"脚与地面的接触状态"会出什么问题？</li>
+            <li>为什么说 Motion Matching 的"覆盖度天花板"是数据量决定的？举一个具体的游戏场景说明。</li>
+            <li>假设你手上有 10 小时的动捕数据，你会怎么设计 Motion Matching 的索引结构来压低搜索延迟？</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="02-传统方法-关键帧与动作捕捉.html">← 上一章：关键帧与动作捕捉</a>
+            <a href="04-深度学习入场-动作流形学习.html">下一章：深度学习入场 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

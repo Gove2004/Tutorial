@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>业务与引擎模块特征地图 - 游戏性能优化实战教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="11-阴影动画与引擎管线定制.html">← 上一章</a>
+        <a href="13-微观分析四板斧与八大维度.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>业务与引擎模块特征地图</h1>
+        <p class="chapter-meta">模块三 · 模块特征地图 ｜ 对应原文第二部分八大模块</p>
+
+        <p>模块二解决“怎么优化”，本章解决“哪里值得优化”。性能优化不只是找一个耗时函数，更要理解各模块的原理与特征。掌握模块特征，才能快速判断：哪里容易产生开销、哪里有冗余、谁适合缓存、谁能异步、谁能分级、谁能离线化。</p>
+
+        <h2>12.1 系统分层全景</h2>
+
+        <div class="mermaid">
+flowchart TB
+    subgraph L1["基础支撑层"]
+        F1["数学库 / 物理库 / 容器 / 字符串 / 网络库"]
+    end
+    subgraph L2["游戏框架层"]
+        F2["UI 框架 / 技能框架 / 网络同步框架"]
+    end
+    subgraph L3["业务系统层"]
+        F3["任务 / 排名 / 背包等具体玩法"]
+    end
+    subgraph E["引擎核心模块"]
+        E1["渲染管线 / 动画 / 粒子 / UI 内核 / 内存管理"]
+    end
+    L1 --> L2 --> L3
+    L2 --> E
+    L1 --> E
+        </div>
+
+        <p>分析时需要逐层了解模块的工作原理与性能特征。下面逐个拆解，注意区分<strong>业务架构意义上的“UI 框架”</strong>与<strong>引擎底层的“UI 系统（内核）”</strong>，它们是两个层次。</p>
+
+        <h2>12.2 UI 框架（业务架构层）</h2>
+
+        <p>典型 UI 架构可抽象为 MVC：</p>
+        <table>
+            <thead><tr><th>模块</th><th>职责</th></tr></thead>
+            <tbody>
+                <tr><td>Model</td><td>数据、配置、数据服务</td></tr>
+                <tr><td>Control</td><td>控制逻辑、业务逻辑</td></tr>
+                <tr><td>View</td><td>面板、控件、显示逻辑</td></tr>
+            </tbody>
+        </table>
+        <p>典型数据流：<code>服务器消息 → Model → Control → View → UI 更新</code>。</p>
+
+        <div class="callout callout-danger">
+            <strong>常见性能问题</strong>：事件响应产生冗余（重复监听、未取消订阅）、UI 重建产生额外开销、面板更新存在冗余。
+        </div>
+        <p><strong>优化抓手</strong>：事件订阅生命周期管理、静态/动态 Canvas 拆分、隐藏面板挂起刷新。</p>
+
+        <h2>12.3 网络同步框架</h2>
+
+        <table>
+            <thead><tr><th>方案</th><th>机制</th><th>特征</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>状态同步</td>
+                    <td>服务器直接下发状态，客户端据状态产生表现</td>
+                    <td>服务器权威、流量较大，客户端逻辑相对简单</td>
+                </tr>
+                <tr>
+                    <td>帧同步</td>
+                    <td>服务器广播操作指令，客户端据指令自行计算逻辑</td>
+                    <td>流量小、要求确定性，客户端计算量大</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p>无论哪种方案，都要关注<strong>逻辑与表现分离</strong>：把逻辑计算从表现系统独立出来，便于固定逻辑帧、插值回放与多线程。</p>
+
+        <div class="callout callout-danger">
+            <strong>常见性能问题</strong>：线程间数据同步、线程通信带来的缓存问题、逻辑帧卡顿、指令消息冗余。
+        </div>
+        <p><strong>优化抓手</strong>：减少跨线程数据搬运、消息合并去重、逻辑帧与渲染帧解耦。</p>
+
+        <h2>12.4 技能框架</h2>
+
+        <p>技能框架可拆分为四部分：<strong>实体、控制流、行为、数值</strong>。角色的动画、移动、材质、特效等行为独立开发，再通过控制流按时间轴组合。这种配置化方案提升了开发效率，但也带来特有的冗余：</p>
+
+        <ul>
+            <li><strong>配置冗余</strong>：多个技能重复配置相同行为段。</li>
+            <li><strong>资源冗余</strong>：相似特效/动画被重复引用或复制。</li>
+            <li><strong>更新冗余</strong>：未生效的技能段仍在每帧检查。</li>
+            <li><strong>计算冗余</strong>：可共享的数值结果被反复计算。</li>
+        </ul>
+
+        <p><strong>优化抓手</strong>：行为段共享复用、时间轴驱动的按需激活、配置与数值缓存。</p>
+
+        <h2>12.5 地图与内存管理</h2>
+
+        <p>地图系统通常包含场景物件、位置与旋转信息、机关脚本、导航网格，重点关注场景渲染压力。内存管理由对象池、内存池、内存分配器组成。</p>
+
+        <div class="callout callout-danger">
+            <strong>常见性能问题</strong>：内存分配算法效率、内存碎片、对象池冗余、不合理的预分配。
+        </div>
+        <p><strong>优化抓手</strong>：按生命周期选择分配器、池容量治理、空间划分与分块加载。</p>
+
+        <h2>12.6 渲染管线</h2>
+
+        <p>典型渲染管线分为<strong>剔除管线 → 绘制管线</strong>。</p>
+
+        <table>
+            <thead><tr><th>阶段</th><th>组成</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>剔除</td>
+                    <td>Frustum、地形、Occlusion、Group、光照、反射剔除</td>
+                </tr>
+                <tr>
+                    <td>绘制</td>
+                    <td>动态网格、粒子条带/拖尾、深度图、阴影、不透明、半透明、排序、合批</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-danger">
+            <strong>常见性能问题</strong>：低端机仍执行不必要的管线功能、Camera Culling 不适合实际玩法、渲染对象重复计算、合批过程产生额外 CPU 开销。
+        </div>
+        <p><strong>优化抓手</strong>：分档管线裁剪、定制剔除策略、缓存渲染对象、空间分组合批。</p>
+
+        <h2>12.7 动画模块</h2>
+
+        <p>动画模块分为两部分：</p>
+        <ol>
+            <li><strong>动画逻辑</strong>：骨骼采样、插值、动画事件、状态机、Motion、IK。</li>
+            <li><strong>蒙皮计算</strong>：骨骼矩阵计算 → Job System → 骨骼节点权重混合 → 提交绘制。</li>
+        </ol>
+
+        <div class="callout callout-danger">
+            <strong>常见性能问题</strong>：镜头外动画仍运行、相同动画重复计算、动画逻辑更新频率过高。
+        </div>
+        <p><strong>优化抓手</strong>：距离分级调度、Job 并行化、动画重定向与共享、镜头外裁剪。</p>
+
+        <h2>12.8 粒子系统</h2>
+
+        <p>粒子系统分三部分：<strong>包围盒计算、粒子逻辑、粒子渲染</strong>。粒子逻辑持续计算生成数量、位置、运动、生命周期，只有判定可见时才进入渲染。</p>
+
+        <div class="callout callout-danger">
+            <strong>常见性能问题</strong>：粒子包围盒重复计算、镜头外粒子仍运行、粒子渲染产生大量 Overdraw。
+        </div>
+        <p><strong>优化抓手</strong>：包围盒缓存、可见性驱动逻辑启停、离线凸包裁剪、粒子数分档。</p>
+
+        <h2>12.9 UI 系统（引擎内核层）</h2>
+
+        <p>UI 从结构上分为组件层与内核层。组件层负责 UI 元素与逻辑；内核层负责<strong>合批计算、网格生成、渲染提交</strong>。</p>
+
+        <p>典型流程：<code>UI 组件 → 顶点/材质更新 → 可见性判断 → 重建 → 排序 → 合批 → 渲染提交</code>。</p>
+
+        <div class="callout callout-danger">
+            <strong>常见性能问题</strong>：UI 重建、合批计算、UI 更新频率过高。
+        </div>
+        <p><strong>优化抓手</strong>：限制重建范围、图集与材质一致性、刷新节流。</p>
+
+        <h2>12.10 模块特征速查表</h2>
+
+        <table>
+            <thead>
+                <tr><th>模块</th><th>核心特征</th><th>首选优化方向</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>UI 框架</td><td>事件驱动、MVC 数据流</td><td>事件治理 + Canvas 拆分</td></tr>
+                <tr><td>网络同步</td><td>逻辑/表现分离、跨线程</td><td>消息去重 + 线程解耦</td></tr>
+                <tr><td>技能框架</td><td>配置化、时间轴组合</td><td>按需激活 + 共享复用</td></tr>
+                <tr><td>地图/内存</td><td>池化、碎片敏感</td><td>分配器选型 + 容量治理</td></tr>
+                <tr><td>渲染管线</td><td>剔除→绘制、状态切换</td><td>管线裁剪 + 分组合批</td></tr>
+                <tr><td>动画</td><td>逻辑+蒙皮、可并行</td><td>Job 化 + 距离分级</td></tr>
+                <tr><td>粒子</td><td>生命周期 + Overdraw</td><td>可见性启停 + 离线裁剪</td></tr>
+                <tr><td>UI 内核</td><td>重建/合批/网格提交</td><td>限制重建 + 刷新节流</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习与思考</h2>
+        <div class="exercise">
+            <h3><span class="tag practice">基础练习</span>模块标注</h3>
+            <p>在你自己的工程中，把现有性能问题按这八个模块归类，判断每个问题属于配置/资源/更新/计算哪类冗余。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag think">思考题</span>两个 UI 层次</h3>
+            <p>用自己的话说明“UI 框架（MVC）”与“UI 系统（内核）”的区别，并解释为什么事件订阅问题和 Canvas 重建问题要在不同层次解决。</p>
+        </div>
+        <div class="exercise">
+            <h3><span class="tag practice">进阶挑战</span>优化抓手落地</h3>
+            <p>从速查表中选一个模块，把它的“首选优化方向”拆解成具体可执行的改造项，并写出每一项的验证指标。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>系统分基础支撑、游戏框架、业务系统三层，引擎核心模块横跨框架与基础层。</li>
+            <li>八大模块各有架构特征与典型冗余，优化抓手不同：事件、线程、配置、内存、管线、并行、可见性、重建。</li>
+            <li>判断“哪里值得优化”，本质是把模块特征映射到缓存、异步、分级、离线化四类手段。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章</strong>：有了模块地图，还需要一套可操作的分析方法。第 13 章讲微观分析四板斧与八大维度。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="11-阴影动画与引擎管线定制.html">← 上一章：阴影、动画与引擎管线定制</a>
+            <a href="13-微观分析四板斧与八大维度.html">下一章：微观分析四板斧与八大维度 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

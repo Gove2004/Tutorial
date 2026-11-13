@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>13 环境搭建与实战演练 - AI4Animation 深度教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+</head>
+<body>
+<nav class="chapter-nav">
+    <a href="index.html">目录</a>
+    <a href="12-AI4AnimationPy框架详解.html">← 上一章：AI4AnimationPy</a>
+    <a href="14-评估方法与研究前沿.html">下一章：评估与前沿 →</a>
+</nav>
+
+<main>
+    <h1>13　环境搭建与实战演练</h1>
+    <p>本章给出一条可直接照做的路径：从空 Conda 环境到跑通 Demo、批量转换数据、训练并验证。命令均来自官方安装文档，
+    平台以你当前的 Windows 为主，并附 Linux 版本。</p>
+
+    <h2>13.1 创建环境</h2>
+    <p>框架要求 Python 3.12+，使用 Conda 管理环境：</p>
+<pre class="terminal"><code>conda create -n AI4AnimationPY python=3.12
+conda activate AI4AnimationPY</code></pre>
+
+    <h2>13.2 Windows 安装（GPU）</h2>
+<pre class="terminal"><code>pip install msvc-runtime==14.40.33807
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip install nvidia-cudnn-cu12==9.3.0.75 nvidia-cuda-runtime-cu12==12.5.82 nvidia-cufft-cu12==11.2.3.61
+pip install onnxruntime-gpu==1.19.0
+pip install -e . --use-pep517</code></pre>
+
+    <div class="callout callout-warning">
+        <span class="callout-title">关于 CUDA 版本</span>
+        <p>官方文档明确提示：需要根据 GPU 调整 PyTorch/CUDA 版本。文档默认 cu124 是撰写时的基线；较新架构的显卡
+        （如 Blackwell 架构）应改用对应更新的 CUDA 索引安装，不要机械照抄 cu124。</p>
+    </div>
+
+    <h2>13.3 Linux 安装（无显示器服务器）</h2>
+<pre class="terminal"><code>conda create -y -n AI4AnimationPY python=3.12 pip
+conda activate AI4AnimationPY
+pip install torch torchvision torchaudio onnx raylib numpy scipy matplotlib scikit-learn einops pygltflib pyscreenrec tqdm pyyaml ipython
+pip install onnxruntime-gpu
+pip install -e . --no-dependencies</code></pre>
+    <p>macOS 流程相同，把 <code>onnxruntime-gpu</code> 换成 <code>onnxruntime</code>。</p>
+
+    <h2>13.4 验证安装</h2>
+<pre class="terminal"><code>python Demos/Empty/Program.py
+python Demos/Actor/Program.py</code></pre>
+    <p>第一个无报错即安装成功；第二个会打开独立窗口显示角色模型。</p>
+
+    <h2>13.5 Hello World：两种执行模式</h2>
+<pre><code class="language-python">from ai4animation import AI4Animation
+
+class Program:
+    def Start(self):
+        print("Hello World")
+
+    def Update(self):
+        return
+
+if __name__ == "__main__":
+    AI4Animation(Program(), mode=AI4Animation.Mode.HEADLESS)
+    # 需要窗口时改为：
+    # AI4Animation(Program(), mode=AI4Animation.Mode.STANDALONE)
+</code></pre>
+
+    <h2>13.6 数据转换</h2>
+    <h3>代码内单文件加载</h3>
+<pre><code class="language-python">from ai4animation import Motion
+
+glb_motion = Motion.LoadFromGLB("character.glb", names=bone_names, floor=None)
+fbx_motion = Motion.LoadFromFBX("character.fbx")
+bvh_motion = Motion.LoadFromBVH("character.bvh", scale=0.01)
+npz_motion = Motion.LoadFromNPZ("character.npz")
+
+glb_motion.SaveToNPZ("character")
+</code></pre>
+    <div class="callout callout-info">
+        <span class="callout-title">两个依赖要点</span>
+        <ul>
+            <li>BVH 常以厘米为单位，必须传 <code>scale=0.01</code> 转米；GLB 与 BVH 开箱即用，无额外依赖</li>
+            <li>FBX 导入需要单独安装 Autodesk FBX SDK Python 绑定并配置 <code>FBXSDK_ROOT</code>、<code>FBXSDK_COMPILER</code> 环境变量</li>
+        </ul>
+    </div>
+
+    <h3>CLI 批量转换</h3>
+<pre class="terminal"><code>convert --input_dir path/to/motions --output_dir path/to/output --skeleton Cranberry</code></pre>
+    <table>
+        <thead><tr><th>参数</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr><td>--input_dir</td><td>含 GLB/FBX/BVH 的目录，递归搜索</td></tr>
+            <tr><td>--output_dir</td><td>NPZ 输出目录，默认 input_dir/NPZ</td></tr>
+            <tr><td>--skeleton</td><td>可选骨骼过滤定义：Cranberry 或 Geno</td></tr>
+            <tr><td>--bvh_scale</td><td>BVH 位置缩放，默认 0.01</td></tr>
+        </tbody>
+    </table>
+
+    <h2>13.7 构建数据集与运动浏览</h2>
+<pre><code class="language-python">from ai4animation import (
+    AI4Animation, MotionEditor, Dataset,
+    RootModule, MotionModule, ContactModule, GuidanceModule,
+)
+
+class Program:
+    def Start(self):
+        editor = AI4Animation.Scene.AddEntity("MotionEditor")
+        editor.AddComponent(
+            MotionEditor,
+            Dataset(npz_path, [
+                lambda x: RootModule(x, Definitions.HipName,
+                    Definitions.LeftHipName, Definitions.RightHipName,
+                    Definitions.LeftShoulderName, Definitions.RightShoulderName),
+                lambda x: MotionModule(x),
+                lambda x: ContactModule(x, [
+                    (Definitions.LeftAnkleName, 0.1, 0.25),
+                    (Definitions.LeftBallName, 0.05, 0.25),
+                    (Definitions.RightAnkleName, 0.1, 0.25),
+                    (Definitions.RightBallName, 0.05, 0.25),
+                ]),
+                lambda x: GuidanceModule(x),
+            ]),
+            model_path, bone_names
+        )
+        AI4Animation.Standalone.Camera.SetTarget(editor)
+
+    def Update(self):
+        pass
+
+if __name__ == "__main__":
+    AI4Animation(Program())
+</code></pre>
+    <p>MotionEditor 提供时间轴 GUI，可拖动浏览 NPZ 片段并检查接触与轨迹是否正确——这是训练前必须做的数据质检环节。</p>
+
+    <h2>13.8 推荐的实战推进顺序</h2>
+    <div class="steps">
+        <div class="step"><span class="step-number">1</span><div class="step-content"><p>跑通 Empty 与 Actor，确认环境与渲染正常</p></div></div>
+        <div class="step"><span class="step-number">2</span><div class="step-content"><p>取 3–5 个 BVH 用 convert 转 NPZ，检查单位与骨骼名</p></div></div>
+        <div class="step"><span class="step-number">3</span><div class="step-content"><p>用 MotionEditor 逐片段质检，确认接触标签与根轨迹</p></div></div>
+        <div class="step"><span class="step-number">4</span><div class="step-content"><p>先在小数据子集训练 MLP 基线，跑通完整训练-评估回路</p></div></div>
+        <div class="step"><span class="step-number">5</span><div class="step-content"><p>再换用 PFNN/MANN 等目标模型，全量训练并导出 ONNX</p></div></div>
+    </div>
+
+    <h2>13.9 故障排查</h2>
+    <table>
+        <thead><tr><th>现象</th><th>可能原因</th><th>处理</th></tr></thead>
+        <tbody>
+            <tr><td>ImportError: 找不到包</td><td>未激活环境或未用 -e 安装</td><td>确认 conda 环境，重新 pip install -e .</td></tr>
+            <tr><td>torch 无法调用 CUDA</td><td>CUDA 版本与显卡不匹配</td><td>按 GPU 架构换对应 PyTorch 索引重装</td></tr>
+            <tr><td>角色尺寸异常放大/缩小</td><td>BVH 厘米未转米</td><td>LoadFromBVH 或 convert 传 scale=0.01</td></tr>
+            <tr><td>STANDALONE 无法开窗</td><td>远程/无显示环境或 raylib 缺失</td><td>改用 HEADLESS，或补齐 raylib 依赖</td></tr>
+            <tr><td>FBX 导入报错</td><td>未装 FBX SDK 绑定</td><td>配置 FBXSDK_ROOT 等环境变量后安装绑定</td></tr>
+            <tr><td>onnxruntime 初始化失败</td><td>GPU 版与驱动不匹配</td><td>核对驱动版本，必要时退回 CPU 版 onnxruntime</td></tr>
+        </tbody>
+    </table>
+
+    <section class="exercise">
+        <h3>练习与思考</h3>
+        <div class="steps">
+            <div class="step"><span class="step-number">1</span><div class="step-content"><h4>全流程</h4><p>独立完成一次"BVH → NPZ → MotionEditor 质检 → 小数据训练"，记录每一步的实际耗时与遇到的报错。</p></div></div>
+            <div class="step"><span class="step-number">2</span><div class="step-content"><h4>环境判断</h4><p>解释为什么在你当前显卡上不能直接照抄 cu124 命令，应如何确定正确的 PyTorch 版本。</p></div></div>
+        </div>
+    </section>
+
+    <h2>本章小结</h2>
+    <ul>
+        <li>Python 3.12 + Conda，Windows 用 GPU 版安装、Linux 服务器装无窗口依赖，editable 模式安装</li>
+        <li>执行模式为 HEADLESS 与 STANDALONE；BVH 必须 scale=0.01，FBX 需额外 SDK</li>
+        <li>convert 支持批量转换，MotionEditor 是训练前的数据质检入口</li>
+        <li>先小数据跑通基线再全量训练，是降低返工成本的标准推进方式</li>
+    </ul>
+
+    <div class="callout callout-info">
+        <span class="callout-title">延伸阅读</span>
+        <ul>
+            <li><a href="https://facebookresearch.github.io/ai4animationpy/getting-started/installation/">官方安装文档</a></li>
+            <li><a href="https://facebookresearch.github.io/ai4animationpy/getting-started/quickstart/">快速开始</a></li>
+        </ul>
+    </div>
+</main>
+
+<footer class="chapter-footer">
+    <nav class="chapter-nav">
+        <a href="12-AI4AnimationPy框架详解.html">← 上一章：AI4AnimationPy</a>
+        <a href="14-评估方法与研究前沿.html">下一章：评估与前沿 →</a>
+    </nav>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

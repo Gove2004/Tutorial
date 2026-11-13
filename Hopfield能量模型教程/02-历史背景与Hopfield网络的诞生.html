@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 历史背景与 Hopfield 网络的诞生 - Hopfield 与能量生成模型教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-math.css">
+    <script>
+        MathJax = {
+            tex: { inlineMath: [['$','$'],['\\(','\\)']], displayMath: [['$$','$$'],['\\[','\\]']] },
+            svg: { fontCache: 'global' }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-导读-能量视角的神经网络.html">← 上一章</a>
+        <a href="03-离散Hopfield网络与能量函数.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>02 ｜ 历史背景与 Hopfield 网络的诞生</h1>
+
+        <h2>2.1 前史：从形式神经元到感知机的兴衰</h2>
+        <p>要理解 Hopfield 1982 年论文为什么引发震动，先要知道它发表在什么样的学术气氛中。神经网络并不是 1982 年才出现的新东西，它的前史经历了一轮完整的兴起与挫败。</p>
+
+        <div class="timeline">
+            <div class="timeline-item">
+                <div class="timeline-year">1943</div>
+                <h4>McCulloch–Pitts 形式神经元</h4>
+                <p>McCulloch 与 Pitts 证明：由简单的二值阈值单元组成的网络，原则上可以计算任意逻辑函数。这是「神经元即逻辑门」的第一次形式化，但模型没有学习能力，权重需要人工指定。</p>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-year">1949</div>
+                <h4>Hebb 突触学习假说</h4>
+                <p>Hebb 在《The Organization of Behavior》中提出：两个反复同时兴奋的神经元之间，突触连接会增强。这一假说后来成为 Hopfield 网络存储规则的直接来源（第 4 章）。</p>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-year">1958–1960</div>
+                <h4>Rosenblatt 的感知机</h4>
+                <p>Rosenblatt 提出感知机，并给出了可收敛的学习规则：当分类出错时按误差方向调整权重。这是第一个能从数据中学习的神经网络模型，引发了第一轮公众热情。</p>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-year">1969</div>
+                <h4>Minsky 与 Papert 的《Perceptrons》</h4>
+                <p>书中严格证明：单层感知机只能表示线性可分函数，连异或（XOR）这样简单的问题都无法解决；同时对多层网络的训练前景表示悲观。该书的数学权威性直接导致研究经费撤离，神经网络研究进入约十年的低谷。</p>
+            </div>
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>需要澄清的一点</strong>：Minsky 与 Papert 批判的是<em>单层</em>感知机。多层网络在表达能力上并没有这个限制，但当时没有任何可靠的多层训练算法（反向传播要到 1986 年才被 Rumelhart、Hinton、Williams 重新推广并普及）。所以《Perceptrons》的结论在数学上成立，真正的问题是其悲观解读被外推到了整个联结主义路线。
+        </div>
+
+        <h2>2.2 寒冬中的两条暗线</h2>
+        <p>1970 年代的神经网络研究并未完全中断，有两条暗线直接通向 Hopfield 的工作。</p>
+        <h3>暗线一：内容寻址记忆问题</h3>
+        <p>传统计算机按地址取数据，而人脑显然是按<em>内容</em>检索的：一句残缺的旋律、一张模糊的脸，就能唤起完整记忆。如何让网络从部分输入恢复完整模式，即「内容寻址记忆」（content-addressable memory）或「联想记忆」（associative memory），成为当时的核心问题。Willshaw 等人在 1960 年代末已提出相关模型，但这些模型缺乏统一的动力学与收敛性分析。</p>
+        <h3>暗线二：物理学对无序系统的研究</h3>
+        <p>1975 年 Edwards 与 Anderson 提出自旋玻璃（spin glass）的数学模型：大量微小磁矩通过随机的、相互冲突的耦合相互作用，系统存在数目庞大的亚稳态。物理学家发展出一整套分析这类系统的工具（自由能、复制方法）。神经网络与自旋玻璃在数学结构上的相似性，很快被少数研究者注意到。</p>
+
+        <div class="callout callout-info">
+            <strong>公平的优先权说明</strong>：William Little 在 1974 年的论文《The existence of persistent states in the brain》中，已经用 Ising 型持久状态描述大脑记忆，结构上非常接近后来的模型。Hopfield 的贡献不在于「第一个想到二值单元网络」，而在于第一个用能量函数把动力学、收敛性和记忆容量组织成一个<em>可分析、可推广的完整框架</em>。科学史上这类「框架化」工作往往比孤立的先声更有影响力。
+        </div>
+
+        <h2>2.3 Hopfield 1982：论文与其历史语境</h2>
+        <p>John J. Hopfield 是受过固体物理训练的科学家，1982 年论文发表于《美国国家科学院院刊》（PNAS），标题为 <em>Neural networks and physical systems with emergent collective computational abilities</em>。标题中的「emergent collective computational abilities（涌现的集体计算能力）」点明了立意：计算能力不属于任何单个神经元，而属于整个网络的集体动力学。</p>
+        <p>论文相对于此前工作的真正创新有两点。</p>
+
+        <div class="definition">
+            <h4>创新一：引入 Lyapunov 型能量函数，给出收敛性保证</h4>
+            <p>Hopfield 构造了一个网络状态的标量函数，并证明按他的更新规则，该函数在每一步都不增加。这意味着无论从什么初始状态出发，网络必然在有限步内停在某个稳定状态，而不会陷入无限振荡或混沌。此前的联想记忆模型大多只能靠实验观察「好像能收敛」，没有这种数学保证。</p>
+        </div>
+        <div class="definition">
+            <h4>创新二：把记忆重新定义为动力学的吸引子</h4>
+            <p>记忆不是存放在某个单元里的数据，而是状态空间中的稳定不动点；每个记忆周围有一片「吸引盆地」，落入盆地的任何残缺输入都会被动力学自动修正到该记忆。这一转换同时解释了容错性（盆地内的扰动无害）和检索过程（沿能量下降的自发演化），并自然引出了可量化的容量问题。</p>
+        </div>
+
+        <h2>2.4 为什么这篇论文改变了局面</h2>
+        <p>1982 年的论文迅速跨越物理界，在 1980 年代中期重新点燃了神经网络研究的热情，原因是它同时满足了三拨人的需求：</p>
+        <ul>
+            <li><strong>对物理学家</strong>：网络是一个定义明确的多体系统，配分函数、自由能、相变、自旋玻璃的全套工具都可以直接搬过来，模型第一次变得「可计算、可分析」。</li>
+            <li><strong>对工程师</strong>：收敛性保证意味着系统行为可预测；1984 年的连续模型进一步表明，整个网络可以用运算放大器和电阻构成的模拟电路直接实现，计算在收敛过程中「自动完成」，无需中央时钟。</li>
+            <li><strong>对认知科学家</strong>：吸引子、盆地、自发补全，提供了一套描述知觉、记忆、模式识别的新语言，与符号主义的规则系统形成鲜明对照。</li>
+        </ul>
+        <p>紧随其后，Ackley、Hinton 与 Sejnowski 在 1985 年把随机温度引入这套能量框架，得到玻尔兹曼机——这是能量模型从「确定性记忆装置」走向「概率生成模型」的关键一步，也是本教程第二部分的主题。</p>
+
+        <h2>2.5 练习与思考</h2>
+        <div class="exercise">
+            <h4>思考题 2-1</h4>
+            <p>《Perceptrons》证明的是单层网络的局限，但公众和资助机构却把它解读为整个神经网络路线的失败。结合你了解的其他技术史，分析「严格的局部结论」为什么容易被外推成「全局性否定」，这种外推需要什么条件才站得住脚？</p>
+        </div>
+        <div class="exercise">
+            <h4>思考题 2-2</h4>
+            <p>Little 在 1974 年已有类似模型结构，Hopfield 却被视为该路线的开创者。请用你自己的话总结：Hopfield 的工作中，哪一部分是「新模型」，哪一部分是「新框架」？为什么框架化的工作更容易被记住？</p>
+        </div>
+        <div class="exercise">
+            <h4>文献阅读（可选）</h4>
+            <p>阅读 Hopfield 1982 论文的摘要与引言（仅 5 页），留意他如何用「物理系统」而非「计算机程序」的语言描述网络。这一措辞选择对论文被接受的方式有什么影响？</p>
+        </div>
+
+        <div class="summary-box">
+            <h3>本章小结</h3>
+            <ul>
+                <li>1943–1969 年神经网络经历了形式神经元、Hebbian 假说、感知机的兴起，以及《Perceptrons》之后的第一次寒冬。</li>
+                <li>寒冬中内容寻址记忆问题与自旋玻璃物理学两条暗线，为 Hopfield 准备了问题和工具。</li>
+                <li>Hopfield 1982 的核心创新是能量函数带来的收敛性保证，以及「记忆即吸引子」的重新定义，而非二值网络结构本身。</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="01-导读-能量视角的神经网络.html">← 上一章：导读</a>
+            <a href="03-离散Hopfield网络与能量函数.html">下一章：离散 Hopfield 网络与能量函数 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

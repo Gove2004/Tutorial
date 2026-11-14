@@ -6,12 +6,6 @@
     "updated": "2026-11-11"
   },
   {
-    "dir": "CACC真题精讲",
-    "title": "CACC 真题精讲 - 第一届与第二届区域赛、总决赛题目解析",
-    "chapters": 12,
-    "updated": "2026-11-11"
-  },
-  {
     "dir": "HollowKnight源码导读",
     "title": "《空洞骑士》反编译源码深度导读",
     "chapters": 17,
@@ -24,18 +18,6 @@
     "updated": "2026-11-11"
   },
   {
-    "dir": "Lua",
-    "title": "Lua 从入门到精通 - 完整教程",
-    "chapters": 13,
-    "updated": "2026-07-01"
-  },
-  {
-    "dir": "Network",
-    "title": "计算机网络 - 期末复习教程",
-    "chapters": 6,
-    "updated": "2026-07-01"
-  },
-  {
     "dir": "RainWorld源码导读",
     "title": "Rain World 反编译源码深度导读",
     "chapters": 15,
@@ -46,18 +28,6 @@
     "title": "Unity DOTS 与 Netcode for GameObjects 入门教程",
     "chapters": 11,
     "updated": "2026-11-11"
-  },
-  {
-    "dir": "compute-shader-tutorial",
-    "title": "Compute Shader 入门到精通",
-    "chapters": 10,
-    "updated": "2026-07-03"
-  },
-  {
-    "dir": "discrete-math-tutorial",
-    "title": "离散数学教程（屈婉玲版）",
-    "chapters": 15,
-    "updated": "2026-09-12"
   },
   {
     "dir": "ecs-dot-tutorial",
@@ -76,12 +46,6 @@
     "title": "动手做强化学习 · 从直觉到实战的系统教程",
     "chapters": 11,
     "updated": "2026-09-26"
-  },
-  {
-    "dir": "software-engineering-tutorial",
-    "title": "软件工程完整教程",
-    "chapters": 10,
-    "updated": "2026-07-03"
   },
   {
     "dir": "unity-mirror-networking",

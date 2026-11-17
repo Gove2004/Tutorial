@@ -1,0 +1,193 @@
+/* ============================================================
+   深色主题 · 技术蓝
+   仅在 html[data-theme="dark"] 下生效，浅色主题保持原样
+   ============================================================ */
+
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --primary: #4d9fe0;
+    --primary-dark: #8ccbf2;
+    --bg-main: #151a21;
+    --bg-aside: #0d1116;
+    --text: #e3e8ef;
+}
+
+html[data-theme="dark"] body {
+    background: var(--bg-aside);
+    color: var(--text);
+}
+
+html[data-theme="dark"] main {
+    background: var(--bg-main);
+    box-shadow: none;
+}
+
+html[data-theme="dark"] h1 {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+html[data-theme="dark"] h2 {
+    color: #e9edf3;
+    border-bottom-color: #2b333d;
+}
+
+html[data-theme="dark"] h3,
+html[data-theme="dark"] h4 {
+    color: #e9edf3;
+}
+
+html[data-theme="dark"] pre {
+    background: #1b222b;
+    border: 1px solid #2b3540;
+}
+
+html[data-theme="dark"] pre code {
+    color: #e9eef6;
+}
+
+html[data-theme="dark"] pre.terminal {
+    background: #0f151b;
+    border-left-color: #4fd08a;
+}
+
+html[data-theme="dark"] .copy-button {
+    background: #2f7cb8;
+}
+
+html[data-theme="dark"] .copy-button:hover {
+    background: #4d9fe0;
+}
+
+html[data-theme="dark"] .callout-info {
+    background: #14212d;
+    border-color: #4d9fe0;
+}
+
+html[data-theme="dark"] .callout-warning {
+    background: #2a2113;
+    border-color: #e0a34a;
+}
+
+html[data-theme="dark"] .callout-tip {
+    background: #14251a;
+    border-color: #63bf83;
+}
+
+html[data-theme="dark"] .callout-danger {
+    background: #2a1617;
+    border-color: #e57e78;
+}
+
+html[data-theme="dark"] details {
+    border-color: #2b333d;
+    background: #171d25;
+}
+
+html[data-theme="dark"] .details-content {
+    border-top-color: #2b333d;
+}
+
+html[data-theme="dark"] .tab-buttons {
+    border-bottom-color: #2b333d;
+}
+
+html[data-theme="dark"] .tab-buttons button {
+    color: var(--text);
+}
+
+html[data-theme="dark"] .tab-buttons button.active {
+    border-bottom-color: var(--primary);
+    color: var(--primary);
+}
+
+html[data-theme="dark"] th,
+html[data-theme="dark"] td {
+    border-color: #2b333d;
+}
+
+html[data-theme="dark"] th {
+    background: #1e252e;
+    color: #e9edf3;
+}
+
+html[data-theme="dark"] .comparison .good {
+    background: #14261a;
+}
+
+html[data-theme="dark"] .comparison .bad {
+    background: #2a1617;
+}
+
+html[data-theme="dark"] .step-number {
+    background: var(--primary);
+    color: #0d1116;
+}
+
+html[data-theme="dark"] .definition {
+    background: #171f28;
+    border-color: var(--primary);
+}
+
+html[data-theme="dark"] .definition h4 {
+    color: var(--primary-dark);
+}
+
+html[data-theme="dark"] .sidebar-note {
+    background: #2a2416;
+    border-left-color: #e0b45a;
+}
+
+html[data-theme="dark"] .chapter-nav {
+    border-bottom-color: #2b333d;
+}
+
+html[data-theme="dark"] .chapter-nav a {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .chapter-footer {
+    border-top-color: #2b333d;
+}
+
+html[data-theme="dark"] .intro {
+    color: #9aa5b1;
+}
+
+html[data-theme="dark"] .chapter-item {
+    background: #171d25;
+    border-color: #2b333d;
+}
+
+html[data-theme="dark"] .chapter-item a {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .chapter-badge.basic {
+    background: #16281a;
+    color: #7bd08b;
+}
+
+html[data-theme="dark"] .chapter-badge.intermediate {
+    background: #2a2113;
+    color: #e8b06a;
+}
+
+html[data-theme="dark"] .chapter-badge.advanced {
+    background: #2a1820;
+    color: #f08fa8;
+}
+
+html[data-theme="dark"] .version-info {
+    background: #1a2029;
+    color: #9aa5b1;
+}
+
+/* Mermaid 图形按原设计保留浅色画布，深色页面下作为插图卡片 */
+html[data-theme="dark"] .mermaid {
+    background: #f2f5f9;
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    padding: 1.2em;
+    color: #24292f;
+}

@@ -1,0 +1,223 @@
+/* ============================================================
+   深色主题 · GitHub 风格深色
+   仅在 html[data-theme="dark"] 下生效，浅色主题保持原样
+   ============================================================ */
+
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --primary: #4d9fe0;
+    --primary-dark: #79c0ff;
+    --accent: #58a6ff;
+    --bg-main: #161b22;
+    --bg-aside: #0d1117;
+    --text: #e6edf3;
+}
+
+html[data-theme="dark"] body {
+    background: var(--bg-aside);
+    color: var(--text);
+}
+
+html[data-theme="dark"] main {
+    background: var(--bg-main);
+    box-shadow: none;
+}
+
+html[data-theme="dark"] h1 {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+html[data-theme="dark"] h2 {
+    color: #e6edf3;
+    border-bottom-color: #30363d;
+}
+
+html[data-theme="dark"] h3,
+html[data-theme="dark"] h4 {
+    color: #e6edf3;
+}
+
+html[data-theme="dark"] a {
+    color: #58a6ff;
+}
+
+html[data-theme="dark"] code {
+    background: rgba(110, 118, 129, .34);
+    color: #ff7b72;
+}
+
+html[data-theme="dark"] pre {
+    background: #12161d;
+    border-color: #30363d;
+}
+
+html[data-theme="dark"] pre code {
+    color: #e6edf3;
+}
+
+html[data-theme="dark"] pre.terminal {
+    background: #0b0f14;
+    border-left-color: #3fb950;
+}
+
+html[data-theme="dark"] .copy-button {
+    background: #21262d;
+    color: #e6edf3;
+    border-color: #3d444d;
+}
+
+html[data-theme="dark"] .copy-button:hover {
+    background: #30363d;
+}
+
+html[data-theme="dark"] .callout-info {
+    background: #0d2a3f;
+    border-color: #58a6ff;
+}
+
+html[data-theme="dark"] .callout-warning {
+    background: #2a2312;
+    border-color: #d4a72c;
+}
+
+html[data-theme="dark"] .callout-tip {
+    background: #12251a;
+    border-color: #3fb950;
+}
+
+html[data-theme="dark"] .callout-danger {
+    background: #2a1416;
+    border-color: #f85149;
+}
+
+html[data-theme="dark"] details {
+    background: #161b22;
+    border-color: #30363d;
+}
+
+html[data-theme="dark"] details[open] summary {
+    border-bottom-color: #30363d;
+}
+
+html[data-theme="dark"] .tab-buttons {
+    border-bottom-color: #30363d;
+}
+
+html[data-theme="dark"] .tab-buttons button {
+    color: #9198a1;
+}
+
+html[data-theme="dark"] .tab-buttons button.active {
+    border-bottom-color: var(--primary);
+    color: #79c0ff;
+}
+
+html[data-theme="dark"] th,
+html[data-theme="dark"] td {
+    border-color: #30363d;
+}
+
+html[data-theme="dark"] th {
+    background: #1c232b;
+    color: #e6edf3;
+}
+
+html[data-theme="dark"] .comparison .good {
+    background: #12261a;
+}
+
+html[data-theme="dark"] .comparison .bad {
+    background: #2a1416;
+}
+
+html[data-theme="dark"] .step-number {
+    background: var(--primary);
+    color: #0d1117;
+}
+
+html[data-theme="dark"] .definition {
+    background: #1a2129;
+    border-color: var(--primary);
+}
+
+html[data-theme="dark"] .definition h4 {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .sidebar-note {
+    background: #2a2415;
+    border-left-color: #d4a72c;
+}
+
+html[data-theme="dark"] .chapter-nav {
+    border-bottom-color: #30363d;
+}
+
+html[data-theme="dark"] .chapter-nav a {
+    color: #58a6ff;
+}
+
+html[data-theme="dark"] .chapter-footer {
+    border-top-color: #30363d;
+}
+
+html[data-theme="dark"] .intro {
+    color: #9198a1;
+}
+
+html[data-theme="dark"] .chapter-item {
+    background: #161c23;
+    border-color: #30363d;
+}
+
+html[data-theme="dark"] .chapter-item:hover {
+    border-color: #58a6ff;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, .4);
+}
+
+html[data-theme="dark"] .chapter-item p {
+    color: #9198a1;
+}
+
+html[data-theme="dark"] .chapter-badge.basic {
+    background: #12261a;
+    color: #7ee2a0;
+}
+
+html[data-theme="dark"] .chapter-badge.intermediate {
+    background: #2a1e10;
+    color: #f0a868;
+}
+
+html[data-theme="dark"] .chapter-badge.advanced {
+    background: #2a1416;
+    color: #ff8c85;
+}
+
+html[data-theme="dark"] .version-info {
+    background: #1a2129;
+    border-color: #30363d;
+    color: #9198a1;
+}
+
+html[data-theme="dark"] .exercise {
+    background: #16222e;
+    border-color: #2f4a63;
+}
+
+html[data-theme="dark"] .exercise h3 {
+    color: #79c0ff;
+}
+
+html[data-theme="dark"] .summary-box,
+html[data-theme="dark"] .toc-inline {
+    background: #1a2129;
+}
+
+/* Mermaid 图形按原设计保留浅色画布，深色页面下作为插图卡片 */
+html[data-theme="dark"] .mermaid-wrapper {
+    background: #f2f5f9;
+    border-color: #cfd8e3;
+    color: #24292f;
+}

@@ -1,0 +1,277 @@
+/* ============================================================
+   深色主题 · 技术蓝（性能优化）
+   仅在 html[data-theme="dark"] 下生效，浅色主题保持原样
+   ============================================================ */
+
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --primary: #4d9fe0;
+    --primary-dark: #8ccbf2;
+    --primary-light: #16303f;
+    --bg-main: #151a1f;
+    --bg-aside: #0d1014;
+    --text: #e5e9ef;
+}
+
+html[data-theme="dark"] body {
+    background: var(--bg-aside);
+    color: var(--text);
+}
+
+html[data-theme="dark"] main {
+    background: var(--bg-main);
+    box-shadow: none;
+}
+
+html[data-theme="dark"] h1 {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+html[data-theme="dark"] h2 {
+    color: #e9eef5;
+    border-bottom-color: #2a313a;
+}
+
+html[data-theme="dark"] h3,
+html[data-theme="dark"] h4 {
+    color: #e9eef5;
+}
+
+html[data-theme="dark"] strong {
+    color: #eef4fa;
+}
+
+html[data-theme="dark"] code {
+    background: #202730;
+    color: #f0997a;
+}
+
+html[data-theme="dark"] pre {
+    background: #1b2027;
+    border: 1px solid #2a323c;
+}
+
+html[data-theme="dark"] pre code {
+    color: #f0f2f5;
+}
+
+html[data-theme="dark"] pre.terminal {
+    background: #10151a;
+    border-left-color: #4fd08a;
+}
+
+html[data-theme="dark"] .copy-button {
+    background: rgba(255, 255, 255, .14);
+    color: #fff;
+    border-color: rgba(255, 255, 255, .24);
+}
+
+html[data-theme="dark"] .copy-button:hover {
+    background: rgba(255, 255, 255, .26);
+}
+
+html[data-theme="dark"] .callout-info {
+    background: #14212d;
+    border-color: #4d9fe0;
+}
+
+html[data-theme="dark"] .callout-warning {
+    background: #2a2113;
+    border-color: #e0a34a;
+}
+
+html[data-theme="dark"] .callout-tip {
+    background: #14251a;
+    border-color: #63bf83;
+}
+
+html[data-theme="dark"] .callout-danger {
+    background: #2a1617;
+    border-color: #e57e78;
+}
+
+html[data-theme="dark"] details {
+    background: #171d24;
+    border-color: #2a313a;
+}
+
+html[data-theme="dark"] summary::before {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .details-content {
+    border-top-color: #2a313a;
+}
+
+html[data-theme="dark"] .tabs {
+    border-color: #2a313a;
+}
+
+html[data-theme="dark"] .tab-buttons {
+    background: #1b222a;
+    border-bottom-color: #2a313a;
+}
+
+html[data-theme="dark"] .tab-buttons button {
+    color: #9aa5b1;
+}
+
+html[data-theme="dark"] .tab-buttons button.active {
+    background: #151a1f;
+    border-bottom-color: var(--primary);
+    color: var(--primary);
+}
+
+html[data-theme="dark"] th,
+html[data-theme="dark"] td {
+    border-color: #2a313a;
+}
+
+html[data-theme="dark"] th {
+    background: #1e262f;
+    color: #e9eef5;
+}
+
+html[data-theme="dark"] tbody tr:nth-child(even) {
+    background: #181e25;
+}
+
+html[data-theme="dark"] .comparison .good {
+    background: #14261a;
+}
+
+html[data-theme="dark"] .comparison .bad {
+    background: #2a1617;
+}
+
+html[data-theme="dark"] .step-number {
+    background: var(--primary);
+    color: #0d1014;
+}
+
+html[data-theme="dark"] .definition {
+    background: var(--primary-light);
+    border-color: var(--primary);
+}
+
+html[data-theme="dark"] .definition h4 {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .sidebar-note {
+    background: #2a2416;
+    border-left-color: #e0b64a;
+}
+
+html[data-theme="dark"] .metric-card {
+    background: #1a212a;
+    border-color: #2a313a;
+}
+
+html[data-theme="dark"] .metric-card .metric-name {
+    color: #9aa5b1;
+}
+
+html[data-theme="dark"] .metric-card .metric-value {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .metric-card .metric-desc {
+    color: #9aa5b1;
+}
+
+html[data-theme="dark"] .exercise {
+    background: #16222e;
+    border-color: #2f4a63;
+}
+
+html[data-theme="dark"] .exercise h3 {
+    color: #7fc0f0;
+}
+
+html[data-theme="dark"] .exercise .tag {
+    background: var(--primary);
+    color: #0d1014;
+}
+
+html[data-theme="dark"] .exercise .tag.think {
+    background: #8e5cb7;
+    color: #f5edfa;
+}
+
+html[data-theme="dark"] .exercise .tag.practice {
+    background: #2f7d43;
+    color: #eaf7ee;
+}
+
+html[data-theme="dark"] .chapter-meta {
+    color: #9aa5b1;
+    border-bottom-color: #2a313a;
+}
+
+html[data-theme="dark"] .chapter-nav {
+    border-bottom-color: #2a313a;
+}
+
+html[data-theme="dark"] .chapter-nav a {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .chapter-footer {
+    border-top-color: #2a313a;
+}
+
+html[data-theme="dark"] .intro {
+    color: #9aa5b1;
+}
+
+html[data-theme="dark"] .chapter-item {
+    background: #171e25;
+    border-color: #2a313a;
+}
+
+html[data-theme="dark"] .chapter-item:hover {
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+
+html[data-theme="dark"] .chapter-item p {
+    color: #9aa5b1;
+}
+
+html[data-theme="dark"] .chapter-badge.basic {
+    background: #14261a;
+    color: #7bd08b;
+}
+
+html[data-theme="dark"] .chapter-badge.intermediate {
+    background: #2a2113;
+    color: #e8b06a;
+}
+
+html[data-theme="dark"] .chapter-badge.advanced {
+    background: #2a1820;
+    color: #f08fa8;
+}
+
+html[data-theme="dark"] .module-divider {
+    color: #7fc0f0;
+    border-left-color: var(--primary);
+}
+
+html[data-theme="dark"] .version-info {
+    background: #1a212a;
+    color: #9aa5b1;
+}
+
+html[data-theme="dark"] .toc-inline {
+    background: #171e25;
+    border-color: #2a313a;
+}
+
+/* Mermaid 图形按原设计保留浅色画布，深色页面下作为插图卡片 */
+html[data-theme="dark"] .mermaid {
+    background: #f2f5f9;
+    border-color: #cfd8e3;
+    color: #24292f;
+}

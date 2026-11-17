@@ -1,0 +1,226 @@
+/* ============================================================
+   深色主题 · 强化学习（青绿）
+   仅在 html[data-theme="dark"] 下生效，浅色主题保持原样
+   ============================================================ */
+
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --primary: #86c9c6;
+    --primary-2: #4fb3a8;
+    --accent: #e2b45a;
+    --bg-main: #151b1c;
+    --bg-aside: #0d1213;
+    --text: #dfe8e6;
+}
+
+html[data-theme="dark"] body {
+    background: var(--bg-aside);
+    color: var(--text);
+}
+
+html[data-theme="dark"] main {
+    background: var(--bg-main);
+    box-shadow: none;
+}
+
+html[data-theme="dark"] h1 {
+    color: var(--primary);
+    border-bottom-color: var(--primary-2);
+}
+
+html[data-theme="dark"] h2 {
+    color: #e3edea;
+    border-bottom-color: #2b3638;
+}
+
+html[data-theme="dark"] h3,
+html[data-theme="dark"] h4 {
+    color: #e3edea;
+}
+
+html[data-theme="dark"] strong {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] code {
+    background: #1f2b2d;
+    color: #8fd8cf;
+}
+
+html[data-theme="dark"] pre {
+    background: #1a2324;
+    border-color: #2c393d;
+}
+
+html[data-theme="dark"] pre code {
+    color: #e6edee;
+}
+
+html[data-theme="dark"] pre.terminal {
+    background: #101617;
+    border-left-color: var(--primary-2);
+}
+
+html[data-theme="dark"] pre.terminal code {
+    color: #c9e6df;
+}
+
+html[data-theme="dark"] .copy-button {
+    background: #3f9b93;
+    color: #0d1213;
+}
+
+html[data-theme="dark"] .copy-button:hover {
+    background: var(--primary-2);
+}
+
+html[data-theme="dark"] .callout-info {
+    background: #142222;
+    border-color: var(--primary-2);
+}
+
+html[data-theme="dark"] .callout-warning {
+    background: #2a2213;
+    border-color: var(--accent);
+}
+
+html[data-theme="dark"] .callout-tip {
+    background: #15251b;
+    border-color: #67bf94;
+}
+
+html[data-theme="dark"] .callout-danger {
+    background: #2a1717;
+    border-color: #e0837a;
+}
+
+html[data-theme="dark"] .definition {
+    background: #1a2425;
+    border-color: var(--primary-2);
+}
+
+html[data-theme="dark"] .definition h4 {
+    color: var(--primary-2);
+}
+
+html[data-theme="dark"] details {
+    background: #1a2021;
+    border-color: #2b3638;
+}
+
+html[data-theme="dark"] summary {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .details-content {
+    border-top-color: #2b3638;
+}
+
+html[data-theme="dark"] .tab-buttons {
+    border-bottom-color: #2b3638;
+}
+
+html[data-theme="dark"] .tab-buttons button {
+    color: #9fb1ae;
+}
+
+html[data-theme="dark"] .tab-buttons button.active {
+    border-bottom-color: var(--primary-2);
+    color: var(--primary);
+}
+
+html[data-theme="dark"] th,
+html[data-theme="dark"] td {
+    border-color: #2b3638;
+}
+
+html[data-theme="dark"] th {
+    background: #202a2b;
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .comparison .good {
+    background: #16251a;
+}
+
+html[data-theme="dark"] .comparison .bad {
+    background: #2a1717;
+}
+
+html[data-theme="dark"] .step-number {
+    background: var(--primary-2);
+    color: #0d1213;
+}
+
+html[data-theme="dark"] .sidebar-note {
+    background: #2a2416;
+    border-left-color: var(--accent);
+}
+
+html[data-theme="dark"] .formula {
+    background: #1c2627;
+    border-color: #4d6f6c;
+    color: #cfe9e5;
+}
+
+html[data-theme="dark"] .chapter-nav {
+    border-bottom-color: #2b3638;
+}
+
+html[data-theme="dark"] .chapter-nav a {
+    color: var(--primary-2);
+}
+
+html[data-theme="dark"] .chapter-footer {
+    border-top-color: #2b3638;
+}
+
+html[data-theme="dark"] .intro {
+    color: #9fb1ae;
+}
+
+html[data-theme="dark"] .chapter-item {
+    background: #19201f;
+    border-color: #2b3638;
+}
+
+html[data-theme="dark"] .chapter-badge.basic {
+    background: #16261c;
+    color: #7fcf9f;
+}
+
+html[data-theme="dark"] .chapter-badge.intermediate {
+    background: #2a2213;
+    color: #e8b06a;
+}
+
+html[data-theme="dark"] .chapter-badge.advanced {
+    background: #1a2230;
+    color: #9fb3dd;
+}
+
+html[data-theme="dark"] .hero {
+    background: linear-gradient(120deg, #0d3943, #185551);
+}
+
+html[data-theme="dark"] .hero h1 {
+    color: #fff;
+    border-bottom: none;
+}
+
+html[data-theme="dark"] .hero p {
+    color: #cfe3de;
+}
+
+html[data-theme="dark"] .hero .pills span {
+    background: rgba(255, 255, 255, .14);
+}
+
+/* Mermaid 图形按原设计保留浅色画布，深色页面下作为插图卡片 */
+html[data-theme="dark"] .mermaid {
+    background: #f2f5f9;
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    padding: 1.2em;
+    color: #24292f;
+}

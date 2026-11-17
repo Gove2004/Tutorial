@@ -1,0 +1,206 @@
+/* ============================================================
+   深色主题 · 源码导读（亮蓝）
+   仅在 html[data-theme="dark"] 下生效，浅色主题保持原样
+   ============================================================ */
+
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --primary: #4d9fe0;
+    --primary-dark: #8ccbf2;
+    --accent: #5fbdf5;
+    --bg-main: #151b22;
+    --bg-aside: #0d1116;
+    --text: #e5eaf0;
+}
+
+html[data-theme="dark"] body {
+    background: var(--bg-aside);
+    color: var(--text);
+}
+
+html[data-theme="dark"] main {
+    background: var(--bg-main);
+    box-shadow: none;
+}
+
+html[data-theme="dark"] h1 {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+html[data-theme="dark"] h2 {
+    color: #dfe9f4;
+    border-bottom-color: #2a333d;
+}
+
+html[data-theme="dark"] h3 {
+    color: #cfe0ee;
+}
+
+html[data-theme="dark"] h4 {
+    color: #e9eff6;
+}
+
+html[data-theme="dark"] code {
+    background: #1e2732;
+    color: #f08fb0;
+}
+
+html[data-theme="dark"] pre {
+    background: #1a1f26;
+    border: 1px solid #2a333d;
+}
+
+html[data-theme="dark"] pre code {
+    color: #e6e6e6;
+}
+
+html[data-theme="dark"] pre.terminal {
+    background: #101317;
+    border-left-color: #4fd08a;
+}
+
+html[data-theme="dark"] .copy-button {
+    background: #2f7cb8;
+}
+
+html[data-theme="dark"] .copy-button:hover {
+    background: #4d9fe0;
+}
+
+html[data-theme="dark"] .callout-info {
+    background: #14222e;
+    border-color: #4d9fe0;
+}
+
+html[data-theme="dark"] .callout-warning {
+    background: #2a2113;
+    border-color: #e0a34a;
+}
+
+html[data-theme="dark"] .callout-tip {
+    background: #14251a;
+    border-color: #63bf83;
+}
+
+html[data-theme="dark"] .callout-danger {
+    background: #2a1616;
+    border-color: #e57e78;
+}
+
+html[data-theme="dark"] details {
+    background: #181f27;
+    border-color: #2a333d;
+}
+
+html[data-theme="dark"] .details-content {
+    border-top-color: #2a333d;
+}
+
+html[data-theme="dark"] .tab-buttons {
+    border-bottom-color: #2a333d;
+}
+
+html[data-theme="dark"] .tab-buttons button {
+    color: var(--text);
+}
+
+html[data-theme="dark"] .tab-buttons button.active {
+    border-bottom-color: var(--primary);
+    color: var(--primary);
+}
+
+html[data-theme="dark"] th,
+html[data-theme="dark"] td {
+    border-color: #2a333d;
+}
+
+html[data-theme="dark"] th {
+    background: #1e262f;
+    color: #e9eff6;
+}
+
+html[data-theme="dark"] .comparison .good {
+    background: #14261a;
+}
+
+html[data-theme="dark"] .comparison .bad {
+    background: #2a1617;
+}
+
+html[data-theme="dark"] .step-number {
+    background: var(--primary);
+    color: #0d1116;
+}
+
+html[data-theme="dark"] .definition {
+    background: #18202a;
+    border-color: var(--primary);
+}
+
+html[data-theme="dark"] .definition h4 {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .sidebar-note {
+    background: #2a2315;
+    border-left-color: #e5c04a;
+}
+
+html[data-theme="dark"] .chapter-nav {
+    border-bottom-color: #2a333d;
+}
+
+html[data-theme="dark"] .chapter-nav a {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .chapter-footer {
+    border-top-color: #2a333d;
+}
+
+html[data-theme="dark"] .intro {
+    color: #9aa7b4;
+}
+
+html[data-theme="dark"] .chapter-item {
+    background: #181f27;
+    border-color: #2a333d;
+}
+
+html[data-theme="dark"] .chapter-item a {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .chapter-badge.basic {
+    background: #14261a;
+    color: #86cf9c;
+}
+
+html[data-theme="dark"] .chapter-badge.intermediate {
+    background: #2a2113;
+    color: #e8b06a;
+}
+
+html[data-theme="dark"] .chapter-badge.advanced {
+    background: #2a141d;
+    color: #f094b0;
+}
+
+html[data-theme="dark"] .version-info {
+    background: #1a222b;
+    color: #9aa7b4;
+    border-left-color: var(--primary);
+}
+
+html[data-theme="dark"] .tag-inline {
+    background: #1e2730;
+    color: #9aa7b4;
+}
+
+/* Mermaid 图形按原设计保留浅色画布，深色页面下作为插图卡片 */
+html[data-theme="dark"] pre.mermaid {
+    background: #f2f5f9;
+    border-color: #cfd8e3;
+    color: #24292f;
+}

@@ -1,0 +1,313 @@
+/* ============================================================
+   深色主题 · 技术蓝（论文导读）
+   仅在 html[data-theme="dark"] 下生效，浅色主题保持原样
+   ============================================================ */
+
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --primary: #4d9fe0;
+    --primary-dark: #8ccbf2;
+    --primary-light: #16303f;
+    --bg-main: #151a21;
+    --bg-aside: #0d1116;
+    --text: #e6eaf0;
+}
+
+html[data-theme="dark"] body {
+    background: var(--bg-aside);
+    color: var(--text);
+}
+
+html[data-theme="dark"] main {
+    background: var(--bg-main);
+    box-shadow: none;
+}
+
+html[data-theme="dark"] h1 {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+html[data-theme="dark"] h2 {
+    color: #e3ecf6;
+    border-bottom-color: #2a333d;
+}
+
+html[data-theme="dark"] h3,
+html[data-theme="dark"] h4 {
+    color: #e9eff6;
+}
+
+html[data-theme="dark"] strong {
+    color: #f0f5fa;
+}
+
+html[data-theme="dark"] code {
+    background: #202832;
+    border-color: #2e3742;
+    color: #f08fb0;
+}
+
+html[data-theme="dark"] pre {
+    background: #1b222c;
+    border-color: #28313c;
+}
+
+html[data-theme="dark"] pre code {
+    color: #e6edf3;
+}
+
+html[data-theme="dark"] pre.terminal {
+    background: #0f151c;
+    border-left-color: #4fd08a;
+}
+
+html[data-theme="dark"] .copy-button {
+    background: rgba(255, 255, 255, .1);
+    color: #dce6f0;
+    border-color: rgba(255, 255, 255, .18);
+}
+
+html[data-theme="dark"] .copy-button:hover {
+    background: #2f7cb8;
+}
+
+html[data-theme="dark"] .callout-info {
+    background: #14222e;
+    border-color: #4d9fe0;
+}
+
+html[data-theme="dark"] .callout-warning {
+    background: #2a2113;
+    border-color: #e0a34a;
+}
+
+html[data-theme="dark"] .callout-tip {
+    background: #14251a;
+    border-color: #63bf83;
+}
+
+html[data-theme="dark"] .callout-danger {
+    background: #2a1617;
+    border-color: #e57e78;
+}
+
+html[data-theme="dark"] details {
+    background: #19202a;
+    border-color: #2a333d;
+}
+
+html[data-theme="dark"] summary {
+    color: #e9eff6;
+}
+
+html[data-theme="dark"] details[open] summary {
+    border-bottom-color: #2a333d;
+}
+
+html[data-theme="dark"] .tab-buttons {
+    background: #1e252f;
+    border-bottom-color: #2a333d;
+}
+
+html[data-theme="dark"] .tab-buttons button {
+    color: #9aa6b2;
+}
+
+html[data-theme="dark"] .tab-buttons button.active {
+    background: #151a21;
+    border-bottom-color: var(--primary);
+    color: var(--primary);
+}
+
+html[data-theme="dark"] th,
+html[data-theme="dark"] td {
+    border-color: #2a333d;
+}
+
+html[data-theme="dark"] th {
+    background: #1f2731;
+    color: #dfe8f2;
+}
+
+html[data-theme="dark"] tbody tr:nth-child(even) {
+    background: #181e26;
+}
+
+html[data-theme="dark"] .comparison .good {
+    background: #14261a;
+}
+
+html[data-theme="dark"] .comparison .bad {
+    background: #2a1617;
+}
+
+html[data-theme="dark"] .step-number {
+    background: var(--primary);
+    color: #0d1116;
+}
+
+html[data-theme="dark"] .definition {
+    background: var(--primary-light);
+    border-color: var(--primary);
+}
+
+html[data-theme="dark"] .definition h4 {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .paper-meta {
+    background: #1a2129;
+    border-color: #2a333d;
+}
+
+html[data-theme="dark"] .paper-meta dt {
+    color: #aebbc9;
+}
+
+html[data-theme="dark"] .formula {
+    background: #1a212a;
+    border-color: #2a333d;
+}
+
+html[data-theme="dark"] .formula .formula-label {
+    color: #9aa6b2;
+}
+
+html[data-theme="dark"] .sidebar-note {
+    background: #2a2415;
+    border-left-color: #dfb64f;
+}
+
+html[data-theme="dark"] .pill {
+    background: #16303f;
+    color: #9fd0f2;
+}
+
+html[data-theme="dark"] .pill.green {
+    background: #15251a;
+    color: #83cf9b;
+}
+
+html[data-theme="dark"] .pill.orange {
+    background: #2a2113;
+    color: #e8b06a;
+}
+
+html[data-theme="dark"] .pill.red {
+    background: #2a1617;
+    color: #ec8f88;
+}
+
+html[data-theme="dark"] .pill.gray {
+    background: #222a33;
+    color: #9aa6b2;
+}
+
+html[data-theme="dark"] .chapter-nav {
+    border-bottom-color: #2a333d;
+}
+
+html[data-theme="dark"] .chapter-nav a {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .chapter-footer {
+    border-top-color: #2a333d;
+}
+
+html[data-theme="dark"] .hero {
+    background: linear-gradient(135deg, #0a4a78 0%, #0068ad 55%, #1a7fb8 100%);
+}
+
+html[data-theme="dark"] .hero h1 {
+    color: #fff;
+    border-bottom: none;
+}
+
+html[data-theme="dark"] .intro {
+    color: #9aa6b2;
+}
+
+html[data-theme="dark"] .chapter-item {
+    background: #171e26;
+    border-color: #2a333d;
+}
+
+html[data-theme="dark"] .chapter-item:hover {
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+
+html[data-theme="dark"] .chapter-item p {
+    color: #9aa6b2;
+}
+
+html[data-theme="dark"] .chapter-badge.basic {
+    background: #14261a;
+    color: #83cf9b;
+}
+
+html[data-theme="dark"] .chapter-badge.intermediate {
+    background: #2a2113;
+    color: #e8b06a;
+}
+
+html[data-theme="dark"] .chapter-badge.advanced {
+    background: #2a1617;
+    color: #ec8f88;
+}
+
+html[data-theme="dark"] .part-title {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .part-title::before {
+    background: var(--primary);
+}
+
+html[data-theme="dark"] .timeline {
+    border-left-color: #2c4c66;
+}
+
+html[data-theme="dark"] .timeline-item::before {
+    background: var(--primary);
+    border-color: var(--bg-main);
+    box-shadow: 0 0 0 2px #2c4c66;
+}
+
+html[data-theme="dark"] .timeline-item .year {
+    color: var(--primary);
+}
+
+html[data-theme="dark"] .version-info {
+    background: #1a212a;
+    color: #9aa6b2;
+}
+
+html[data-theme="dark"] pre.tree {
+    background: #141b23;
+}
+
+html[data-theme="dark"] pre.tree code {
+    color: #c8d4e0;
+}
+
+html[data-theme="dark"] .exercise {
+    background: #171e26;
+    border-color: #2a333d;
+}
+
+html[data-theme="dark"] .exercise h3 {
+    color: #e9eff6;
+}
+
+/* Mermaid 图形按原设计保留浅色画布，深色页面下作为插图卡片 */
+html[data-theme="dark"] pre.mermaid {
+    background: #f2f5f9;
+    border-color: #cfd8e3;
+    color: #24292f;
+}
+
+html[data-theme="dark"] .mermaid-caption {
+    color: #9aa6b2;
+}

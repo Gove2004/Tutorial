@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <script src="assets/theme.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>永久死亡：失败的分量 - 肉鸽游戏设计教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <link rel="stylesheet" href="assets/theme-dark.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-随机生成-每一局都不一样.html">← 上一章</a>
+        <a href="04-有限资源-稀缺制造决策.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>永久死亡：失败的分量</h1>
+        <p class="chapter-meta">模块二 · 三大核心特征之二 ｜ 本章讨论死亡的经济学，以及三种“复活”的边界</p>
+
+        <p>如果没有永久死亡，随机生成就只是一次效率波动：这局抽到的好东西少一点，多打半小时补回来就行。玩家的最优策略会退化成“慢慢磨”，紧张感全部消失。反过来说，永久死亡把“每一局”变成了<strong>一次不能重来的押注</strong>，随机才有分量。</p>
+
+        <p>这一章讲三件事：死亡在这套结构里承担什么功能、复活机制该放在哪条线上、以及死亡的分量怎么配才不会把玩家赶走。</p>
+
+        <h2>3.1 永久死亡的功能</h2>
+
+        <p>视频里给的定义很干净：<strong>游戏内没有存档点；单局内一旦死亡，该局进度丢失，无法重来，也无法回退</strong>。这句话里有两个关键词，决定了它能起什么作用：</p>
+
+        <ul>
+            <li><strong>无存档点</strong>：玩家不能在打 Boss 前存一次，失败了读档重来。没有这个限制，Boss 就变成一道可以反复试错的题。</li>
+            <li><strong>不可回退</strong>：错误决策的代价会在后续几十分钟里持续兑现，玩家的每一个选择都带重量。</li>
+        </ul>
+
+        <p>它带来的直接效果是<strong>决策的不可撤销性</strong>。“这瓶药水现在用还是留给 Boss”之所以是个真问题，是因为用错了不能退回。一旦允许存档，这个问题立刻降级成“试两次，选结果好的那个”。</p>
+
+        <div class="definition">
+            <h4>永久死亡 ≠ 死亡惩罚重</h4>
+            <p>永久死亡描述的是<strong>结构的不可逆</strong>：本局数据不保留、不能回退。它和“死一次扣多少钱”“死一次掉多少装备”是两件事。你可以永久死亡，但死亡后几乎没有损失（只是重开一局五分钟）；也可以每局很长、死亡损失极大，那叫惩罚重，不叫永久死亡更纯粹。</p>
+        </div>
+
+                <figure class="figure">
+            <a href="assets/img/04-permadeath.png" target="_blank" rel="noopener">
+                <img src="assets/img/04-permadeath.png" alt="板书：永久死亡的定义，以及存档与 SL 的边界" width="1440" height="810" loading="lazy">
+            </a>
+            <figcaption>原课板书。核心定义只有一句：死亡即失去本局进度；下面两行分别对应存档/读档与 SL 这两条最容易含糊的边界。 <span class="figure-src">视频 07:05</span></figcaption>
+        </figure>
+
+<h2>3.2 边界：什么算存档，什么不算</h2>
+
+        <p>实践里最容易吵起来的，是“退出游戏保存进度”算不算破坏永久死亡。这条线要划清楚，否则程序实现和策划需求会打架。</p>
+
+        <table>
+            <thead>
+                <tr><th>行为</th><th>是否破坏永久死亡</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>退出游戏后从当前层重新进入</td><td>不破坏</td><td>本质是“断点续玩”，玩家不能通过它改变已经发生的结果</td></tr>
+                <tr><td>死亡前主动存档，死亡后读档</td><td>破坏</td><td>这是把不可逆变成可逆，整个压力结构失效</td></tr>
+                <tr><td>层与层之间自动保存</td><td>不破坏</td><td>《以撒》就是每层开头保存：中途退出可从该层起点继续，但死亡依然终止整局。它是断点续玩，不是降低死亡成本</td></tr>
+                <tr><td>战斗中允许暂停并回滚到战斗开始</td><td>破坏</td><td>等于把每场战斗变成可试错的关卡</td></tr>
+            </tbody>
+        </table>
+
+        <p>《以撒》那种“按层保存”值得单独讨论，因为它经常被误读成“降低了死亡成本”。它实际做的是：你可以随时退出，下次从这一层开头继续；一旦死亡，整局仍然结束。它保的是<strong>可中断</strong>，不是<strong>可重来</strong>。</p>
+
+        <p>真正用来降低失败成本的是另一种做法：把一局切成若干章节，每章结束结算一次（发放局外奖励、写入统计），失败只损失当前章。它不是存档，而是<strong>把一次长失败拆成几次短失败</strong>。这两件事在实现上很像，在设计意图上完全不同，混着做会两头不讨好。</p>
+
+        <h2>3.3 三种“复活”，三条完全不同的线</h2>
+
+        <p>玩家永远会想办法活下来。设计者的任务是决定：哪些活法是我们主动给的，哪些是系统漏洞，哪些是必须堵死的。</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>机制内复活 / 回滚：属于游戏内容</h4>
+                    <p>《以撒》的九命猫是典型：拿到之后角色有多次生命，死了原地复活。视频里讲者特意强调，<strong>这是“角色复活”，不是“这一局复活”</strong>——道具还在，进度还在，但你确实消耗了一次机会。另一个例子是“后悔药”这类道具，可以让玩家回到上一层重新走。</p>
+                    <p>关键约束：<strong>这类效果必须有次数限制</strong>，且明确属于道具能力的一部分。没有次数限制的复活，等于把永久死亡删掉了。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>SL 存档读档：系统层的小聪明</h4>
+                    <p>玩家退出游戏、复制存档、再读回来，绕过死亡。视频里的态度是：<strong>这属于利用系统漏洞，不是你玩法设计的核心，可以保留也可以删掉</strong>。讲者个人倾向于保留，理由是玩家用这种小手段让自己舒服一点，未必是坏事。</p>
+                    <p>这条判断值得沿用，但要加一个前提：<strong>不能让它变成主流玩法</strong>。如果社区攻略第一段就是“先备份存档”，说明你的失败成本设计出了问题，而不是玩家太狡猾。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>局外继承：这是 Roguelite 的入口</h4>
+                    <p>死亡后保留点数、货币、解锁，让下一局的开局更强。它严格来说不是“复活”，但确实降低了死亡的绝对损失。第 5 章会专门讲这套系统的配比，这里只提醒一句：<strong>局外继承越强，单局内决策的分量越轻</strong>。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>一个常见的自欺欺人</strong>：给玩家无限次“广告复活”或“看提示复活”，然后声明游戏是永久死亡。玩家不会这样理解，他们会理解成“死亡可以花钱跳过”。这会同时破坏紧张感与商业口碑——前者伤玩法，后者伤评分。
+        </div>
+
+        <h2>3.4 失败成本怎么配</h2>
+
+        <p>失败成本 = 单局已投入的时间 + 已获得的构筑 + 情绪预期。三者叠起来超过玩家的忍耐阈值，他就会关游戏。不同单局长度对应的安全区间大致如下（这是经验值，不是定律）：</p>
+
+        <table>
+            <thead>
+                <tr><th>单局时长</th><th>死亡损失</th><th>需要什么补偿机制</th><th>典型做法</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>5–10 分钟</td><td>整局清零可以接受</td><td>不需要额外补偿</td><td>短局速开的动作肉鸽</td></tr>
+                <tr><td>15–30 分钟</td><td>整局清零会明显挫败</td><td>章节化结算 + 局外留下痕迹</td><td>按章节发放奖励、局外点数</td></tr>
+                <tr><td>40 分钟以上</td><td>整局清零几乎必然导致弃游</td><td>章节级检查点 + 明确的进度预期</td><td>分章节推进，每章结算一次</td></tr>
+            </tbody>
+        </table>
+
+        <p>注意这张表里的补偿机制都不是“让你不死”，而是<strong>把一次大失败切成几次小失败</strong>。这个方向比“降低难度”更有效，因为它保住了压力，只是缩短了压力的持续时间。</p>
+
+        <h2>3.5 死得明白，比死得少更重要</h2>
+
+        <p>永久死亡的体验由两部分组成：损失有多大，以及玩家能不能理解为什么损失。后者经常被忽略，但它是“再来一局”意愿的真正开关。</p>
+
+        <p>视频里没有展开这一层，但这是实践中最容易出问题的地方：玩家死于一个看不清来源的伤害，他不会觉得“我下次注意”，他会觉得“游戏在坑我”。可用的信息设计有三条：</p>
+
+        <ul>
+            <li><strong>伤害来源可见</strong>：受击时给出方向指示、伤害类型、攻击者高亮。屏幕外的远程攻击必须有预警。</li>
+            <li><strong>致死原因可归因</strong>：结算界面直接写清“死于第 6 层精英的冲锋”，而不是只给一个死亡动画。</li>
+            <li><strong>本局可复盘</strong>：展示这局的构筑、关键选择与错过的机会，让玩家看到“如果我当时拿了那件，可能就过了”。</li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>一个可测量的指标</strong>：死亡后“立即重开”的比例。这个数字低，说明玩家要么没看懂为什么死，要么觉得重来毫无意义。前者改反馈，后者改局外成长。
+        </div>
+
+        <h2>3.6 实现：把“局内”和“局外”彻底分开</h2>
+
+        <p>永久死亡在代码层的核心是一条边界：<strong>单局数据必须可整体销毁，局外数据必须整体存活</strong>。这条边界不清楚，就会出现“死了之后金币还在”“重开后 Boss 血条没重置”这类 bug。</p>
+
+<pre><code class="language-csharp">using System;
+using System.Collections.Generic;
+
+/// &lt;summary&gt;单局数据：死亡时整体丢弃&lt;/summary&gt;
+[Serializable]
+public class RunState
+{
+    public int Seed;
+    public int Floor;
+    public int Hp;
+    public int MaxHp;
+    public int Gold;
+    public List&lt;string&gt; Items = new List&lt;string&gt;();
+    public int ReviveTokens;          // 九命猫这类道具给的机会，有上限
+    public DateTime StartedAt;
+}
+
+/// &lt;summary&gt;局外数据：跨局保留，写入存档&lt;/summary&gt;
+[Serializable]
+public class MetaState
+{
+    public int TotalRuns;
+    public int BestFloor;
+    public Dictionary&lt;string, int&gt; Unlocked = new Dictionary&lt;string, int&gt;();
+    public int TalentPoints;
+}
+
+public enum RunEndReason { Death, Victory, Abandoned }
+
+public class RunManager
+{
+    public RunState Run { get; private set; }
+    public MetaState Meta { get; private set; }
+
+    public event Action&lt;RunState, RunEndReason&gt; OnRunEnded;
+
+    public void BeginRun(int seed)
+    {
+        Run = new RunState { Seed = seed, Floor = 1, StartedAt = DateTime.UtcNow };
+    }
+
+    /// &lt;summary&gt;玩家受到致命伤害时调用&lt;/summary&gt;
+    public bool TryConsumeRevive()
+    {
+        if (Run.ReviveTokens &lt;= 0) return false;
+        Run.ReviveTokens--;
+        Run.Hp = Math.Max(1, Run.MaxHp / 2);   // 复活后给一半血，避免立刻再死
+        return true;
+    }
+
+    public void EndRun(RunEndReason reason)
+    {
+        Meta.TotalRuns++;
+        Meta.BestFloor = Math.Max(Meta.BestFloor, Run.Floor);
+        // 只在结算时把“该留下的”写进局外，其余一律丢弃
+        OnRunEnded?.Invoke(Run, reason);
+        Run = null;                              // 关键：不留引用，避免状态泄漏
+    }
+}
+</code></pre>
+
+        <p>这段代码里三个地方值得抄：</p>
+        <ul>
+            <li><strong><code>Run = null</code></strong>：销毁是显式动作，不依赖 GC 时机。UI 若还握着引用，会立刻暴露“死亡后仍能读到旧数据”的 bug。</li>
+            <li><strong><code>ReviveTokens</code> 上限</strong>：复活次数是数据，不是逻辑分支。策划改数值就能调整强度，不用改代码。</li>
+            <li><strong><code>EndRun</code> 统一出口</strong>：死亡、通关、主动放弃走同一条结算路径，局外数据只在一个地方写入，避免三套结算代码算出三个结果。</li>
+        </ul>
+
+        <h2>3.7 两个必须避开的坑</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>假死亡：无限复活把压力抽空</h4>
+                    <p>复活道具掉率过高、或者复活没有次数限制，玩家会开始“战略性送死”——先冲一波试试，死了复活继续。这时候死亡已经不再是失败，而是一种免费的侦察。判断方法：统计玩家的“主动死亡”比例，如果明显升高，说明复活成本太低了。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>长局 + 硬清零：把人赶走</h4>
+                    <p>40 分钟一局、死了全没、还没有分段保存，这是最典型的劝退组合。要么缩短单局，要么加分段检查点，要么把单局的构筑留存一部分（变成 Roguelite）。三者至少选一个。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag think">判断</span>练习 3-1</h3>
+            <p>算一下你项目当前的“单局期望时长”和“死亡损失比例”。如果单局超过 30 分钟，检查有没有分段保存；如果有，检查它是否允许玩家通过读档改变已经发生的结果。</p>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag practice">实现</span>练习 3-2</h3>
+            <p>给 <code>RunManager</code> 加一个“断点续玩”功能：只在每层开始时序列化 <code>RunState</code>，中途退出直接丢弃。写完后测试三个场景：层内退出、死亡退出、通关退出，确认三种情况下局外数据的写入次数都正确。</p>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag think">判断</span>练习 3-3</h3>
+            <p>复盘一次你自己的死亡。不看攻略，只凭游戏内信息，你能说出“我为什么死”吗？如果说不出来，列出缺的三条信息，写进需求文档。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>永久死亡的价值是让随机产生不可撤销的压力，而不是单纯增加难度。</li>
+            <li>复活分三条线：机制内复活（内容，必须限次）、SL（漏洞，可留但不可成为主流）、局外继承（Roguelite 的入口）。</li>
+            <li>失败成本由单局时长决定，长局必须靠分段检查点把大失败拆成小失败。</li>
+            <li>“死得明白”比“死得少”更能提升重开率，伤害来源、致死归因、本局复盘三者缺一不可。</li>
+            <li>代码上必须把 <code>RunState</code> 与 <code>MetaState</code> 彻底分开，销毁要显式。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章预习</strong>：有了随机和死亡，还缺最后一块——为什么玩家不能慢慢磨过去。下一章讲有限资源，以及“无限 loop”该留还是该堵。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="02-随机生成-每一局都不一样.html">← 上一章：随机生成</a>
+            <a href="04-有限资源-稀缺制造决策.html">下一章：有限资源 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

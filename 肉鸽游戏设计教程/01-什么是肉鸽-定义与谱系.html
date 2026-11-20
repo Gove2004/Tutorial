@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <script src="assets/theme.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>什么是肉鸽：定义与谱系 - 肉鸽游戏设计教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <link rel="stylesheet" href="assets/theme-dark.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <span></span>
+        <a href="02-随机生成-每一局都不一样.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>什么是肉鸽：定义与谱系</h1>
+        <p class="chapter-meta">模块一 · 判定标准 ｜ 本章不涉及具体系统，只解决“这到底算不算肉鸽”</p>
+
+        <p>“肉鸽”这个词已经被用坏了。带随机掉宝的横版闯关叫肉鸽，死了掉装备的刷子游戏叫肉鸽，连某些抽卡手游的限时活动都自称肉鸽。术语烂掉的代价不是学术上的不严谨，而是<strong>需求无法对齐</strong>：主策说“这一版要更肉一点”，关卡策划听成“多加点随机房间”，数值策划听成“把死亡惩罚加重”，最后三件事都做了，游戏反而更难受。</p>
+
+        <p>本章的目标很具体：给出一套<strong>可以拿去做类型判定、也能拿去验收需求</strong>的标准。判定通过之后再谈怎么做，这是后面十章的前提。</p>
+
+        <h2>1.1 从《Rogue》说起</h2>
+
+        <p>肉鸽（Roguelike）这个名字直接来自 1980 年的《Rogue》。当时它的画面是纯字符：<code>#</code> 是墙，<code>.</code> 是地板，字母是怪物。但真正被别人记住并模仿的不是画面，而是三件事：</p>
+
+        <ul>
+            <li><strong>地牢是程序生成的。</strong>房间、走廊、怪物、宝箱，每一局都由代码重新拼出来，玩家看不到同一张图第二次。</li>
+            <li><strong>死了就是死了。</strong>没有中途存档，角色一死，这一趟的所有积累清零，下次从地牢第一层重新开始。</li>
+            <li><strong>资源是紧的。</strong>药水有限、卷轴有限、背包格子有限，玩家必须决定把哪一瓶留给 Boss。</li>
+        </ul>
+
+        <p>后来的一批模仿者把这个结构固定下来，形成了所谓“柏林诠释”（Berlin Interpretation）那套讨论。对开发者来说，那套条款过于学术，真正有用的是从里面抽出的三条可判定特征——它们既描述了玩法，也直接对应三个设计变量。</p>
+
+        <div class="definition">
+            <h4>三条可判定特征</h4>
+            <ol>
+                <li><strong>随机生成</strong>：每开一局，地图、敌人、奖励至少有一项重新生成，且玩家无法预期具体结果。</li>
+                <li><strong>永久死亡</strong>：单局内没有可回退的存档点，死亡即结束本局，进度不可追回。</li>
+                <li><strong>资源稀缺</strong>：单局内拿到的资源总量存在上限，无法靠原地重复刷取无限变强。</li>
+            </ol>
+            <p>三条同时成立，就是肉鸽；缺一条，玩家的体验结构就变了，硬贴标签只会让需求跑偏。</p>
+        </div>
+
+                <figure class="figure">
+            <a href="assets/img/01-rogue-origin.png" target="_blank" rel="noopener">
+                <img src="assets/img/01-rogue-origin.png" alt="板书：肉鸽游戏到底指什么，右侧是《Rogue》字符界面截图" width="1440" height="810" loading="lazy">
+            </a>
+            <figcaption>原课第 1 节板书。右侧是 1980 年《Rogue》的运行画面：字符地图、随机地牢、一命到底——三条特征都长在这张图里。 <span class="figure-src">视频 01:25</span></figcaption>
+        </figure>
+
+<h2>1.2 判定流程</h2>
+
+        <p>把三特征变成可执行的判断顺序，比背定义有用。下面这套流程在项目评审里可以直接用：逐项回答，任何一项落在“否”，就不必再往下谈肉鸽的系统设计。</p>
+
+        <div class="mermaid">
+flowchart TD
+    S["候选玩法"] --> Q1{"单局内允许存档、读档、<br/>无限回退？"}
+    Q1 -- "是" --> N1["不是肉鸽<br/>存档制 / 关卡制游戏"]
+    Q1 -- "否" --> Q2{"每局的地图、敌人、<br/>奖励会重新生成？"}
+    Q2 -- "否" --> N2["不是肉鸽<br/>固定关卡的重复挑战"]
+    Q2 -- "是" --> Q3{"单局资源可无限刷取、<br/>靠堆数值就能过关？"}
+    Q3 -- "是" --> N3["不是肉鸽<br/>刷子型 ARPG / 放置"]
+    Q3 -- "否" --> Y["是肉鸽<br/>再判断 Roguelike / Roguelite"]
+    style Y fill:#e9f7ec,stroke:#2e7d32,color:#14395a
+    style N1 fill:#fdecea,stroke:#e53935,color:#14395a
+    style N2 fill:#fdecea,stroke:#e53935,color:#14395a
+    style N3 fill:#fdecea,stroke:#e53935,color:#14395a
+        </div>
+
+        <p>拿几款游戏跑一遍这个流程，会发现它比想象中严格：</p>
+
+        <table>
+            <thead>
+                <tr><th>游戏</th><th>随机生成</th><th>永久死亡</th><th>资源稀缺</th><th>判定</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>《以撒的结合》</td><td>是（房间布局与道具池）</td><td>是（无中途存档）</td><td>是（每层房间与掉落固定上限）</td><td>标准肉鸽</td></tr>
+                <tr><td>《杀戮尖塔》</td><td>是（地图节点与卡牌奖励）</td><td>是（单局死亡即结束）</td><td>是（能量与路线节点固定）</td><td>标准肉鸽</td></tr>
+                <tr><td>《小丑牌》</td><td>是（牌组与小丑牌池）</td><td>是</td><td>是（每关有分数目标与有限出牌次数）</td><td>构筑型肉鸽</td></tr>
+                <tr><td>《暗黑破坏神》类</td><td>部分（掉落随机）</td><td>否（有存档、可回城、可反复刷）</td><td>否（可长期刷取）</td><td>不是肉鸽</td></tr>
+                <tr><td>《马里奥》式闯关</td><td>否（关卡固定）</td><td>部分（命数限制但可续关）</td><td>否</td><td>不是肉鸽</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>最常见的误判</strong>：把“随机掉宝”当成肉鸽。掉落随机只是随机生成的一个子项，它不改变玩家对地图的预期，也不改变单局的资源结构。一个可以回城、可以反复刷同一片区域刷到毕业的游戏，无论掉率多随机，玩家体验都是 MMO 式的累积，而不是肉鸽式的重开。
+        </div>
+
+        <h2>1.3 Roguelike 与 Roguelite：差别只有一个变量</h2>
+
+        <p>这两个词让无数玩家吵架，但在设计上它们的分歧点非常小。传统意义上的区分是：</p>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>Roguelike（经典型）</th><th>Roguelite（轻型）</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>随机生成</td><td>有</td><td>有</td></tr>
+                <tr><td>永久死亡</td><td>有</td><td>有</td></tr>
+                <tr><td>死亡后果</td><td>本局清零，几乎不留任何东西</td><td>本局清零，但留下可积累的点数或货币</td></tr>
+                <tr><td>解锁内容</td><td>新角色、新道具、新区域、新路线，<strong>很少直接加属性</strong></td><td>可以是永久属性加成：暴击、生命、伤害、弹药</td></tr>
+                <tr><td>玩家变强路径</td><td>靠玩家自己的理解与操作</td><td>理解、操作，外加局外数值累积</td></tr>
+                <tr><td>典型作品</td><td>《以撒的结合》《杀戮尖塔》</td><td>带局外天赋树的动作肉鸽、部分手机肉鸽</td></tr>
+            </tbody>
+        </table>
+
+        <p>只差一个变量：<strong>死亡之后留下的东西，会不会直接改变玩家的数值</strong>。《以撒》解锁的是“能遇到什么”，玩家角色本身的强度不变；Roguelite 里打完一局拿到的点数可以点进暴击率，下一局开局就比别人强。</p>
+
+        <p>讲者在视频里给了一个很实在的判断：<strong>两者的边界其实很模糊，对开发者而言，先保证游戏好玩、有人玩，类型标签不必严格划分</strong>。这句话值得认真对待，原因不是分类不重要，而是<strong>分类是商店页的事，设计是体验的事</strong>。你在 Steam 上写 Roguelite 还是 Roguelike，影响的是搜索曝光；你在局外天赋树里放多少数值，影响的是玩家第二十局还愿不愿意开。</p>
+
+        <aside class="sidebar-note">
+            <strong>一个实践建议</strong>：对外宣传时，如果局外成长里有任何永久属性加成，就老实写 Roguelite。玩家对这个词的心理预期包含“可以慢慢变强”，写错了会在评论区被当成欺骗；而对内文档里，两个词可以直接统一成“肉鸽”，减少沟通成本。
+        </aside>
+
+                <figure class="figure">
+            <a href="assets/img/02-roguelike-vs-roguelite.png" target="_blank" rel="noopener">
+                <img src="assets/img/02-roguelike-vs-roguelite.png" alt="板书：Roguelike 与 Roguelite 对比，左为《Rogue》字符地图，右为《以撒》属性与道具界面" width="1440" height="810" loading="lazy">
+            </a>
+            <figcaption>原课用两张截图说明差别：左边是《Rogue》的字符地图，核心循环里没有可累积的东西；右边是《以撒》的角色属性与道具栏，多了一条跨局沉淀的成长线。 <span class="figure-src">视频 03:33</span></figcaption>
+        </figure>
+
+<h2>1.4 一局游戏的生命周期</h2>
+
+        <p>后面所有系统都挂在这条链上。理解链的形状，才知道某个系统失效时，玩家的体验断在哪一环。</p>
+
+        <div class="mermaid">
+flowchart LR
+    A["局外准备<br/>选角色 / 选难度 / 带初始道具"] --> B["单局开始<br/>基础属性 + 初始装备"]
+    B --> C["探索与战斗<br/>地图生成、遭遇、掉落"]
+    C --> D["构筑成型<br/>数值成长、资源转换、路线取舍"]
+    D --> E["终局<br/>Boss / 目标分数 / 阶段结算"]
+    E --> F["局外结算<br/>解锁、点数、成就、图鉴"]
+    F --> A
+    C -- "死亡" --> G["本局清零"]
+    G --> F
+    style A fill:#e7f3ff,stroke:#007acc,color:#14395a
+    style D fill:#fff6e8,stroke:#e65100,color:#14395a
+    style E fill:#f5eefb,stroke:#8e44ad,color:#14395a
+    style G fill:#fdecea,stroke:#e53935,color:#14395a
+        </div>
+
+        <p>这条链上最关键的一段是 <strong>C → D</strong>：从“我捡到了几个道具”变成“我有一套打法”。绝大多数肉鸽的乐趣密度都集中在这一段，而绝大多数设计失败也发生在这里——玩家打了二十分钟，手里只有零散的好东西，凑不成任何一套能打穿终局的组合。</p>
+
+        <h2>1.5 七套系统各自负责什么</h2>
+
+        <p>把一局游戏拆开，能拆出七类互相咬合的系统。它们的顺序不是重要性排序，而是玩家在一局里会依次撞上的顺序：</p>
+
+        <table>
+            <thead>
+                <tr><th>系统</th><th>核心职责</th><th>失效时的典型症状</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>局外成长</td><td>让失败留下痕迹，控制内容解锁节奏</td><td>玩家觉得“白打了”，或反过来觉得“局内随便打都行”</td></tr>
+                <tr><td>数值成长</td><td>定义变强的速度与形态，配平玩家与敌人</td><td>前中期太顺、后期突然打不动，或全程无压力</td></tr>
+                <tr><td>地图与资源生成</td><td>决定每一局拿到什么，是随机性的主要出口</td><td>开局即死局，或连续十几层看不到有用的东西</td></tr>
+                <tr><td>资源管理</td><td>把稀缺翻译成选择，把选择翻译成流派</td><td>玩家只会无脑选同一项，或根本算不清该选哪个</td></tr>
+                <tr><td>战斗系统</td><td>承载构筑的结果，让强度可以被感知</td><td>构筑再强打起来也一样，或某一套无解</td></tr>
+                <tr><td>剧情叙事</td><td>给重复游玩一个叙事理由</td><td>世界观只存在于开场 CG，之后完全消失</td></tr>
+                <tr><td>目标与成就</td><td>提供单局之外的追求方向</td><td>通关一次就卸载，没有第二目标</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>为什么要拆成七套</strong>：因为肉鸽的失败很少是单一系统的错。玩家说“这游戏不好玩”，可能是生成不给流派（地图与生成）、也可能是数值让玩家前期就无敌（数值成长）、还可能是死亡惩罚过重（永久死亡）。拆开之后，才能把一句模糊的抱怨定位到一个可改的参数。
+        </div>
+
+        <h2>1.6 三个常见误判</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>“加了随机就是肉鸽”</h4>
+                    <p>随机只解决“每局不一样”，不解决“每局都紧张”。如果死亡可以回退、资源可以刷，随机只是让刷的过程更花时间。判定三特征必须一起满足。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>“越难越肉鸽”</h4>
+                    <p>难度不等于永久死亡。把敌人调强、把回血删掉，得到的是一个难游戏，不是肉鸽。永久死亡的特征是<strong>不可回退</strong>，不是<strong>难以存活</strong>。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>“肉鸽必须是俯视角弹幕”</h4>
+                    <p>《杀戮尖塔》是卡牌，《小丑牌》是牌型计算，《幸运房东》是老虎机。肉鸽描述的是一局的结构，不是视角、不是操作方式、也不是品类。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag think">判断</span>练习 1-1</h3>
+            <p>拿你正在做的项目（或最近玩的一款游戏），逐条回答三特征，并写下判断依据。注意区分“有随机元素”和“每局重新生成”——如果一个游戏的地图是手工做的，只是敌人位置随机，那它的随机生成强度很低，重开的价值也就有限。</p>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag practice">实现</span>练习 1-2</h3>
+            <p>给三特征各写一条可以量化验收的标准。例如：随机生成 → “同一难度下连续 20 局的房间序列重复率低于 5%”；永久死亡 → “单局内不存在可恢复的存档点，死亡后 run 状态对象被销毁”；资源稀缺 → “单局金币总收入上限为该层房间数的线性函数，不含无限刷新路径”。</p>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag think">判断</span>练习 1-3</h3>
+            <p>你的项目里如果已经做了局外天赋树，逐项检查它加的是什么：机制解锁、还是纯数值。统计一下比例，然后回答一个问题——如果把这套天赋树删掉，玩家的第一局体验会变差多少？如果答案是“几乎不变”，说明这套系统没有解决它该解决的问题。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>肉鸽的判定靠三特征，不靠标签：随机生成、永久死亡、资源稀缺。</li>
+            <li>Roguelike 与 Roguelite 的唯一实质差别，是局外成长里有没有直接的永久数值。</li>
+            <li>一局游戏是“准备 → 开始 → 探索 → 成型 → 终局 → 结算”的闭环，乐趣密度集中在探索到成型这一段。</li>
+            <li>七套系统拆开看，才能把“不好玩”这种模糊反馈定位到具体参数。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章预习</strong>：三根支柱里最容易被做坏的是随机。下一章讲清楚“随机不等于无序”——模板、参数、池子三层结构，以及为什么必须留锚点房。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="02-随机生成-每一局都不一样.html">下一章：随机生成 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

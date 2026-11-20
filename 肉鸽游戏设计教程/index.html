@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <script src="assets/theme.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>肉鸽游戏设计教程 - 从三大特征到七套系统</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <link rel="stylesheet" href="assets/theme-dark.css">
+</head>
+<body>
+    <main>
+        <h1>肉鸽游戏设计教程</h1>
+        <p class="intro">从“为什么它是肉鸽”讲到“怎么把七套系统拧成一台机器”。一条判定标准、两类随机、三种失败成本、四个数值工具、五层生成权重，最后落到一份可以照着改需求文档的自检清单。</p>
+
+        <div class="version-info">
+            <strong>内容来源</strong>：本教程基于课程视频《肉鸽游戏设计——基础篇》（讲者：银白忧伤，系统策划）整理、重构并扩写。原视频是一节 31 分钟的基础课，按“定义 → 三大特征 → 七套系统 → 进阶方向”的线索口述加板书，信息密度高但多为结论。本教程保留其全部结论与案例，补齐了原视频未展开的部分：随机生成与保底的具体算法、数值换算的数学形式、各系统的可执行参数、Unity/C# 的落地代码、常见陷阱与练习。章节顺序按学习路径重排，不是逐句转写稿。
+        </div>
+
+        <div class="callout callout-info">
+            <strong>关于本教程</strong>
+            <ul>
+                <li><strong>面向读者</strong>：正在或准备做肉鸽玩法的策划、独立开发者，以及需要和策划对齐实现细节的客户端程序；能读懂 C# 与基础概率概念即可。</li>
+                <li><strong>学习目标</strong>：学完后能判断一个玩法“是不是肉鸽、缺哪一环”，能把“随机、死亡、稀缺”翻译成可配置的参数与代码，而不是只记住“要加随机性”这种口号。</li>
+                <li><strong>深度定位</strong>：系统掌握级。覆盖核心概念、参数设定、生产陷阱与权衡；不做单款游戏的源码拆解，也不是“三分钟入门”。</li>
+                <li><strong>视觉风格</strong>：沿用本站 tech 技术蓝，代码块支持一键复制，结构图使用 Mermaid 渲染，右下角可切换深浅色。</li>
+            </ul>
+        </div>
+
+                <figure class="figure">
+            <a href="assets/img/00-cover.png" target="_blank" rel="noopener">
+                <img src="assets/img/00-cover.png" alt="原课封面：肉鸽游戏设计——从核心特征到系统的入门指南" width="1440" height="810" loading="lazy">
+            </a>
+            <figcaption>原课封面页。这门课的取径是先立判定标准，再从三大核心特征切进七套系统，最后落到可执行的自检表。 <span class="figure-src">视频 00:20</span></figcaption>
+        </figure>
+
+<h2>这套教程解决什么问题</h2>
+
+        <p>肉鸽这个词这几年被用得极滥。一个关卡制游戏加了随机掉宝，商店页就敢写“Roguelike”；一个带死亡惩罚的动作游戏，玩家也会叫它肉鸽。术语混乱的直接后果是<strong>需求描述含混</strong>：策划说“做得肉一点”，程序和美术各自理解成一件事，最后做出来的是一个四不像。</p>
+
+        <p>这套教程用一个更硬的标准替换模糊的类型标签：先给出可判定的三大特征，再拆开一局游戏背后的七套系统，逐套讲清楚“它负责什么体验、关键参数是什么、做错了会出现什么现象”。判定负责方向，系统负责手感。</p>
+
+        <div class="definition">
+            <h4>贯穿全课程的一句话</h4>
+            <p><strong>随机生成 + 永久死亡 + 资源稀缺</strong>，让每一局都值得重开；七套系统负责让这一局值得认真打。</p>
+            <p>前半句决定“是不是肉鸽”，后半句决定“是不是好肉鸽”。两者可以分开验收，这一点在最后一章的自检清单里会变成两张检查表。</p>
+        </div>
+
+        <h2>学习路径</h2>
+
+        <p>四个模块是递进关系：先建立判定标准，再逐个吃透三根支柱，然后把它们落到七套系统上，最后收口到可执行的检查表。</p>
+
+        <div class="mermaid">
+flowchart LR
+    A["模块一<br/>判定标准<br/>第 1 章"] --> B["模块二<br/>三大特征<br/>第 2-4 章"]
+    B --> C["模块三<br/>七套系统<br/>第 5-10 章"]
+    C --> D["模块四<br/>进阶与自检<br/>第 11 章"]
+    style A fill:#e7f3ff,stroke:#007acc,color:#14395a
+    style B fill:#e9f7ec,stroke:#2e7d32,color:#14395a
+    style C fill:#fff6e8,stroke:#e65100,color:#14395a
+    style D fill:#f5eefb,stroke:#8e44ad,color:#14395a
+        </div>
+
+                <figure class="figure">
+            <a href="assets/img/06-seven-systems.png" target="_blank" rel="noopener">
+                <img src="assets/img/06-seven-systems.png" alt="板书：一局肉鸽背后由七套系统支撑" width="1440" height="810" loading="lazy">
+            </a>
+            <figcaption>原课把一局游戏拆成七套系统：局外成长、数值成长、地图与资源生成、资源管理、战斗系统、剧情叙事、目标与成就。下面的章节顺序就是按这张图排的。 <span class="figure-src">视频 09:50</span></figcaption>
+        </figure>
+
+<h2>课程目录</h2>
+
+        <p class="module-divider">模块一：判定标准</p>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="01-什么是肉鸽-定义与谱系.html">01 - 什么是肉鸽：定义与谱系</a></h3>
+                <p>从《Rogue》的字符地牢到今天的构筑类玩法；Roguelike 与 Roguelite 的真实差别；一个能套到 99% 游戏上的三特征判定流程；一局游戏的完整生命周期与七套系统的位置。</p>
+            </div>
+        </div>
+
+        <p class="module-divider">模块二：三大核心特征</p>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="02-随机生成-每一局都不一样.html">02 - 随机生成：每一局都不一样</a></h3>
+                <p>随机不等于无序：模板、参数、池子三层结构；关卡随机与流派构筑随机分别考什么；锚点房为什么必须存在；房间图生成与加权抽卡的 C# 实现。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="03-永久死亡-失败的分量.html">03 - 永久死亡：失败的分量</a></h3>
+                <p>死亡为什么是随机成立的前提；九命猫、后悔药这类“机制内复活”的边界；SL 存档读档该怎么对待；单局时长与失败惩罚的配比，以及“死得不明不白”的排查方法。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge basic">基础</span>
+                <h3><a href="04-有限资源-稀缺制造决策.html">04 - 有限资源：稀缺制造决策</a></h3>
+                <p>资源有限与时间有限两种压法；金币通胀与商店定价的联动；怎样判断一个“无限 loop”是该留着还是该堵；资源预算表的做法。</p>
+            </div>
+        </div>
+
+        <p class="module-divider">模块三：七套系统</p>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="05-局外成长-死亡之外留下什么.html">05 - 局外成长：死亡之外留下什么</a></h3>
+                <p>成就解锁与点数解锁两条路线；解锁内容该是机制还是数值；难度分级的三种加压方式；为什么“纯数值局外成长”会把局内决策架空。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-数值成长-强度换算.html">06 - 数值成长：让强度换算有章可循</a></h3>
+                <p>费用参照物的建立方法；用期望值把暴击类机制折算成等效攻击；超模卡为什么可以是合理的；同步成长曲线的配平；诅咒机制作为风险定价工具。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="07-地图与资源生成-随机里的确定性.html">07 - 地图与资源生成：随机里留确定性</a></h3>
+                <p>固定房间的保底逻辑；低/中/高三个品质档位的设计分工；80/18/2 起手概率与软保底；流派亲和权重怎么加才不会被玩家算出“必给”。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="08-资源管理-取舍与转化.html">08 - 资源管理：在取舍中构筑流派</a></h3>
+                <p>路线选择、三选一、分支升级给玩家多少才合适；“多的换少的”和“少的换多的”两类转换；动态汇率与机会成本的显性化。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="09-战斗系统-由简入繁.html">09 - 战斗系统：由简入繁，组合出强度</a></h3>
+                <p>为什么初始攻击必须简单；属性维度拆分与 1+1&gt;2 的乘法协同；削弱强势流派的三条间接路径；直接加强弱势流派的风险与边界。</p>
+            </div>
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="10-叙事与成就-长线驱动.html">10 - 叙事与成就：把一次性体验拉成长线</a></h3>
+                <p>碎片化叙事为什么天生适配肉鸽；投放节奏与载体选择；结局、挑战、收集、统计四类成就各自承担什么心理功能。</p>
+            </div>
+        </div>
+
+        <p class="module-divider">模块四：进阶与自检</p>
+        <div class="chapter-list">
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">高级</span>
+                <h3><a href="11-进阶方向与设计自检.html">11 - 进阶方向与设计自检</a></h3>
+                <p>Mod 支持的数据驱动分层；联机必须解决的确定性随机；商业化与永久死亡之间的张力；两张自检清单，以及从基础篇走向专项的路径。</p>
+            </div>
+        </div>
+
+        <h2>术语约定</h2>
+
+        <p>视频里讲者明确说过不再区分 Roguelike 与 Roguelite，统称“肉鸽”。本教程沿用这个做法，但在需要讨论具体机制时会用到下面这张表里的词，先把定义钉死，后面才不会互相误解。</p>
+
+        <table>
+            <thead>
+                <tr><th>术语</th><th>含义</th><th>不指什么</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>单局（run）</td><td>从开局选角色到死亡或通关的一次完整流程</td><td>不是“一关”，也不是一个存档槽</td></tr>
+                <tr><td>局外（meta）</td><td>跨单局保留的进度：解锁、点数、图鉴、成就</td><td>不是指游戏主菜单</td></tr>
+                <tr><td>构筑（build）</td><td>单局内靠道具、卡牌、升级拼出来的能力组合</td><td>不是预设职业或配装方案</td></tr>
+                <tr><td>锚点</td><td>随机地图中固定出现或按保底出现的房间、事件</td><td>不是随机池里的普通节点</td></tr>
+                <tr><td>流派亲和</td><td>按玩家当前构筑提高某类掉落权重的机制</td><td>不是直接指定下一件道具</td></tr>
+                <tr><td>软保底</td><td>连续未获得目标品质时逐步提高其概率</td><td>不是到第 N 次必给</td></tr>
+            </tbody>
+        </table>
+
+        <h2>案例索引</h2>
+
+        <p>课程里反复引用的几款游戏，各自的取法不同。做设计时不要照抄其中任何一款的数值，先看清它解决的是哪个问题。</p>
+
+        <table>
+            <thead>
+                <tr><th>游戏</th><th>在本教程里被用来示范</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>《Rogue》</td><td>随机地牢与永久死亡的原始形态</td></tr>
+                <tr><td>《以撒的结合》</td><td>关卡随机、锚点房、局外解锁、碎片化叙事</td></tr>
+                <tr><td>《杀戮尖塔》</td><td>费用参照物、路线选择、卡牌三选一、删牌涨价</td></tr>
+                <tr><td>《小丑牌》</td><td>无地图、纯目标分数型的构筑随机</td></tr>
+                <tr><td>《土豆兄弟》</td><td>波次限时带来的时间稀缺</td></tr>
+                <tr><td>《雨中冒险》</td><td>怪物随时间长数值、变相压缩生存空间</td></tr>
+                <tr><td>《幸运房东》</td><td>纯构筑、无空间探索的随机形态</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-tip">
+            <strong>怎么读这套教程</strong>：如果你只有一小时，读第 1 章和第 11 章，拿到判定标准和自检清单；如果你正在立项，按第 2 → 4 章把三根支柱的参数定下来，再按第 5 → 10 章写系统需求；如果你已经在做一个卡住的项目，直接从第 7 章和第 9 章切进去，这两章对应的问题最常见。
+        </div>
+
+        <h2>配套说明</h2>
+        <ul>
+            <li>代码示例均为 Unity/C#，只依赖 <code>System</code> 与 <code>UnityEngine</code> 的常用 API，可直接粘进项目改成数据驱动版本。</li>
+            <li>概率与数值示例都在文中标了取值理由，直接抄数字通常不合适，抄结构才有效。</li>
+            <li>每章末尾的练习分“推导”“实现”“判断”三类，其中“判断”类没有标准答案，用途是和团队对齐口径。</li>
+        </ul>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

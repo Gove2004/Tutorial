@@ -6,18 +6,6 @@
     "updated": "2026-11-18"
   },
   {
-    "dir": "HollowKnight源码导读",
-    "title": "《空洞骑士》反编译源码深度导读",
-    "chapters": 17,
-    "updated": "2026-11-18"
-  },
-  {
-    "dir": "Hopfield能量模型教程",
-    "title": "Hopfield 网络与能量生成模型教程",
-    "chapters": 13,
-    "updated": "2026-11-18"
-  },
-  {
     "dir": "RainWorld源码导读",
     "title": "Rain World 反编译源码深度导读",
     "chapters": 15,
@@ -63,6 +51,12 @@
     "dir": "研究报告写作教程",
     "title": "研究报告写作教程 · 从结构到文字",
     "chapters": 8,
+    "updated": "2026-11-18"
+  },
+  {
+    "dir": "肉鸽游戏设计教程",
+    "title": "肉鸽游戏设计教程 - 从三大特征到七套系统",
+    "chapters": 11,
     "updated": "2026-11-18"
   },
   {

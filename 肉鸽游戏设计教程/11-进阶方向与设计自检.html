@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <script src="assets/theme.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>进阶方向与设计自检 - 肉鸽游戏设计教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <link rel="stylesheet" href="assets/theme-dark.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="10-叙事与成就-长线驱动.html">← 上一章</a>
+        <span></span>
+    </nav>
+
+    <main>
+        <h1>进阶方向与设计自检</h1>
+        <p class="chapter-meta">模块四 · 收口 ｜ 本章给出两张可以直接拿去评审的检查表</p>
+
+        <p>前面十章讲的是一套完整的肉鸽该怎么搭。最后一章处理三件事：三个不属于“单局体验”的进阶方向（Mod、联机、商业化）、一套验收清单，以及从“基础篇”往专项走的路径。</p>
+
+        <h2>11.1 Mod 支持：把内容生产外包给玩家</h2>
+
+        <p>视频里把 Mod 支持列为进阶方向的第一条，理由是它能<strong>延长玩法生命周期</strong>。这一点在《杀戮尖塔》《以撒》这类游戏上已经验证过：官方内容做完之后，社区还能持续产出新角色、新道具、新高难度规则。</p>
+
+        <p>但支持 Mod 不是“留个接口”这么简单，它要求架构上做三件事：</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>数据与逻辑分离</h4>
+                    <p>角色、道具、房间、掉落表全部走配置（JSON / ScriptableObject / 自定义格式），代码里不写死任何内容 ID。这是最基础也最容易做不到的一条——一旦某个系统里硬编码了“第 3 层必有商店”，Mod 作者就改不动。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>加载顺序与覆盖规则</h4>
+                    <p>Mod 应该能“覆盖”原配置而不是“追加”一堆。要定义清楚：同 ID 时谁优先、冲突时怎么报错、多个 Mod 同时改一张表如何合并。规则不清晰，玩家社区会自己发明一套，然后互相冲突。</p>
+                </div>
+            </div>
+            <div class="step">
+            <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>沙箱与版本兼容</h4>
+                    <p>允许执行脚本的 Mod 必须隔离权限（不能读存档、不能联网）。同时留一条版本迁移路径：游戏更新后老 Mod 能加载失败但不能导致崩溃，最好给出明确的错误提示。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>11.2 多人联机：先解决“随机一致”</h2>
+
+        <p>联机是很多肉鸽的扩展方向：合作闯关、对抗竞速。视频提到它带来“新的体验形态”，但没展开实现。这里补上最关键的一条：<strong>肉鸽联机第一个要解决的不是同步，而是确定性随机</strong>。</p>
+
+        <p>如果两个客户端各自用本地时间做种子，他们看到的地图、掉落的道具、刷新的敌人全都不同，玩家根本没法协作。所以联机版必须做到：</p>
+
+        <ul>
+            <li><strong>种子由主机（或服务器）生成并下发</strong>，所有客户端用同一个种子。</li>
+            <li><strong>随机调用顺序必须一致</strong>：每层生成、每次掉落，都要按确定的事件顺序消耗随机数。任何“客户端各自触发一次抽卡”的写法都会导致分叉。</li>
+            <li><strong>掉落归属要提前定义</strong>：个人掉落（各自看到自己的）还是共享池（抢）。共享池适合合作，个人掉落适合避免争吵，但会让玩家之间的构筑差距变大。</li>
+        </ul>
+
+        <div class="mermaid">
+flowchart TB
+    A["主机生成种子"] --> B["下发 seed 给所有客户端"]
+    B --> C["各自用同一 seed 生成地图与掉落池"]
+    C --> D["按固定事件顺序消耗随机数"]
+    D --> E["状态同步：只同步玩家输入与关键结果"]
+    E --> F{"结果一致？"}
+    F -- "是" --> G["继续"]
+    F -- "否" --> H["回滚该次随机 / 记录分叉日志"]
+    style A fill:#e7f3ff,stroke:#007acc,color:#14395a
+    style H fill:#fdecea,stroke:#e53935,color:#14395a
+        </div>
+
+        <p>还有一个体验层面的取舍：一人死亡怎么办。淘汰制（死了就只能观战）压力最大但合作性差，接力制（队友可复活你，但有代价）更适合合作向的肉鸽。</p>
+
+        <h2>11.3 商业化：和永久死亡的张力</h2>
+
+        <p>视频里对商业化的描述比较克制：单机可以做 DLC、皮肤；网游可以做长线养成。这句话背后的关键问题是：<strong>肉鸽的核心体验（每一次都是新的、输赢自负）和长线商业化（持续投入、持续变强）天然冲突</strong>。</p>
+
+        <table>
+            <thead>
+                <tr><th>模式</th><th>做法</th><th>对核心体验的影响</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>买断 + DLC</td><td>卖新角色、新区域、新模式</td><td>影响最小，玩家买的是内容</td></tr>
+                <tr><td>皮肤 / 外观</td><td>不影响数值，只改表现</td><td>几乎无影响，前提是别做成“看不清判定”的花哨皮肤</td></tr>
+                <tr><td>付费复活 / 付费续命</td><td>死亡后花钱继续</td><td>直接破坏永久死亡，慎用；如果一定要做，限制次数并明确标注</td></tr>
+                <tr><td>长线养成（Roguelite 化）</td><td>角色等级、装备、抽卡，跨局累积</td><td>把游戏重心从“每局决策”转移到“长期投入”，等于换了品类</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>一个判断标准</strong>：如果你的付费点让玩家能“花钱越过一次失败”，那它就在卖永久死亡的反面。这类设计短期能赚钱，长期会摧毁游戏的口碑——因为老玩家会明确告诉你“这游戏已经不肉鸽了”。
+        </div>
+
+        <h2>11.4 自检清单 A：这到底是不是肉鸽</h2>
+
+        <p>这张表用来做立项评审或竞品判断。十条全部通过，才算结构成立。</p>
+
+        <table>
+            <thead>
+                <tr><th>#</th><th>检查项</th><th>通过标准</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>1</td><td>单局内是否有可回退的存档</td><td>没有；断点续玩不算</td></tr>
+                <tr><td>2</td><td>地图/敌人/奖励是否每局重新生成</td><td>至少两项显著变化，玩家无法背图</td></tr>
+                <tr><td>3</td><td>死亡后本局进度是否清零</td><td>是，且不可追回</td></tr>
+                <tr><td>4</td><td>单局资源是否有硬上限</td><td>有，且不存在可重复刷取的入口</td></tr>
+                <tr><td>5</td><td>是否存在“停下来刷就能变强”的路径</td><td>不存在，或收益随时间递减到 0</td></tr>
+                <tr><td>6</td><td>局外成长是否会直接改数值</td><td>可以改，但必须有明确上限</td></tr>
+                <tr><td>7</td><td>单局时长是否与失败惩罚匹配</td><td>超过 30 分钟必须有分段保存或少局设计</td></tr>
+                <tr><td>8</td><td>是否至少有一条构筑路径</td><td>有，且依赖随机获得的道具组合</td></tr>
+                <tr><td>9</td><td>玩家的失败能否归因</td><td>死亡结算能说清“为什么死”</td></tr>
+                <tr><td>10</td><td>重开是否有新信息</td><td>是，新地图/新组合/新事件</td></tr>
+            </tbody>
+        </table>
+
+        <h2>11.5 自检清单 B：它是不是一个好肉鸽</h2>
+
+        <p>结构成立只保证“是肉鸽”，下面这张表判断“好不好玩”。它的来源是前面各章的核心结论，做版本评审时逐条打勾。</p>
+
+        <table>
+            <thead>
+                <tr><th>组别</th><th>检查项</th></tr>
+            </thead>
+            <tbody>
+                <tr><td rowspan="4">前期</td><td>前两层是否至少给一次可用的成长道具</td></tr>
+                <tr><td>初始攻击是否足够简单，玩家能在 2 分钟内上手</td></tr>
+                <tr><td>是否在开局就有明确的“这局可以怎么玩”的暗示</td></tr>
+                <tr><td>第一次死亡是否发生在“玩家已经理解基本规则”之后</td></tr>
+                <tr><td rowspan="5">中期</td><td>是否存在至少两条可辨识的构筑路线</td></tr>
+                <tr><td>三选一里是否存在明显的最优解（选取率 &gt; 80%）</td></tr>
+                <tr><td>锚点房是否每层都齐（商店、成长、休整）</td></tr>
+                <tr><td>玩家是否能在 3 件道具内看出“我在往哪个方向走”</td></tr>
+                <tr><td>资源是否紧到需要取舍，但不至于完全没钱</td></tr>
+                <tr><td rowspan="4">后期</td><td>BOSS 是否检验构筑而不只是血量</td></tr>
+                <tr><td>是否存在一套明显无解的组合（玩家社区已在传播）</td></tr>
+                <tr><td>后期金币是否严重溢出（剩余率 &gt; 40%）</td></tr>
+                <tr><td>通关后是否有更高难度或新目标</td></tr>
+                <tr><td rowspan="4">长期</td><td>玩家通关一次后，是否有理由再玩第二十次</td></tr>
+                <tr><td>叙事碎片是否能独立成篇、又能互相咬合</td></tr>
+                <tr><td>成就是否有四类，而不是只有“通关”和“击杀数”</td></tr>
+                <tr><td>局外成长是否让玩家“连输十局也不觉得白打”</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-tip">
+            <strong>怎么用这两张表</strong>：A 表在立项阶段用，一条不过就要重新讨论玩法框架；B 表在每个可玩版本用，逐条打分，低于 12 项的版本别急着上架——那通常意味着完成度不够，而不是内容不够。
+        </div>
+
+        <h2>11.6 需要采集的数据</h2>
+
+        <p>所有自检项里，能靠数据回答的应该优先靠数据。最小采集集如下：</p>
+
+        <div class="metric-grid">
+            <div class="metric-card">
+                <div class="metric-name">留存</div>
+                <div class="metric-value">D1 / D7</div>
+                <div class="metric-desc">开局 3 局内流失率，是玩法门槛的直接信号</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-name">推进</div>
+                <div class="metric-value">死亡层数分布</div>
+                <div class="metric-desc">看曲线形状，判断难度墙在哪一层</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-name">构筑</div>
+                <div class="metric-value">道具选取率</div>
+                <div class="metric-desc">找出选取率 &gt; 80% 的“答案型”道具</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-name">经济</div>
+                <div class="metric-value">金币剩余率</div>
+                <div class="metric-desc">判断后期通胀是否失控</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-name">挫败</div>
+                <div class="metric-value">死亡后重开率</div>
+                <div class="metric-desc">低说明玩家没看懂死因，或觉得重开无意义</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-name">平衡</div>
+                <div class="metric-value">流派通关率</div>
+                <div class="metric-desc">各流派的通关分布，判断是否存在唯一解</div>
+            </div>
+        </div>
+
+        <h2>11.7 从基础篇往后走</h2>
+
+        <p>视频结尾提到，后续课程会把各个机制拆开单独讲：数值管理与资源生成一节，战斗与叙事再各一节。这个拆法是对的，因为基础篇解决的是“骨架”，每一块骨头都需要单独练。</p>
+
+        <div class="mermaid">
+flowchart LR
+    A["基础篇<br/>三特征 + 七系统<br/>（本教程）"] --> B["数值专项<br/>费用曲线、曲线配平、公式化"]
+    A --> C["生成专项<br/>生成算法、保底、池管理"]
+    A --> D["战斗专项<br/>手感、敌人设计、平衡流程"]
+    A --> E["叙事专项<br/>碎片化写作、世界观构建"]
+    B --> F["完整项目<br/>从原型到可发行"]
+    C --> F
+    D --> F
+    E --> F
+    style A fill:#e7f3ff,stroke:#007acc,color:#14395a
+    style F fill:#f5eefb,stroke:#8e44ad,color:#14395a
+        </div>
+
+        <p>如果你现在就要动手，建议的顺序是：先用第 2 章的生成器搭一个能跑的地图，再用第 7 章的掉落器配一版道具，然后用第 9 章的属性聚合把战斗接起来。三件事做完，你就有一个人能完整玩一局的垂直切片，剩下的系统都是在这个切片上迭代。</p>
+
+        <div class="definition">
+            <h4>最后一遍回看开头那句话</h4>
+            <p><strong>随机生成 + 永久死亡 + 资源稀缺</strong>，让每一局都值得重开；<strong>七套系统</strong>，让这一局值得认真打。</p>
+            <p>做到前半句，你做出来的是一个根正苗红的肉鸽，不是四不像；做到后半句，玩家通关后还会想再开一局，而不是“大概懂了就卸载”。这两件事分别验收，不要混在一起谈。</p>
+        </div>
+
+                <figure class="figure">
+            <a href="assets/img/14-summary.png" target="_blank" rel="noopener">
+                <img src="assets/img/14-summary.png" alt="板书：课程小结——好肉鸽让每一局都值得重开" width="1440" height="810" loading="lazy">
+            </a>
+            <figcaption>原课最后一页。整门课收在这句话上：随机、死亡、稀缺只是让一局成立，决定玩家会不会再开一局的，是每局之间的差别。 <span class="figure-src">视频 30:30</span></figcaption>
+        </figure>
+
+<h2>本章小结</h2>
+        <ul>
+            <li>Mod 支持的前提是数据与逻辑分离、明确的覆盖规则、脚本沙箱。</li>
+            <li>联机肉鸽的第一难题是确定性随机：同种子、同消耗顺序、同结果。</li>
+            <li>商业化的红线是别把“花钱跳过失败”做成核心付费点。</li>
+            <li>两张清单分开用：A 判结构，B 判体验，采集数据优先回答能测量的部分。</li>
+            <li>下一步不是继续读，而是做出一个能完整玩一局的垂直切片。</li>
+        </ul>
+
+        <div class="exercise">
+            <h3><span class="tag think">判断</span>练习 11-1</h3>
+            <p>用 A 表给你的项目打分，逐条写出“通过/不通过/证据”。任何一条不通过，先不要做内容扩充，回到对应章节重设参数。</p>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag practice">实现</span>练习 11-2</h3>
+            <p>搭一个最小垂直切片：随机生成一层地图 + 一个带软保底的道具池 + 一套基础战斗数值 + 一次死亡结算。要求能在 10 分钟内完整玩一局，并在结束时输出这局的关键数据。</p>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag think">判断</span>练习 11-3</h3>
+            <p>假设你的游戏上线三个月，社区开始流传一套“无敌组合”。按第 9 章的三条间接路径设计一次调整，并预测玩家的三种反应，提前准备好更新公告的措辞。</p>
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="10-叙事与成就-长线驱动.html">← 上一章：叙事与成就</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <script src="assets/theme.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>局外成长：死亡之外留下什么 - 肉鸽游戏设计教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <link rel="stylesheet" href="assets/theme-dark.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-有限资源-稀缺制造决策.html">← 上一章</a>
+        <a href="06-数值成长-强度换算.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>局外成长：死亡之外留下什么</h1>
+        <p class="chapter-meta">模块三 · 七套系统之一 ｜ 本章处理“死了之后还剩什么”，以及它和局内决策的拉扯</p>
+
+        <p>永久死亡让每一局都有分量，但也带来一个副作用：连续的失败会让玩家怀疑自己在浪费时间。局外成长就是对这个副作用的补偿——它保证玩家哪怕连输十局，也带走了一点东西。</p>
+
+        <p>这套系统的难点不在“加什么”，而在“加多少”。加得太少，玩家觉得白打；加得太多，局内的一切选择都被局外数值碾平。视频里讲者对这一点有一句很关键的提醒：<strong>尽量避免纯数值提升，不要为了“有局外成长”而强行加一套加点</strong>。这一章把这句提醒展开成可执行的配比。</p>
+
+        <h2>5.1 它解决的两个问题</h2>
+
+        <div class="metric-grid">
+            <div class="metric-card">
+                <div class="metric-name">问题一</div>
+                <div class="metric-value">失败的残留</div>
+                <div class="metric-desc">连输之后，玩家需要一个“我确实在进步”的证据</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-name">问题二</div>
+                <div class="metric-value">认知的负荷</div>
+                <div class="metric-desc">开局就把所有机制、道具、元素丢给玩家，他会手忙脚乱</div>
+            </div>
+        </div>
+
+        <p>第二个问题经常被忽略，但它其实是局外成长最聪明的一种用法。<strong>把“解锁”当作教学节奏控制器</strong>：第一局只给你三种元素，等你熟悉了，再放开剩下的五种。这比弹一堆新手引导有效得多，因为它是玩家自己“挣来”的复杂度。</p>
+
+        <h2>5.2 两条解锁路线</h2>
+
+        <table>
+            <thead>
+                <tr><th>路线</th><th>触发方式</th><th>优点</th><th>风险</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>成就解锁</td>
+                    <td>完成特定条件：打赢某个 Boss、达成某个结局、用某个角色通关</td>
+                    <td>目标明确，玩家知道“做什么能拿到什么”；适合作为长期目标</td>
+                    <td>条件太苛刻会卡住大部分人，导致内容永远见不到</td>
+                </tr>
+                <tr>
+                    <td>点数解锁</td>
+                    <td>每局结束按表现给点数/货币，玩家在局外树状界面里点选</td>
+                    <td>节奏可控，输赢都有收益；适合承载数值型成长</td>
+                    <td>容易变成“纯数值堆叠”，把局内决策架空</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p>健康的做法是两条一起用，各管一段：<strong>成就解锁负责“新内容”，点数解锁负责“新手缓冲”</strong>。前者制造惊喜与探索欲，后者兜住连续失败的挫败。</p>
+
+                <figure class="figure">
+            <a href="assets/img/07-meta-progression.png" target="_blank" rel="noopener">
+                <img src="assets/img/07-meta-progression.png" alt="板书：局外成长的两条解锁路线与解锁内容的分寸" width="1440" height="810" loading="lazy">
+            </a>
+            <figcaption>原课板书。两条解锁路线（难度解锁与挑战解锁）对应两种玩家动机，右侧那句“解锁内容不多于”是这一节的分寸线。 <span class="figure-src">视频 11:40</span></figcaption>
+        </figure>
+
+<h2>5.3 解锁内容该是什么</h2>
+
+        <p>视频里列了四类可解锁内容，这个分类可以直接写进需求文档：</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>新可用角色</h4>
+                    <p>改变操作方式或起始条件，是最有分量的解锁。它天然带来“重新学一遍”的乐趣，但制作成本也最高——每个角色都要单独配平衡。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>新可遇见的道具 / 装备 / 战利品</h4>
+                    <p>扩充随机池，让老玩家看到没见过的东西。这里要小心：池子越大，特定流派越难凑齐（第 2 章讲的池污染），所以新道具应该按流派分池投放，而不是全塞进一个大池。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>新通关路线与新机制</h4>
+                    <p>给重复游玩提供结构性变化。比如解锁一条隐藏路线、解锁“诅咒模式”、解锁一个能改变掉落规则的系统。这类解锁最能延长生命周期，因为它改变的是<strong>玩法框架</strong>而不是数字。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-content">
+                    <h4>新难度层级</h4>
+                    <p>通关之后才开放的加压模式，详见下一节。它严格来说不是“内容”，而是给已经掌握游戏的玩家一个继续玩的理由。</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>5.4 反纯数值：为什么这条线不能越过</h2>
+
+        <p>纯数值的局外成长有一个隐蔽的破坏力：它让<strong>局内难度校准失去意义</strong>。你的关卡是按“玩家初始攻击 10”设计的，但老玩家靠天赋树开局就有 15。于是同一层对新手是地狱，对老玩家是散步——你无法再用一套难度曲线服务所有人。</p>
+
+        <p>更麻烦的是心理层面：当玩家知道自己可以靠“多点几下”变强，他在局内的取舍就不再认真。“这局打不过？回去点满攻击再来。”——肉鸽的核心体验是“在有限资源下做决策”，这句话被直接绕开了。</p>
+
+        <div class="definition">
+            <h4>一条可用的配比</h4>
+            <p>把局外成长拆成两类解锁，比例控制在 <strong>机制类 7 : 数值类 3</strong> 左右：</p>
+            <ul>
+                <li><strong>机制类</strong>：新角色、新道具、新路线、新事件、新规则。它们改变“能遇到什么”，不改变“起点有多强”。</li>
+                <li><strong>数值类</strong>：生命上限、初始金币、掉落品质概率、复活次数。它们必须<strong>有明确上限</strong>，且总量控制在“最多让开局舒服一点，不足以越过一层难度”。</li>
+            </ul>
+            <p>验收标准：<strong>满点玩家与零解锁玩家的第一层通关率差距，不应超过 15 个百分点</strong>。超过，就说明数值权重太大。</p>
+        </div>
+
+        <p>视频里的原话是“可以加一点，但不要加太多，不然游戏到后面就变成很无聊了，或者说你不做局外成长就玩不了”。后半句是最危险的状态：<strong>如果设计成“不点满就打不过”</strong>，那局外成长已经从辅助变成了主线，玩家每局都在做同一道算术题。</p>
+
+        <h2>5.5 难度分级：通关之后往哪加压</h2>
+
+        <p>通关一次之后，玩家需要一个“还能继续”的理由。视频里给了三种加压方式，它们的心理效果不一样：</p>
+
+        <table>
+            <thead>
+                <tr><th>方式</th><th>做法</th><th>玩家感受</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>直接增强敌人</td><td>血量、伤害、攻速按层级整体上调</td><td>“怪更硬了，我得打得更准”——最直白，也最容易被摸清</td></tr>
+                <tr><td>间接降低高品质掉率</td><td>高品质道具出现概率下降，等效于让构筑更难成型</td><td>“这局拼不出来”——压力来自构筑，不是操作</td></tr>
+                <tr><td>塞入无用内容</td><td>往掉落池里加入低价值道具，稀释有效选项</td><td>“又被喂垃圾”——最容易招骂，谨慎使用</td></tr>
+            </tbody>
+        </table>
+
+        <p>《杀戮尖塔》的进阶（Ascension）是这套思路的教科书：20 级难度，前几级改敌人强度，中间级改精英与 Boss 配置，高级改起始条件（比如开局带诅咒、少一个药水槽）。它不是简单地把所有数值乘 1.2，而是<strong>逐级换一个变量</strong>，让每一级都有新的应对方式。</p>
+
+        <div class="callout callout-warning">
+            <strong>不要把所有加压手段一起上</strong>。敌人变强 + 掉率变差 + 池子被稀释，三件事同时发生，玩家的可操作空间会被压缩到零。这个难度层就不是挑战，而是抽奖。
+        </div>
+
+        <h2>5.6 实现：解锁状态怎么参与掉落</h2>
+
+<p>局外成长在代码里应该只是一个<strong>过滤器</strong>：它不直接改数值，而是决定哪些内容“可以出现”。这样数值与内容的改动互不干扰，策划调表也不会牵动战斗逻辑。</p>
+
+<pre><code class="language-csharp">using System;
+using System.Collections.Generic;
+using System.Linq;
+
+public enum UnlockCategory { Character, Item, Route, Mechanic, Difficulty, NumericBuff }
+
+public class UnlockDef
+{
+    public string Id;
+    public UnlockCategory Category;
+    public string Condition;        // 例："beat_boss:floor3" / "runs&gt;=3"
+    public bool HiddenUntilMet;     // 未达成时是否在图鉴里隐藏
+}
+
+public class UnlockService
+{
+    private readonly MetaState _meta;
+    private readonly List&lt;UnlockDef&gt; _defs;
+
+    public UnlockService(MetaState meta, List&lt;UnlockDef&gt; defs)
+    {
+        _meta = meta; _defs = defs;
+    }
+
+    public bool IsUnlocked(string id) =&gt; _meta.Unlocked.ContainsKey(id);
+
+    /// &lt;summary&gt;把未解锁的内容从池子里剔除；这是唯一正确的接入点&lt;/summary&gt;
+    public List&lt;(ItemDef item, float weight)&gt; FilterPool(
+        IReadOnlyList&lt;(ItemDef item, float weight)&gt; raw)
+    {
+        var result = new List&lt;(ItemDef, float)&gt;(raw.Count);
+        foreach (var entry in raw)
+        {
+            if (entry.item.RequiresUnlock &amp;&amp; !IsUnlocked(entry.item.UnlockId))
+                continue;
+            result.Add(entry);
+        }
+        return result;
+    }
+
+    /// &lt;summary&gt;数值类加成必须读上限，不要让它无限叠加&lt;/summary&gt;
+    public int NumericBonus(string key, int cap)
+    {
+        int raw = _meta.Unlocked.TryGetValue(key, out var v) ? v : 0;
+        return Math.Min(raw, cap);
+    }
+}
+</code></pre>
+
+        <p>两个设计要点：</p>
+        <ul>
+            <li><strong><code>RequiresUnlock</code></strong> 是道具属性，不是代码分支。</li>
+            <li><strong><code>NumericBonus</code></strong> 强制带 <code>cap</code> 参数，从接口层面堵住“越点越强”的无上限成长。上限值是策划配的，不是程序拍的。</li>
+        </ul>
+
+        <h2>5.7 三个坑</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>解锁全是随机</h4>
+                    <p>“打多少局随机解锁一个东西”看起来很轻，实际上玩家感受不到因果关系，也不会为它做任何努力。解锁条件必须是可见、可解释、可通过特定行为达成的。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>点数树变成唯一解</h4>
+                    <p>如果天赋树里有一条明显最优的路线（比如“先点满暴击”），玩家的局外选择就消失了。做法是：让每一层的点数投入都有边际收益递减，或者用互斥分支逼迫取舍。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>解锁内容跟版本打架</h4>
+                    <p>新版本改变了解锁条件，老玩家的进度如何迁移？至少要保证：已解锁的不回退，条件变更要写迁移脚本，否则老玩家会丢存档进度——这是最伤口碑的一类事故。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag think">判断</span>练习 5-1</h3>
+            <p>列出你项目的全部局外解锁项，按“机制 / 数值”分类，数一下比例。如果数值类超过 30%，挑三项改成机制类（比如把“+5 攻击”换成“解锁一种新的道具类型”）。</p>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag practice">实现</span>练习 5-2</h3>
+            <p>用 <code>UnlockService</code> 接一次完整的掉落流程：构造 20 件道具的池子，其中 6 件需要解锁，分别验证“零解锁 / 半解锁 / 全解锁”三种状态下抽到的道具分布是否符合预期。</p>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag think">判断</span>练习 5-3</h3>
+            <p>假设玩家连续输了 6 局。你的系统能让他带走什么？如果答案是“只有一点经验值”，说明局外成长太薄；如果是“他又变强了，第 7 局直接碾压”，说明太厚。写出你希望他在第 7 局感受到的那句话。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>局外成长解决两件事：失败的残留感，以及新手认知负荷的渐进释放。</li>
+            <li>成就解锁负责内容，点数解锁负责缓冲，两条路线各管一段。</li>
+            <li>解锁内容优先机制（角色、道具、路线、规则），数值必须设上限。</li>
+            <li>难度分级要逐级换变量，不要把加压手段一次性叠满。</li>
+            <li>代码上把局外成长做成“池过滤器 + 带上限的加成读取”，不要让它直接改战斗数值。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章预习</strong>：玩家在局内怎么变强，是肉鸽手感的核心。下一章讲费用参照物、期望值折算、同步成长与诅咒机制。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-有限资源-稀缺制造决策.html">← 上一章：有限资源</a>
+            <a href="06-数值成长-强度换算.html">下一章：数值成长 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

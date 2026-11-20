@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <script src="assets/theme.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>战斗系统：由简入繁，组合出强度 - 肉鸽游戏设计教程</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <link rel="stylesheet" href="assets/theme-dark.css">
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-资源管理-取舍与转化.html">← 上一章</a>
+        <a href="10-叙事与成就-长线驱动.html">下一章 →</a>
+    </nav>
+
+    <main>
+        <h1>战斗系统：由简入繁，组合出强度</h1>
+        <p class="chapter-meta">模块三 · 七套系统之五 ｜ 本章包含属性聚合与伤害结算的实现</p>
+
+        <p>前面几章讲的是玩家“拥有什么”，这一章讲这些东西“打起来是什么感觉”。肉鸽的战斗和 RPG、SLG 的战斗有一个根本差别：<strong>你不是带着一整套配装进副本，而是在副本里边打边长</strong>。这个差别决定了战斗系统必须服务于“成长过程”，而不只是“战斗结果”。</p>
+
+        <h2>9.1 从简单开始，逐层叠加</h2>
+
+        <p>《以撒》的开局是教科书级的：角色只会吐出普通的小泪弹，没有特效、没有分裂、没有追踪。玩家先学会走位和瞄准，然后道具一件件叠上来，眼泪才开始分裂、爆炸、追踪、反弹。</p>
+
+        <p>对比一下传统 RPG 的开局：进去之前就配好四五个技能，一上手就要理解连招、冷却、资源循环。两种体验的差别不在难度，而在<strong>认知负担的分布</strong>：肉鸽把复杂度摊在几十分钟里，RPG 把它压在前十分钟。</p>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>肉鸽战斗</th><th>传统 RPG 战斗</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>复杂度出现时机</td><td>随单局推进逐步叠加</td><td>开局即给全套技能</td></tr>
+                <tr><td>玩家的学习曲线</td><td>边玩边学，每次只加一个变量</td><td>前置学习，先看攻略再上手</td></tr>
+                <tr><td>强度来源</td><td>组合（乘法协同）</td><td>等级与装备（加法累积）</td></tr>
+                <tr><td>失败的原因</td><td>走位、时机、构筑方向</td><td>配置不足、技能循环错误</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-info">
+            <strong>为什么要“逐层加”而不是“一次性给”</strong>：每加一件道具，玩家都要重新评估自己的打法。这个重估的过程本身就是乐趣。一次性给全部能力，玩家只会找一套最优连招然后重复，中间没有任何判断。
+        </div>
+
+        <h2>9.2 把攻击拆成维度</h2>
+
+        <p>视频里给的建议非常具体：把普通攻击拆成攻击力、攻速、攻击范围、暴击率、暴击伤害这些独立维度，让玩家可以分别强化。这不是为了做数值表，而是为了<strong>让不同道具落在不同维度上，从而产生不同的构筑路线</strong>。</p>
+
+        <p>更关键的是这段计算：假设初始攻击力是 1、攻速是 1，玩家分别把两者各加 1，输出会变成 4 倍——因为 <code>(1+1) × (1+1) = 4</code>。如果只加攻击力，加到 3 也只有 3 倍。</p>
+
+        <div class="definition">
+            <h4>乘法的力量</h4>
+            <p>单维度线性叠加：<code>DPS = (1 + a) × 1</code>，加成是加法。</p>
+            <p>多维度并行叠加：<code>DPS = (1 + a) × (1 + s)</code>，加成是乘法。</p>
+            <p>这就是为什么同样投入两点资源，分散到两个维度能得到 4 倍，集中在单个维度只有 3 倍。设计上要做的，是<strong>确保这两个维度都有足够的道具供给</strong>，否则玩家想分散也做不到。</p>
+        </div>
+
+        <p>维度拆得越细，1+1&gt;2 的空间越大，但也越容易出现“某条维度没人供给”的空洞。一个可用的维度清单：</p>
+
+        <table>
+            <thead>
+                <tr><th>维度</th><th>作用</th><th>如果缺失</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>攻击力</td><td>基础输出，最直观</td><td>玩家感觉“打了半天不掉血”</td></tr>
+                <tr><td>攻速</td><td>提高出手频率，强化手感</td><td>战斗节奏沉闷，操作反馈弱</td></tr>
+                <tr><td>攻击范围 / 数量</td><td>清场效率，应对群怪</td><td>面对群怪只能逐个处理，节奏断裂</td></tr>
+                <tr><td>暴击率 / 暴伤</td><td>提供“惊喜感”与高上限</td><td>伤害曲线太平，没有爽点</td></tr>
+                <tr><td>元素 / 状态</td><td>制造流派差异与组合空间</td><td>所有构筑打起来都一样</td></tr>
+                <tr><td>召唤 / 衍生物</td><td>提供自动化输出与防线</td><td>玩家必须全程手动，操作压力过高</td></tr>
+            </tbody>
+        </table>
+
+                <figure class="figure">
+            <a href="assets/img/11-combat.png" target="_blank" rel="noopener">
+                <img src="assets/img/11-combat.png" alt="板书：简单参考、叠加成 1+1>2 与平衡性手段" width="1440" height="810" loading="lazy">
+            </a>
+            <figcaption>原课板书。三层递进：先给一个能跑通的简单参考，再让机制叠加产生 1+1>2，最后才用平衡性手段收口。 <span class="figure-src">视频 24:00</span></figcaption>
+        </figure>
+
+<h2>9.3 平衡性：三种手段，优先级不同</h2>
+
+        <p>这是本章最重要的一节。视频里讲者说了一句很诚实的话：<strong>平衡性这个东西，世界顶尖的设计师也设计不出来</strong>。所以不要追求一次做对，而要设计一套“可以持续调”的方法。</p>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>间接削弱：不砍核心，砍关联</h4>
+                    <p>某把枪太强，不要直接把枪的伤害砍掉——那会让喜欢它的玩家觉得自己的东西被抢走了。改法有三条：削弱它依赖的子弹、削弱适配的瞄准镜、削弱给它供能的道具。</p>
+                    <p>更典型的例子是“火龙卷”：伤害过高，但它的机制依赖“先给敌人叠燃烧层数，再用火龙卷引爆”。那么削弱“叠燃烧”的道具，就能在不改动火龙卷本身的前提下降低整体强度。玩家的感受是“这套还是能用，但要更费劲了”，而不是“我的核心被删了”。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>提高成型门槛</h4>
+                    <p>不改效果，改获取难度：让关键配件更难拿到、需要更多件才能启动、或者给敌人加上抗性，迫使玩家多带一个“破抗”组件。</p>
+                    <p>视频里的说法是“让他抓的配件要更多一点”。这条路径的好处是<strong>保住了强度上限</strong>——高手仍然能打出那套，但需要更高的技巧与运气，这正是你想要的结果。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>直接加强弱势</h4>
+                    <p>弱势流派不需要绕弯子，直接加数值最有效，玩家反馈也最正面——因为他们拿到的是一份礼物，而不是一次修改。</p>
+                    <p>如果加了数值还是没人玩，说明问题不在数字，而在这个流派的核心机制不成立，那就重做。重做要趁早，拖得越久，已经投入的玩家越难接受。</p>
+                </div>
+            </div>
+        </div>
+
+        <table class="comparison">
+            <thead>
+                <tr><th>做法</th><th>适用场景</th><th>玩家反应</th></tr>
+            </thead>
+            <tbody>
+                <tr class="good">
+                    <td>削关联配件</td>
+                    <td>核心道具本身设计合理，只是组合过强</td>
+                    <td>“这套还能玩，只是更慢了”——接受度高</td>
+                </tr>
+                <tr class="good">
+                    <td>提高成型门槛</td>
+                    <td>上限太高但下限正常</td>
+                    <td>“高手向”——社区通常认可</td>
+                </tr>
+                <tr class="good">
+                    <td>加强弱势</td>
+                    <td>某条路线长期没人用</td>
+                    <td>“终于有人管了”——正向反馈</td>
+                </tr>
+                <tr class="bad">
+                    <td>直接砍核心数值</td>
+                    <td>只在紧急热修时使用</td>
+                    <td>“我的东西被抢了”——口碑风险高</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>平衡的敌人是“没有数据”</strong>。在拿不到真实选取率与通关率之前，所有平衡调整都是猜。至少采集四项：道具选取率、道具对通关率的贡献、各流派的通关分布、玩家死亡层数分布。没有这四项，你调的只是自己的手感。
+        </div>
+
+        <h2>9.4 敌人设计服务于构筑验证</h2>
+
+        <p>视频没有展开敌人设计，但这一点在实际项目里很关键：敌人是检验构筑的镜子。如果所有敌人都只是“血更厚的靶子”，那玩家永远只需要堆伤害。</p>
+
+        <ul>
+            <li><strong>压力测试型</strong>：高攻速、低血量的小怪群，检验清场效率与范围伤害。</li>
+            <li><strong>窗口检验型</strong>：有明确攻击间隔的精英，检验玩家的爆发窗口与走位。</li>
+            <li><strong>构筑反制型</strong>：对某类伤害有抗性，迫使玩家准备第二条输出路径。</li>
+            <li><strong>终局检验型</strong>：Boss 用多阶段机制，分别检验输出、生存、资源管理。</li>
+        </ul>
+
+        <p>把这四类按层数排布，玩家自然会感到“我的构筑在被检验”，而不是“怪物在变厚”。</p>
+
+        <h2>9.5 实现：加法区与乘法区的分层</h2>
+
+        <p>战斗数值最容易失控的地方，是“所有加成混在一起算”。正确做法是分成两层：<strong>加法区</strong>（同类来源相加）与<strong>乘法区</strong>（不同维度相乘）。这样既能保证 1+1&gt;2 的协同，也能给每个维度设上限。</p>
+
+<pre><code class="language-csharp">using System;
+using System.Collections.Generic;
+
+/// &lt;summary&gt;属性聚合：加法区先汇总，再按维度相乘&lt;/summary&gt;
+public class StatAggregator
+{
+    // 加法区：同类加成直接相加
+    private readonly Dictionary&lt;string, float&gt; _flat = new();
+    // 乘法区：不同维度相乘，且各自有上限
+    private readonly Dictionary&lt;string, float&gt; _mult = new();
+
+    public void AddFlat(string key, float value) =&gt;
+        _flat[key] = _flat.TryGetValue(key, out var v) ? v + value : value;
+
+    public void AddMultiplier(string key, float value, float cap = 3f)
+    {
+        float cur = _mult.TryGetValue(key, out var v) ? v : 1f;
+        _mult[key] = Math.Min(cap, cur * (1f + value));
+    }
+
+    public float Get(string key, float baseValue)
+    {
+        float flat = _flat.TryGetValue(key, out var f) ? f : 0f;
+        float mult = _mult.TryGetValue(key, out var m) ? m : 1f;
+        return (baseValue + flat) * mult;
+    }
+}
+
+/// &lt;summary&gt;一次伤害结算：先算基础，再乘暴击，最后加上元素修正&lt;/summary&gt;
+public class DamageCalculator
+{
+    public static float Compute(
+        float baseDamage,
+        float flatBonus,
+        float damageMultiplier,
+        float critRate,
+        float critMultiplier,
+        float targetResistance)
+    {
+        float raw = (baseDamage + flatBonus) * damageMultiplier;
+        float expected = raw * (1f + critRate * (critMultiplier - 1f));
+        return expected * (1f - Math.Clamp(targetResistance, 0f, 0.9f));
+    }
+}
+</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>为什么暴击要放在“期望值”里算</strong>：单次结算时暴击是随机的，但平衡验收时要用期望值，否则你无法比较两件道具的长期强度。两者要分开：实机走随机，调平衡看期望。
+        </div>
+
+        <h2>9.6 三个坑</h2>
+
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                    <h4>只有一条维度在成长</h4>
+                    <p>所有道具都是“+攻击”，玩家会算出一条唯一最优路线。检查方法：统计道具对不同维度的覆盖数量，任何一个维度如果道具数少于 5 件，它就是死维度。</p>
+                </div>
+            </div>
+            <div class="step">
+            <span class="step-number">2</span>
+                <div class="step-content">
+                    <h4>乘法维度没有上限</h4>
+                    <p>攻速 × 暴击 × 增伤 × 元素，四个维度各翻一倍就是 16 倍，后期直接秒 Boss。给每个维度设硬上限（比如攻速最多 3 倍、暴伤最多 4 倍），或者引入减伤曲线。</p>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                    <h4>平衡只靠削</h4>
+                    <p>每次版本更新都在砍，玩家的构筑一个个被拆掉，社区氛围会迅速恶化。健康的节奏是“削一个、加两个”：每削一处，至少补两处弱势流派的增强，让玩家有新的东西可玩。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag practice">实现</span>练习 9-1</h3>
+            <p>用 <code>StatAggregator</code> 做一次对照实验：给玩家 4 点加成预算，分别按“全部加攻击”“攻击与攻速各半”“攻击、攻速、暴击、增伤各一”三种方案分配，比较最终 DPS。写下结论，并说明这对你的道具分布意味着什么。</p>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag think">判断</span>练习 9-2</h3>
+            <p>找出一把你项目里最容易被投诉“太强”的武器，按三条间接路径各写一个改法。不要写“降低伤害”，那是最差答案。</p>
+        </div>
+
+        <div class="exercise">
+            <h3><span class="tag think">判断</span>练习 9-3</h3>
+            <p>列出你当前版本的四类敌人，标注它们各自在检验什么。如果某个类型缺失，说明你的战斗系统少了对应的一层压力。</p>
+        </div>
+
+        <h2>本章小结</h2>
+        <ul>
+            <li>肉鸽战斗要从简单开始，复杂度随构筑逐步叠加，让玩家边玩边学。</li>
+            <li>把攻击拆成多个维度，分散投入会产生乘法协同（各加 1 可得 4 倍）。</li>
+            <li>平衡优先用间接手段：削关联、提门槛；弱势直接加强，必要时重做。</li>
+            <li>敌人是构筑的镜子，四类敌人分别检验清场、爆发、反制与终局能力。</li>
+            <li>数值要分加法区与乘法区，乘法维度必须设上限。</li>
+        </ul>
+
+        <div class="callout callout-info">
+            <strong>下一章预习</strong>：打完之后，玩家为什么还愿意再开一局？下一章讲碎片化叙事与四类成就。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="08-资源管理-取舍与转化.html">← 上一章：资源管理</a>
+            <a href="10-叙事与成就-长线驱动.html">下一章：叙事与成就 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

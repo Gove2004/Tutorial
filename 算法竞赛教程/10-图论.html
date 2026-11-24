@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>第 10 章 图论 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="09-字符串.html">← 上一章</a>
+        <a href="11-计算几何.html">下一章 →</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>第 10 章 图论</h1>
+
+        <p class="intro">
+            图论是竞赛里“模型最多”的一章：最短路、最小生成树、连通性、网络流，每一类都有固定的判定条件和模板。
+            难点不在背模板，而在<strong>把题面抽象成图</strong>——点是什么、边是什么、边权是什么。
+        </p>
+
+        <div class="definition">
+            <h4>学完本章，你应该能做到</h4>
+            <ul>
+                <li>根据数据规模在邻接矩阵、邻接表、链式前向星之间选型；</li>
+                <li>用拓扑排序判断有向图是否有环，并求字典序最小的方案；</li>
+                <li>用 Tarjan 求割点、割边、强连通分量，解释 <code>low</code> 与 <code>num</code> 的含义；</li>
+                <li>在 Floyd / Bellman-Ford / SPFA / Dijkstra 之间正确选择；</li>
+                <li>写出 Kruskal 与 Prim，知道为什么 Kruskal 要用并查集；</li>
+                <li>写出 Dinic 求最大流，理解“最大流 = 最小割”；</li>
+                <li>用匈牙利算法求二分图最大匹配。</li>
+            </ul>
+        </div>
+
+        <h2>10.1 基本概念</h2>
+
+        <table>
+            <thead><tr><th>术语</th><th>含义</th><th>竞赛里的用法</th></tr></thead>
+            <tbody>
+                <tr><td>有向图 / 无向图</td><td>边是否有方向</td><td>无向边在存图时要存两条</td></tr>
+                <tr><td>度</td><td>与该点相连的边数</td><td>欧拉路的判定依据</td></tr>
+                <tr><td>路径 / 回路</td><td>点边交替的序列 / 起点终点相同</td><td>最短路、欧拉回路</td></tr>
+                <tr><td>连通 / 强连通</td><td>任意两点互相可达</td><td>无向图用并查集或 DFS；有向图用 Tarjan</td></tr>
+                <tr><td>权</td><td>边上的数值（长度、费用、容量）</td><td>最短路、MST、网络流</td></tr>
+            </tbody>
+        </table>
+
+        <h2>10.2 图的存储</h2>
+
+        <p>三种存法，各有明确的适用边界：</p>
+
+        <table>
+            <thead><tr><th>存法</th><th>空间</th><th>遍历某点邻居</th><th>适用</th></tr></thead>
+            <tbody>
+                <tr><td>邻接矩阵 <code>g[u][v]</code></td><td>O(n<sup>2</sup>)</td><td>O(n)</td><td>n ≤ 300、Floyd、稠密图</td></tr>
+                <tr><td>邻接表 <code>vector&lt;int&gt; g[n]</code></td><td>O(n+m)</td><td>O(度数)</td><td>绝大多数题，写法最简单</td></tr>
+                <tr><td>链式前向星</td><td>O(n+m)</td><td>O(度数)</td><td>边数上百万、需要极致常数</td></tr>
+            </tbody>
+        </table>
+
+        <pre><code class="language-cpp">// 邻接表：够用且好写
+vector&lt;pair&lt;int, int&gt;&gt; g[MAXN];       // (邻点, 边权)
+g[u].push_back({v, w});
+g[v].push_back({u, w});               // 无向图存两条
+
+// 链式前向星：空间效率最高
+const int NUM = 1000005;              // 一百万点、一百万边
+struct Edge { int to, next, w; } edge[NUM];
+int head[NUM], cnt;
+
+void init() {
+    for (int i = 0; i &lt; NUM; i++) { edge[i].next = -1; head[i] = -1; }
+    cnt = 0;
+}
+
+void add_edge(int u, int v, int w) {
+    edge[cnt].to = v;
+    edge[cnt].w = w;
+    edge[cnt].next = head[u];         // 指向 u 上一次存的边
+    head[u] = cnt++;                  // u 的最新边在数组末尾
+}
+
+// 遍历 u 的所有邻居
+for (int i = head[u]; ~i; i = edge[i].next) { /* edge[i].to ... */ }</code></pre>
+
+        <div class="callout callout-info">
+            <strong>链式前向星的优缺点：</strong>空间零浪费、能存重边、常数小；
+            但<strong>不方便删除边</strong>，也不方便随机访问某条边。需要删边时用邻接表或矩阵。
+        </div>
+
+        <h2>10.3 遍历与连通性</h2>
+
+        <p>
+            第 4 章的 BFS/DFS 直接搬过来即可。遍历的同时就能统计连通块数量：对每个未访问的点启动一次搜索，
+            计数器加一。
+        </p>
+
+        <pre><code class="language-cpp">int vis[MAXN], blocks = 0;
+
+void dfs(int u) {
+    vis[u] = 1;
+    for (int i = head[u]; ~i; i = edge[i].next) {
+        int v = edge[i].to;
+        if (!vis[v]) dfs(v);
+    }
+}
+
+// 主函数
+for (int i = 1; i &lt;= n; i++)
+    if (!vis[i]) { blocks++; dfs(i); }</code></pre>
+
+        <p>
+            更省事的是并查集：每读一条边就合并两个端点，最后统计不同代表的数量。两种写法复杂度都是 O(n+m)。
+        </p>
+
+        <h2>10.4 拓扑排序</h2>
+
+        <p>
+            有向无环图（DAG）可以把所有点排成一条线，使每条边都从前指向后。做法是 Kahn 算法：
+            反复取出入度为 0 的点，删掉它的出边，并把邻居入度减一。
+        </p>
+
+        <pre><code class="language-cpp">int indeg[MAXN], order[MAXN], tot;
+
+bool topo(int n) {
+    queue&lt;int&gt; q;
+    for (int i = 1; i &lt;= n; i++) if (indeg[i] == 0) q.push(i);
+    while (!q.empty()) {
+        int u = q.front(); q.pop();
+        order[++tot] = u;
+        for (int i = head[u]; ~i; i = edge[i].next) {
+            int v = edge[i].to;
+            if (--indeg[v] == 0) q.push(v);
+        }
+    }
+    return tot == n;                  // 小于 n 说明有环
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>两个常用变形：</strong>
+            ① 把 <code>queue</code> 换成 <code>priority_queue</code>，就得到字典序最小的拓扑序；
+            ② 用 DFS 后序（退出时记录）也能求拓扑序，但需要额外判环（三色标记）。
+        </div>
+
+        <h2>10.5 欧拉路</h2>
+
+        <p>
+            欧拉路：经过每条边恰好一次。判定条件：
+        </p>
+
+        <ul>
+            <li><strong>无向图：</strong>连通，且奇度点个数为 0（欧拉回路）或 2（欧拉路，从奇度点出发）；</li>
+            <li><strong>有向图：</strong>弱连通，且每个点入度等于出度（回路），或恰有一个点出度比入度大 1（起点）、
+            一个点入度比出度大 1（终点）。</li>
+        </ul>
+
+        <pre><code class="language-cpp">// Hierholzer：DFS 中“走完再记”，得到欧拉路
+int ans[MAXN], tot;
+
+void euler(int u) {
+    for (int i = head[u]; ~i; i = edge[i].next) {
+        if (edge[i].used) continue;         // 每条边只走一次
+        edge[i].used = true;
+        euler(edge[i].to);
+    }
+    ans[++tot] = u;                         // 退出时记录，最后倒序输出
+}</code></pre>
+
+        <h2>10.6 无向图的连通性：割点与割边</h2>
+
+        <p>
+            割点：删掉它会让连通块增加。割边（桥）：删掉它会让连通块增加。
+            Tarjan 用两个数组判断：<code>num[u]</code> 是 DFS 访问顺序（时间戳），<code>low[u]</code> 是 u 及其子树能回溯到的<em>最早</em>时间戳。
+        </p>
+
+        <ul>
+            <li>对边 (u, v)：若 <code>low[v] &gt; num[u]</code>，则 (u, v) 是割边；</li>
+            <li>对点 u（非根）：若存在儿子 v 使 <code>low[v] &gt;= num[u]</code>，则 u 是割点；</li>
+            <li>根节点：有两个以上这样的儿子才是割点。</li>
+        </ul>
+
+        <pre><code class="language-cpp">int num[MAXN], low[MAXN], timer;
+bool iscut[MAXN];
+
+void tarjan(int u, int fa) {
+    num[u] = low[u] = ++timer;
+    int child = 0;
+    for (int i = head[u]; ~i; i = edge[i].next) {
+        int v = edge[i].to;
+        if (v == fa) continue;                 // 无向图要跳过父亲（处理重边需改成判边编号）
+        if (!num[v]) {
+            child++;
+            tarjan(v, u);
+            low[u] = min(low[u], low[v]);
+            if (fa != 0 &amp;&amp; low[v] &gt;= num[u]) iscut[u] = true;   // 非根割点
+            if (low[v] &gt; num[u]) { /* (u,v) 是割边 */ }
+        } else {
+            low[u] = min(low[u], num[v]);       // 回边
+        }
+    }
+    if (fa == 0 &amp;&amp; child &gt;= 2) iscut[u] = true;   // 根有两个以上子树
+}</code></pre>
+
+        <p>
+            双连通分量（点双、边双）也是在同一个 DFS 里用栈收集。点双分量的每个分量内部没有割点，
+            边双分量内部没有割边。它们常与“缩点”一起用：把每个双连通分量缩成一个点，图就变成一棵树。
+        </p>
+
+        <h2>10.7 有向图的强连通分量</h2>
+
+        <p>
+            强连通分量（SCC）：分量内任意两点互相可达。求出 SCC 后<strong>缩点</strong>，原图就变成一个 DAG，
+            可以接拓扑排序或 DP。
+        </p>
+
+        <h3>10.7.1 Kosaraju</h3>
+
+        <p>
+            两遍 DFS：第一遍在原图上求后序，第二遍在反图上按后序逆序 DFS，每次能访问到的点就是一个 SCC。
+            复杂度 O(V+E)，思路直白但需要存反图。
+        </p>
+
+        <h3>10.7.2 Tarjan</h3>
+
+        <p>
+            一次 DFS 就能把所有 SCC 分出来。原理仍是 <code>low</code> 与 <code>num</code>：当一个点的 <code>low[u] == num[u]</code>
+            时，它就是当前 SCC 的“根”，栈中它以上的点全部属于这个 SCC。
+        </p>
+
+        <pre><code class="language-cpp">int num[MAXN], low[MAXN], sccno[MAXN], timer, scc_cnt;
+int st[MAXN], top;
+bool inStack[MAXN];
+
+void tarjan(int u) {
+    num[u] = low[u] = ++timer;
+    st[++top] = u; inStack[u] = true;
+    for (int i = head[u]; ~i; i = edge[i].next) {
+        int v = edge[i].to;
+        if (!num[v]) {
+            tarjan(v);
+            low[u] = min(low[u], low[v]);
+        } else if (inStack[v]) {
+            low[u] = min(low[u], num[v]);
+        }
+    }
+    if (low[u] == num[u]) {                  // u 是 SCC 的根
+        scc_cnt++;
+        while (true) {
+            int v = st[top--];
+            inStack[v] = false;
+            sccno[v] = scc_cnt;
+            if (v == u) break;
+        }
+    }
+}</code></pre>
+
+        <p>
+            原书用过一个很直观的例子：图中有 a、b、c、d、e、f 六个点，DFS 后 <code>low</code> 值分成三段——
+            等于 1 的 {a,b,d,c}、等于 4 的 {f}、等于 5 的 {e}，正好是三个 SCC。
+            <strong>low 值相同的点属于同一个 SCC</strong>，这个观察对理解算法很有帮助。
+        </p>
+
+        <h2>10.8 2-SAT</h2>
+
+        <p>
+            每个变量只能取真/假，给出一堆“若 A 则 B”的约束，问是否存在赋值。做法是把每个变量拆成两个点
+            （x 为真、x 为假），把约束建成有向边，然后求 SCC：
+        </p>
+
+        <div class="definition">
+            <h4>判定</h4>
+            <p>若某个变量的“真”和“假”在同一个 SCC 里，则无解；否则按 SCC 的拓扑序（Tarjan 求出的编号逆序）赋值即可。</p>
+        </div>
+
+        <p>
+            关键在于把 <code>a ∨ b</code> 这类子句转成两条边：<code>¬a → b</code> 与 <code>¬b → a</code>。
+            这一步转换错了，后面全错。
+        </p>
+
+        <h2>10.9 最短路</h2>
+
+        <table>
+            <thead><tr><th>算法</th><th>适用</th><th>复杂度</th><th>能否处理负权</th></tr></thead>
+            <tbody>
+                <tr><td>Floyd</td><td>多源最短路、n ≤ 300</td><td>O(n<sup>3</sup>)</td><td>能（不能有负环）</td></tr>
+                <tr><td>Bellman-Ford</td><td>单源、有负权</td><td>O(VE)</td><td>能，且能判负环</td></tr>
+                <tr><td>SPFA</td><td>单源、稀疏图、有负权</td><td>平均 O(kE)，最坏 O(VE)</td><td>能</td></tr>
+                <tr><td>Dijkstra（堆优化）</td><td>单源、非负权</td><td>O((n+m)log n)</td><td>不能</td></tr>
+            </tbody>
+        </table>
+
+        <h3>10.9.1 Floyd</h3>
+
+        <pre><code class="language-cpp">for (int k = 1; k &lt;= n; k++)              // 中转点必须放最外层
+    for (int i = 1; i &lt;= n; i++)
+        for (int j = 1; j &lt;= n; j++)
+            if (dis[i][k] + dis[k][j] &lt; dis[i][j])
+                dis[i][j] = dis[i][k] + dis[k][j];</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>k 必须在最外层。</strong>如果把 k 放内层，等价于“只允许用一条边中转”，结果不是最短路。
+            <code>dis</code> 初始化：自己到自己为 0，有边为边权，无边为 INF；注意 INF + INF 会溢出，判断时加限制。
+        </div>
+
+        <h3>10.9.2 Bellman-Ford</h3>
+
+        <p>
+            思路最朴素：进行 n−1 轮松弛，每轮把<strong>所有边</strong>都检查一遍。因为一条最短路最多包含 n−1 条边，
+            所以 n−1 轮之后一定收敛。它的价值不在速度，而在于<strong>能处理负权、并且能判负环</strong>。
+        </p>
+
+        <pre><code class="language-cpp">// Bellman-Ford：最多松弛 n-1 轮
+for (int i = 1; i &lt;= n - 1; i++)
+    for (int j = 1; j &lt;= m; j++)
+        if (dis[E[j].u] + E[j].w &lt; dis[E[j].v])
+            dis[E[j].v] = dis[E[j].u] + E[j].w;
+// 第 n 轮还能松弛，说明存在负环</code></pre>
+
+        <div class="callout callout-info">
+            <strong>为什么第 n 轮还能松弛就说明有负环？</strong>如果没有负环，最短路最多用 n−1 条边，
+            第 n−1 轮之后不该再有任何更新。第 n 轮仍在更新，只能是因为沿着负环可以无限变小。
+        </div>
+
+        <h3>10.9.3 SPFA</h3>
+
+        <p>
+            SPFA 是 Bellman-Ford 的队列优化：只把“距离被更新过的点”入队，用它去松弛邻居，
+            避免每轮扫描所有边。它在随机图上很快（平均 O(kE)），但<strong>可以被构造数据卡成 O(VE)</strong>，
+            所以非负权的题优先用 Dijkstra。
+        </p>
+
+        <pre><code class="language-cpp">bool inq[MAXN];
+int cnt[MAXN];                          // cnt[u] = u 的入队次数
+
+bool spfa(int s, int n) {
+    fill(dis, dis + n + 1, INF);
+    memset(inq, 0, sizeof(inq));
+    memset(cnt, 0, sizeof(cnt));
+    queue&lt;int&gt; q;
+    dis[s] = 0; q.push(s); inq[s] = true;
+    while (!q.empty()) {
+        int u = q.front(); q.pop(); inq[u] = false;
+        for (int i = head[u]; ~i; i = edge[i].next) {
+            int v = edge[i].to, w = edge[i].w;
+            if (dis[u] + w &lt; dis[v]) {
+                dis[v] = dis[u] + w;
+                if (!inq[v]) {
+                    if (++cnt[v] &gt;= n) return false;   // 入队 n 次 → 存在负环
+                    q.push(v);
+                    inq[v] = true;
+                }
+            }
+        }
+    }
+    return true;
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>SPFA 的三个坑。</strong>① 判负环用“入队次数 ≥ n”，不是“出队次数”；
+            ② 出队后要把 <code>inq[u]</code> 置回 false，否则同一个点不会被再次入队，算法会算错；
+            ③ 随机图上快不代表安全，出题人只要构造“菊花图 + 链”就能把它压到 O(VE)，能不用就不用。
+        </div>
+
+        <h3>10.9.4 Dijkstra</h3>
+
+        <p>
+            原书用“多米诺骨牌”解释：从起点推倒第一块骨牌，相邻的骨牌依次倒下，
+            <em>先倒下的那条路径一定是最短的</em>——因为如果绕路会更远。这就是贪心，也是它不能处理负权的原因：
+            负权边会让“后倒下的路径”反而更短。
+        </p>
+
+        <pre><code class="language-cpp">typedef pair&lt;int, int&gt; pii;               // (距离, 点)
+
+void dijkstra(int s) {
+    fill(dis, dis + n + 1, INF);
+    dis[s] = 0;
+    priority_queue&lt;pii, vector&lt;pii&gt;, greater&lt;pii&gt;&gt; pq;
+    pq.push({0, s});
+    while (!pq.empty()) {
+        pii cur = pq.top(); pq.pop();
+        int d = cur.first, u = cur.second;
+        if (d &gt; dis[u]) continue;          // 过期状态，跳过
+        for (int i = head[u]; ~i; i = edge[i].next) {
+            int v = edge[i].to, w = edge[i].w;
+            if (dis[u] + w &lt; dis[v]) {
+                dis[v] = dis[u] + w;
+                pq.push({dis[v], v});      // 松弛成功才入队
+            }
+        }
+    }
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>那行 <code>if (d &gt; dis[u]) continue;</code> 是堆优化的关键。</strong>
+            同一个点可能被多次入队，取出来时如果距离已经不是最新的，直接丢弃。少了这一行，复杂度会退化。
+        </div>
+
+        <h2>10.10 最小生成树</h2>
+
+        <pre><code class="language-cpp">// Kruskal：按边权排序 + 并查集
+sort(e + 1, e + m + 1, [](Edge a, Edge b) { return a.w &lt; b.w; });
+init(n);
+int total = 0, chosen = 0;
+for (int i = 1; i &lt;= m; i++) {
+    int u = find(e[i].u), v = find(e[i].v);
+    if (u == v) continue;                 // 已连通，加这条边会成环
+    merge(u, v);
+    total += e[i].w;
+    if (++chosen == n - 1) break;
+}</code></pre>
+
+        <p>
+            Prim 则是“从一个点开始，每次加入离当前生成树最近的点”，用优先队列维护到树的距离，复杂度 O(m log n)。
+            稠密图 Prim 更快，稀疏图 Kruskal 更简单。
+        </p>
+
+        <div class="callout callout-info">
+            <strong>为什么 Kruskal 一定正确？</strong>它每次选的是“当前能选的最小边”。
+            由割性质：对任意割，横跨割的最小边一定属于某棵最小生成树。按边权从小到大加入，恰好不断满足这个条件。
+        </div>
+
+        <h2>10.11 最大流</h2>
+
+        <p>
+            在网络中，每条边有容量，从源点 s 到汇点 t 最多能送多少流量？
+            Ford-Fulkerson 的思想是：不断找“增广路”，沿路增加流量，直到找不到为止。
+            <strong>最大流 = 最小割</strong>，这是网络流里最重要的对偶关系。
+        </p>
+
+        <table>
+            <thead><tr><th>算法</th><th>找增广路的方式</th><th>复杂度</th><th>适用</th></tr></thead>
+            <tbody>
+                <tr><td>Ford-Fulkerson</td><td>DFS</td><td>O(maxflow·E)，可能极慢</td><td>只用于理解原理</td></tr>
+                <tr><td>Edmonds-Karp</td><td>BFS</td><td>O(VE<sup>2</sup>)</td><td>小图，n ≤ 300</td></tr>
+                <tr><td>Dinic</td><td>BFS 分层 + DFS 多路增广</td><td>O(V<sup>2</sup>E)</td><td>主流选择</td></tr>
+                <tr><td>ISAP</td><td>反向 BFS 标号 + 间隙优化</td><td>同阶，常数更小</td><td>需要极限卡常时</td></tr>
+            </tbody>
+        </table>
+
+        <pre><code class="language-cpp">// Dinic
+struct Edge { int to, cap, nxt; } e[MAXM * 2];
+int head[MAXN], cnt = 1, dep[MAXN], cur[MAXN];
+
+void add(int u, int v, int c) {
+    e[++cnt] = {v, c, head[u]}; head[u] = cnt;
+    e[++cnt] = {u, 0, head[v]}; head[v] = cnt;      // 反向边容量 0
+}
+
+bool bfs(int s, int t) {                             // 分层
+    memset(dep, 0, sizeof(dep));
+    queue&lt;int&gt; q; q.push(s); dep[s] = 1;
+    while (!q.empty()) {
+        int u = q.front(); q.pop();
+        for (int i = head[u]; i; i = e[i].nxt)
+            if (e[i].cap &amp;&amp; !dep[e[i].to]) {
+                dep[e[i].to] = dep[u] + 1;
+                q.push(e[i].to);
+            }
+    }
+    return dep[t];
+}
+
+int dfs(int u, int t, int flow) {                    // 多路增广
+    if (u == t) return flow;
+    for (int&amp; i = cur[u]; i; i = e[i].nxt) {         // 当前弧优化
+        int v = e[i].to;
+        if (e[i].cap &amp;&amp; dep[v] == dep[u] + 1) {
+            int f = dfs(v, t, min(flow, e[i].cap));
+            if (f) {
+                e[i].cap -= f;
+                e[i ^ 1].cap += f;                   // 反向边加回
+                return f;
+            }
+        }
+    }
+    return 0;
+}
+
+int dinic(int s, int t) {
+    int ans = 0, f;
+    while (bfs(s, t)) {
+        memcpy(cur, head, sizeof(head));
+        while ((f = dfs(s, t, INF)) &gt; 0) ans += f;
+    }
+    return ans;
+}</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>反向边是理解网络流的关键。</strong><code>e[i ^ 1]</code> 之所以能取到反向边，是因为建边时成对存储、
+            编号从 2 开始（<code>cnt = 1</code>），所以 <code>i</code> 与 <code>i^1</code> 互为反向。
+            把 <code>cnt</code> 初始化成 0 或 1 会直接导致算法错误。
+        </div>
+
+        <p>
+            最小费用最大流：在找增广路时把 BFS 换成 SPFA（按单位费用做最短路），沿路增广到不能增为止，
+            得到“在最大流前提下费用最小”的方案。
+        </p>
+
+        <h2>10.12 二分图匹配</h2>
+
+        <p>
+            二分图：点集能分成左右两部分，边只跨两边。匹配：选一些边，使每个点最多连一条。
+            求最大匹配用匈牙利算法：为每个左点找增广路，找到就匹配数加一。
+        </p>
+
+        <pre><code class="language-cpp">int match[MAXN];         // 右点匹配的左点
+bool vis[MAXN];
+
+bool dfs(int u) {
+    for (int i = head[u]; ~i; i = edge[i].next) {
+        int v = edge[i].to;
+        if (vis[v]) continue;
+        vis[v] = true;                      // 本轮中右点 v 已被尝试
+        if (!match[v] || dfs(match[v])) {   // v 未匹配，或它的匹配对象能让位
+            match[v] = u;
+            return true;
+        }
+    }
+    return false;
+}
+
+int hungary(int n) {
+    int ans = 0;
+    for (int i = 1; i &lt;= n; i++) {
+        memset(vis, 0, sizeof(vis));
+        if (dfs(i)) ans++;
+    }
+    return ans;
+}</code></pre>
+
+        <p>
+            二分图还有两个重要结论：<strong>最大匹配 = 最小点覆盖</strong>（König 定理），
+            <strong>最大独立集 = 顶点数 − 最大匹配</strong>。很多“最少选几个点覆盖所有边”“最多选几个点互不相连”的题，
+            都是这两个结论的直接应用。
+        </p>
+
+        <h2>自测清单</h2>
+        <table>
+            <thead><tr><th>问题</th><th>要点</th></tr></thead>
+            <tbody>
+                <tr><td>Floyd 的 k 为什么必须在最外层？</td><td>否则只允许一条边中转，结果不是最短路</td></tr>
+                <tr><td>Dijkstra 为什么不能处理负权？</td><td>贪心假设“先确定的距离不会再变小”</td></tr>
+                <tr><td>Kruskal 为什么要用并查集？</td><td>判断加入一条边是否成环</td></tr>
+                <tr><td>Tarjan 中 <code>low[u] == num[u]</code> 意味着什么？</td><td>u 是当前 SCC 的根</td></tr>
+                <tr><td>Dinic 的反向边编号为什么从 2 开始？</td><td>保证 <code>i^1</code> 正好是反向边</td></tr>
+                <tr><td>拓扑排序返回的序列长度小于 n 说明什么？</td><td>图中有环</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习题</h2>
+        <ol>
+            <li>用链式前向星存一张 10<sup>6</sup> 条边的图，统计每个点的度数，与邻接表版本对拍。</li>
+            <li>拓扑排序：先求任意拓扑序，再改造成字典序最小（用优先队列）。</li>
+            <li>Tarjan 求割点与割边，自己画图验证 <code>low</code> 与 <code>num</code> 的更新过程。</li>
+            <li>Dijkstra 用堆优化与非优化各写一遍，在 n = 10<sup>5</sup>、m = 10<sup>5</sup> 的数据上比较耗时。</li>
+            <li>Kruskal 与 Prim 各写一遍，比较稀疏图与稠密图上的表现。</li>
+            <li>Dinic 模板题（如 HDU 1532 / POJ 1273），再加一组数据验证“最大流 = 最小割”。</li>
+            <li>匈牙利算法做一道“课程分配/任务分配”题，并用 König 定理求最小点覆盖。</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="09-字符串.html">← 第 9 章 字符串</a>
+            <a href="11-计算几何.html">第 11 章 计算几何 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

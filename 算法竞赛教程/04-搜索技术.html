@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>第 4 章 搜索技术 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="03-STL与基本数据结构.html">← 上一章</a>
+        <a href="05-高级数据结构.html">下一章 →</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>第 4 章 搜索技术</h1>
+
+        <p class="intro">
+            搜索是“暴力”的技术化。谁都会写循环枚举，但能把状态空间压到可接受规模、并且不漏解不重解的人很少。
+            这一章从递归开始，依次讲 BFS、DFS、剪枝、迭代加深与 A*，每一条都对应一类具体题目。
+        </p>
+
+        <div class="definition">
+            <h4>学完本章，你应该能做到</h4>
+            <ul>
+                <li>用递归写出全排列、组合、子集枚举，并知道它们的规模上限；</li>
+                <li>判断一道题该用 BFS 还是 DFS：看“最短步数”还是“所有方案”；</li>
+                <li>给状态设计哈希（如康托展开），让“判重”变成 O(1)；</li>
+                <li>写出带剪枝的八皇后，理解剪枝函数为什么能砍掉绝大部分分支；</li>
+                <li>知道什么时候该上双向广搜、迭代加深、IDA*。</li>
+            </ul>
+        </div>
+
+        <h2>4.1 暴力搜索的三件事</h2>
+
+        <p>
+            暴力搜索思路简单，操作起来却不简单。它固定包含三个动作：
+        </p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content"><strong>找到所有可能的状态，并用数据结构表示和存储。</strong>
+                这是最容易被低估的一步。比如迷宫问题，怎么列举从起点到终点的所有可能路径？</div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content"><strong>剪枝。</strong>尽量多地排除不符合条件的数据，减少搜索空间。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content"><strong>用某个算法快速检索这些数据。</strong>通常是 BFS 或 DFS。</div>
+            </div>
+        </div>
+
+        <div class="callout callout-info">
+            <strong>一个重要的分界：</strong>图上两点间“所有可行路径”可能是天文数字，根本不能枚举——那是最短路径问题，该用 Dijkstra。
+            搜索解决的是“状态空间有限且可表示”的问题。判断一道题能不能搜，先估状态总数。
+        </div>
+
+        <h2>4.2 递归与排列组合</h2>
+
+        <p>
+            暴力枚举常遇到三类问题：
+        </p>
+
+        <table>
+            <thead><tr><th>问题</th><th>规模</th><th>实现方式</th></tr></thead>
+            <tbody>
+                <tr><td>n 个数的全排列</td><td>n!</td><td>递归 + 标记数组</td></tr>
+                <tr><td>n 个数中任取 m 个的排列</td><td>n!/(n−m)!</td><td>递归 + 计数剪枝</td></tr>
+                <tr><td>n 个数中任取 m 个的组合</td><td>C(n,m) = n!/(m!(n−m)!)</td><td>子集枚举 / 递归</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            递归的本质是把大问题缩成规模更小的同类问题：n → n−1 → n−2 → … → 1，最小问题的解已知（就是初始条件）。
+            因为大问题和小问题的解法完全一样，所以函数可以调用自己。
+        </p>
+
+        <pre><code class="language-cpp">// 全排列：按字典序输出 1..n 的所有排列
+#include &lt;bits/stdc++.h&gt;
+using namespace std;
+int n, a[10];
+bool used[10];
+
+void dfs(int step) {              // step：当前要填第几个位置
+    if (step == n + 1) {          // 填满了，输出一个排列
+        for (int i = 1; i &lt;= n; i++) cout &lt;&lt; a[i] &lt;&lt; " ";
+        cout &lt;&lt; "\n";
+        return;
+    }
+    for (int i = 1; i &lt;= n; i++) {
+        if (!used[i]) {           // 这个数还没被用过
+            used[i] = true;
+            a[step] = i;
+            dfs(step + 1);
+            used[i] = false;      // 回溯：撤销选择
+        }
+    }
+}
+
+int main() {
+    cin &gt;&gt; n;
+    dfs(1);
+    return 0;
+}</code></pre>
+
+        <p>
+            这段代码的结构值得记住：<strong>标记 → 递归 → 撤销标记</strong>。后面所有回溯题都是这个骨架的变体。
+        </p>
+
+        <h3>4.2.1 子集枚举与位运算</h3>
+
+        <p>
+            n 个元素的子集共有 2<sup>n</sup> 个。最省事的写法是用一个整数的二进制位表示“选/不选”：
+            第 j 位为 1 表示选第 j 个元素。
+        </p>
+
+        <pre><code class="language-cpp">// 枚举所有子集
+for (int i = 0; i &lt; (1 &lt;&lt; n); i++) {
+    for (int j = 0; j &lt; n; j++)
+        if (i &amp; (1 &lt;&lt; j)) { /* 选中第 j 个元素 */ }
+}</code></pre>
+
+        <p>
+            如果只要“恰好 k 个元素的子集”，可以用一个漂亮的性质：<code>kk &amp; (kk - 1)</code> 能清除最低位的 1。
+            反复执行直到 <code>kk == 0</code>，执行次数就是 1 的个数。
+        </p>
+
+        <pre><code class="language-cpp">void print_set(int n, int k) {           // n 个元素中取 k 个
+    for (int i = 0; i &lt; (1 &lt;&lt; n); i++) {
+        int num = 0, kk = i;
+        while (kk) {
+            kk = kk &amp; (kk - 1);              // 清除最后一个 1
+            num++;                           // 统计 1 的个数
+        }
+        if (num == k) {                      // 二进制中恰好有 k 个 1
+            for (int j = 0; j &lt; n; j++)
+                if (i &amp; (1 &lt;&lt; j)) cout &lt;&lt; j &lt;&lt; " ";
+            cout &lt;&lt; endl;
+        }
+    }
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>位运算的两个常用式子：</strong>
+            <code>x &amp; (x - 1)</code> 清除最低位的 1（用于数 1 的个数、判断 2 的幂）；
+            <code>lowbit(x) = x &amp; -x</code> 取出最低位的 1（树状数组的核心，第 5 章会用）。
+        </div>
+
+        <h2>4.3 BFS：一层一层往外扩</h2>
+
+        <p>
+            想象老鼠走迷宫。DFS 是“认准一个方向走到黑，撞墙再退回来换方向”；BFS 是“把身边所有能走的格子都走一遍，
+            再走这些格子的邻居”。因为 BFS 按距离分层扩展，它天然适合求<strong>最短步数</strong>。
+        </p>
+
+        <p>
+            BFS 的实现只需要一个队列：起点入队 → 取出队首 → 把它的未访问邻居入队并标记 → 重复直到队列为空。
+        </p>
+
+        <pre><code class="language-cpp">// 迷宫最短路：HDU 1312 / 通用方格 BFS 模板
+#include &lt;bits/stdc++.h&gt;
+using namespace std;
+const int MAXN = 105;
+char room[MAXN][MAXN];
+int dir[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};   // 下、上、右、左
+int W, H, sx, sy, ans;
+bool vis[MAXN][MAXN];
+
+struct node { int x, y, step; };
+
+int bfs() {
+    queue&lt;node&gt; q;
+    q.push({sx, sy, 0});
+    vis[sx][sy] = true;
+    while (!q.empty()) {
+        node cur = q.front(); q.pop();
+        if (room[cur.x][cur.y] == 'E') return cur.step;   // 到达终点
+        for (int i = 0; i &lt; 4; i++) {
+            int nx = cur.x + dir[i][0], ny = cur.y + dir[i][1];
+            if (nx &lt; 0 || nx &gt;= H || ny &lt; 0 || ny &gt;= W) continue;   // 越界
+            if (vis[nx][ny] || room[nx][ny] == '#') continue;        // 走过或墙
+            vis[nx][ny] = true;
+            q.push({nx, ny, cur.step + 1});
+        }
+    }
+    return -1;                                               // 到不了
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>BFS 三个必错点：</strong>
+            ① 忘了在<em>入队时</em>标记，只在出队时标记，同一个点会被重复入队，队列爆炸；
+            ② 把 <code>step</code> 存在全局变量里，多个分支共用同一个值；
+            ③ 方向数组写错导致走对角线。逐条对着检查，能省掉大量调试时间。
+        </div>
+
+        <h3>4.3.1 八数码：状态搜索 + 康托展开判重</h3>
+
+        <p>
+            3×3 棋盘上 8 个数字和一个空格，每次可以把空格与相邻数字交换，问从初始状态到目标状态最少几步。
+            这是一个典型的状态空间搜索：把整个棋盘编码成一个状态，用 BFS 找最短步数。
+        </p>
+
+        <p>
+            3×3 的状态共 9! = 362880 种，用数组或 <code>set</code> 判重都太慢。<strong>康托展开</strong>能把一个排列映射到
+            [0, 9!) 内的唯一整数，于是判重变成一次 O(1) 的数组访问。
+        </p>
+
+        <pre><code class="language-cpp">// 康托展开：把长度为 n 的排列映射成 0..n!-1 的整数
+long long fac[12];
+int Cantor(int a[], int n) {
+    long long x = 0;
+    for (int i = 0; i &lt; n; i++) {
+        int cnt = 0;                      // 后面比 a[i] 小的个数
+        for (int j = i + 1; j &lt; n; j++)
+            if (a[j] &lt; a[i]) cnt++;
+        x += cnt * fac[n - 1 - i];
+    }
+    return (int)x;
+}
+
+// BFS 主体（节选）：用康托值作为访问标记的下标
+struct node { int state[9]; int dis; };
+queue&lt;node&gt; q;
+bool visited[362885];
+
+int bfs(node start, node goal) {
+    q.push(start);
+    visited[Cantor(start.state, 9)] = true;
+    while (!q.empty()) {
+        node head = q.front(); q.pop();
+        if (memcmp(head.state, goal.state, sizeof(goal.state)) == 0) return head.dis;
+
+        int z;
+        for (z = 0; z &lt; 9; z++) if (head.state[z] == 0) break;   // 找空格
+        int x = z % 3, y = z / 3;                                  // 转二维
+        for (int i = 0; i &lt; 4; i++) {
+            int nx = x + dir[i][0], ny = y + dir[i][1];
+            if (nx &lt; 0 || nx &gt;= 3 || ny &lt; 0 || ny &gt;= 3) continue;
+            int nz = nx + 3 * ny;                                  // 转回一维
+            node nxt = head;
+            swap(nxt.state[z], nxt.state[nz]);
+            nxt.dis++;
+            int key = Cantor(nxt.state, 9);
+            if (!visited[key]) {
+                visited[key] = true;
+                q.push(nxt);
+            }
+        }
+    }
+    return -1;                                                     // 无解
+}</code></pre>
+
+        <p>
+            15 数码有 16! ≈ 2×10<sup>13</sup> 种状态，数组存不下，此时必须换算法：双向广搜、A*、IDA*。
+            对应练习是 POJ 1077 “Eight”，也就是八数码本身。
+        </p>
+
+        <h3>4.3.2 A*：给搜索加一个“方向感”</h3>
+
+        <p>
+            普通 BFS 对所有方向一视同仁，像水面扩散。A* 给每个状态一个估价：
+        </p>
+
+        <div class="definition">
+            <h4>估价函数</h4>
+            <p><code>f(n) = g(n) + h(n)</code>，其中 <code>g(n)</code> 是起点到 n 的实际代价，<code>h(n)</code> 是 n 到终点的<em>估计</em>代价。</p>
+            <p>只要 <code>h(n)</code> 不高估真实代价（可采纳性），A* 就能保证找到最优解，并且扩展的状态数远少于 BFS。</p>
+        </div>
+
+        <p>
+            八数码常用的估价是“每个数字当前位置与目标位置的曼哈顿距离之和”。它显然不会高估——每移动一步最多让一个数字靠近一格，
+            所以总距离是真实步数的下界。
+        </p>
+
+        <p>
+            实现上，A* 用一个优先队列按 <code>f</code> 排序，每次取出 <code>f</code> 最小的状态扩展。
+            这条路径和 Dijkstra 几乎一样，区别只是把“已走距离”换成了“已走距离 + 估计剩余”。
+        </p>
+
+        <h3>4.3.3 双向广搜</h3>
+
+        <p>
+            状态空间太大时，从起点搜和从终点搜各走一半，在中间相遇。假设每个方向扩展 b 层，单向需要 b<sup>d</sup>，
+            双向只需要 2·b<sup>d/2</sup>，直接开方。八数码、单词接龙类题目常用。
+        </p>
+
+        <table>
+            <thead><tr><th>算法</th><th>适用</th><th>空间</th><th>能否保证最优</th></tr></thead>
+            <tbody>
+                <tr><td>BFS</td><td>无权图最短路、状态数可控</td><td>大（存整层）</td><td>能</td></tr>
+                <tr><td>A*</td><td>有可采纳估价函数</td><td>中</td><td>能（h 不高估时）</td></tr>
+                <tr><td>双向 BFS</td><td>起点终点都已知、状态可逆</td><td>较小</td><td>能</td></tr>
+                <tr><td>DFS</td><td>求所有方案、连通性</td><td>小（O(深度)）</td><td>不保证最短</td></tr>
+            </tbody>
+        </table>
+
+        <h2>4.4 DFS：一条路走到黑</h2>
+
+        <p>
+            DFS 从初始状态出发，任选一个方向深入，直到无法继续再退回一步换方向。
+            它用递归实现最简单，代码比 BFS 短得多。
+        </p>
+
+        <pre><code class="language-cpp">void DFS(int dx, int dy) {
+    room[dx][dy] = '#';                    // 标记已走过
+    num++;
+    for (int i = 0; i &lt; 4; i++) {          // 四个方向依次深搜
+        int nx = dx + dir[i][0], ny = dy + dir[i][1];
+        if (nx &gt;= 0 &amp;&amp; nx &lt; H &amp;&amp; ny &gt;= 0 &amp;&amp; ny &lt; W &amp;&amp; room[nx][ny] == '.')
+            DFS(nx, ny);
+    }
+}</code></pre>
+
+        <p>
+            递归返回的顺序值得亲手打印一次。原书建议在函数里加上 <code>cout</code> 打印走过的位置和回退的位置，
+            你会看到它确实是一路退回到起点——这个“回退链”就是理解回溯的关键。
+        </p>
+
+        <h3>4.4.1 回溯与剪枝：八皇后</h3>
+
+        <p>
+            DFS 把所有子节点全部展开，再选最新的一个扩展。但很多子节点一看就“不对”，
+            可以在递归前就判断出来并直接返回，这就是<strong>剪枝</strong>。回溯 + 剪枝是 DFS 类题目的标准组合。
+        </p>
+
+        <p>
+            八皇后：在 8×8 棋盘放 8 个皇后，要求不同行、不同列、不同对角线。按行放置，每行试 8 个列位置：
+        </p>
+
+        <pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+int n = 8, cnt = 0;
+int col[10], d1[20], d2[20];      // 列、主对角线、副对角线占用标记
+
+void dfs(int row) {
+    if (row == n + 1) { cnt++; return; }
+    for (int c = 1; c &lt;= n; c++) {
+        if (col[c] || d1[row + c] || d2[row - c + n]) continue;   // 剪枝：冲突就跳过
+        col[c] = d1[row + c] = d2[row - c + n] = 1;
+        dfs(row + 1);
+        col[c] = d1[row + c] = d2[row - c + n] = 0;               // 回溯
+    }
+}
+
+int main() {
+    dfs(1);
+    cout &lt;&lt; cnt &lt;&lt; endl;    // 92
+    return 0;
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>对角线怎么快速判断冲突？</strong>主对角线满足 <code>row - col</code> 相同，副对角线满足 <code>row + col</code> 相同。
+            用两个数组按这个值做标记，冲突判断就是 O(1)。这是“把几何约束转成整数下标”的典型手法。
+        </div>
+
+        <p>
+            不加剪枝的枚举是 8<sup>8</sup> = 1677 万种；加上行列对角剪枝后，实际扩展的节点只有几千个。
+            这就是剪枝函数的价值——它砍掉的不是常数，是数量级。
+        </p>
+
+        <h3>4.4.2 迭代加深与 IDA*</h3>
+
+        <p>
+            有些题目的解可能很深，DFS 会陷进一条错误的深分支，BFS 又会把内存吃光。
+            <strong>迭代加深</strong>（IDDFS）的办法是：限制搜索深度为 1、2、3……逐层放宽，每次都用 DFS。
+            看起来重复搜索了很多次，但因为搜索树是指数增长的，前面所有层的总量不超过最后一层，总复杂度仍与 BFS 同阶，内存却只有 O(深度)。
+        </p>
+
+        <p>
+            把迭代加深和 A* 的估价函数结合，就是 <strong>IDA*</strong>：用 <code>f = g + h</code> 作为剪枝阈值，
+            超过阈值就返回。它在八数码、15 数码这类“状态多但解不深”的题上非常好用。
+        </p>
+
+        <h2>自测清单</h2>
+        <table>
+            <thead><tr><th>问题</th><th>要点</th></tr></thead>
+            <tbody>
+                <tr><td>什么时候必须用 BFS 而不是 DFS？</td><td>求最短步数、最少操作次数</td></tr>
+                <tr><td>BFS 的判重应该在入队时还是出队时做？</td><td>入队时，否则会重复入队</td></tr>
+                <tr><td>康托展开解决了什么问题？</td><td>把排列映射成唯一整数，使判重 O(1)</td></tr>
+                <tr><td>A* 的 h(n) 必须满足什么条件？</td><td>不高估真实代价（可采纳）</td></tr>
+                <tr><td>八皇后的对角线冲突怎么 O(1) 判断？</td><td>用 row+col 与 row−col 作为数组下标</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习题</h2>
+        <ol>
+            <li>写出 1–8 的全排列并统计数量，与 8! = 40320 对照。</li>
+            <li>用 BFS 完成 HDU 1312 “Red and Black”，输出能到达的格子数；再用 DFS 写一遍，比较两者代码长度。</li>
+            <li>完成 POJ 1077 “Eight”（八数码），先用 BFS + 康托展开，再尝试 A* 版本，比较访问的状态数。</li>
+            <li>实现八皇后并输出全部 92 个解；再用“位运算表示列/对角线占用”优化一版。</li>
+            <li>写一个迭代加深版本的“埃及分数”或任意最短路搜索题，记录每层扩展的节点数，验证总量不超过最后一层。</li>
+        </ol>
+
+        <details>
+            <summary>进阶：为什么 15 数码不能用数组判重？</summary>
+            <div class="details-content">
+                <p>
+                    16! ≈ 2.09×10<sup>13</sup>。即使每个状态只占 1 字节，也需要 20TB 内存。
+                    所以要么用哈希表存访问过的状态（内存仍然吃紧），要么用双向 BFS / A* / IDA* 把访问量压下来。
+                    这也是“状态总数决定算法选型”的最好例子。
+                </p>
+            </div>
+        </details>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="03-STL与基本数据结构.html">← 第 3 章 STL 与基本数据结构</a>
+            <a href="05-高级数据结构.html">第 5 章 高级数据结构 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

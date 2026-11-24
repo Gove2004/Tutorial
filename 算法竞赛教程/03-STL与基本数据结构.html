@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>第 3 章 STL 与基本数据结构 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="02-复杂度与算法评估.html">← 上一章</a>
+        <a href="04-搜索技术.html">下一章 →</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>第 3 章 STL 与基本数据结构</h1>
+
+        <p class="intro">
+            STL 让竞赛代码从 200 行缩到 80 行。但用错 STL 也会让你从 AC 掉到 RE：迭代器失效、比较函数写错、
+            <code>vector::erase</code> 在循环里用成 O(n<sup>2</sup>)，都是真正常见的翻车现场。
+            这一章按“什么时候用、怎么用、哪里会炸”的顺序讲。
+        </p>
+
+        <div class="definition">
+            <h4>学完本章，你应该能做到</h4>
+            <ul>
+                <li>在需要动态数组、栈、队列、优先队列、有序集合、键值映射时，立刻选对容器；</li>
+                <li>记住每个容器的核心操作复杂度，知道什么时候它会退化成线性；</li>
+                <li>写出正确的 <code>sort</code> 比较函数（严格弱序，不含 <code>&lt;=</code>）；</li>
+                <li>用 <code>next_permutation</code> 枚举全排列，并知道它要求序列先有序。</li>
+            </ul>
+        </div>
+
+        <h2>3.1 容器选型：先看这张表</h2>
+
+        <table>
+            <thead><tr><th>需求</th><th>容器</th><th>关键操作复杂度</th><th>典型场景</th></tr></thead>
+            <tbody>
+                <tr><td>长度会变的数组</td><td><code>vector</code></td><td>尾插 O(1) 均摊，随机访问 O(1)，中间插入/删除 O(n)</td><td>存点、存边、可变长序列</td></tr>
+                <tr><td>后进先出</td><td><code>stack</code></td><td>push/pop/top 均 O(1)</td><td>括号匹配、单调栈、DFS 非递归</td></tr>
+                <tr><td>先进先出</td><td><code>queue</code></td><td>push/pop 均 O(1)</td><td>BFS、滑动窗口</td></tr>
+                <tr><td>每次取最大/最小</td><td><code>priority_queue</code></td><td>push/pop O(log n)，top O(1)</td><td>Dijkstra、Huffman、贪心</td></tr>
+                <tr><td>频繁在中间插入删除</td><td><code>list</code></td><td>插入/删除 O(1)（已定位），查找 O(n)</td><td>约瑟夫环、队列模拟</td></tr>
+                <tr><td>有序集合、去重</td><td><code>set</code></td><td>插入/删除/查找 O(log n)</td><td>去重、找前驱后继</td></tr>
+                <tr><td>键值映射</td><td><code>map</code></td><td>插入/删除/查找 O(log n)</td><td>计数、按名字索引</td></tr>
+                <tr><td>纯查找（不关心顺序）</td><td><code>unordered_set/map</code></td><td>平均 O(1)，最坏 O(n)</td><td>大数据量判重</td></tr>
+            </tbody>
+        </table>
+
+        <h2>3.2 vector：默认选择</h2>
+
+        <p>
+            数组有两种：静态和动态。竞赛里的惯例是<strong>空间够就用静态数组</strong>，简单、不会错；
+            空间紧张或者长度真的不确定时，用 <code>vector</code> 建动态数组。
+        </p>
+
+        <p>
+            <code>vector</code> 的内存是连续的，所以下标访问是 O(1)；但在中间插入/删除要搬移后面所有元素，是 O(n)。
+            另外，容量不足时会重新申请一块更大的内存并整体复制——这就是“扩容”的成本。
+        </p>
+
+        <pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+
+int main() {
+    vector&lt;int&gt; a;                       // 空
+    vector&lt;int&gt; b(a);                    // 用 a 构造 b（拷贝）
+    vector&lt;int&gt; c(100);                  // 100 个 0
+    vector&lt;int&gt; d(100, 6);               // 100 个 6
+    vector&lt;string&gt; e(10, "hello");       // 10 个 "hello"
+
+    a.push_back(1);                      // 尾部添加，O(1) 均摊
+    cout &lt;&lt; a.size() &lt;&lt; endl;           // 元素个数
+    a.pop_back();                        // 删除尾部
+    a.clear();                           // 清空（不释放容量）
+    a.empty();                           // 是否为空
+
+    // 二维数组：第一维固定，第二维动态，常用于邻接表
+    const int MAXN = 100005;
+    vector&lt;int&gt; g[MAXN];
+    return 0;
+}</code></pre>
+
+        <h3>3.2.1 一个真实用例：HDU 4841 圆桌问题</h3>
+
+        <p>
+            2n 个人围坐一桌，前 n 个是好人，后 n 个是坏人。从第 1 个人开始数，数到第 m 个人就赶走，然后从下一个人继续数。
+            要求输出座位安排，好人用 G，坏人用 B。这是约瑟夫环的变体，<code>vector</code> 的 <code>erase</code> 正好能模拟“赶走”。
+        </p>
+
+        <pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+
+int main() {
+    int n, m;
+    while (cin &gt;&gt; n &gt;&gt; m) {
+        vector&lt;int&gt; table;
+        for (int i = 0; i &lt; 2 * n; i++) table.push_back(i);   // 0 表示第 1 个人
+
+        int pos = 0;
+        for (int i = 0; i &lt; n; i++) {                          // 赶走 n 个人
+            pos = (pos + m - 1) % table.size();                // 圆桌取余
+            table.erase(table.begin() + pos);                  // 删除，后面元素前移
+        }
+
+        int j = 0;
+        for (int i = 0; i &lt; 2 * n; i++) {
+            if (i % 50 == 0 &amp;&amp; i) cout &lt;&lt; endl;                // 每 50 个换行
+            if (j &lt; (int)table.size() &amp;&amp; i == table[j]) {
+                j++;
+                cout &lt;&lt; "G";
+            } else {
+                cout &lt;&lt; "B";
+            }
+        }
+        cout &lt;&lt; endl &lt;&lt; endl;
+    }
+    return 0;
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>这里藏着一个复杂度陷阱。</strong><code>erase</code> 在中间删元素是 O(n)，外层又循环 n 次，
+            总复杂度 O(n<sup>2</sup>)。当 n 到 10<sup>5</sup> 就会 TLE。
+            如果数据更大，要改用 <code>list</code> 或树状数组/线段树求第 k 个存活位置。
+        </div>
+
+        <h2>3.3 栈 stack：后进先出</h2>
+
+        <p>
+            栈的特点是“先进后出”。坐电梯时先进去的最后出来；一盒泡腾片，先放进去的在最底下，最后才拿到。
+        </p>
+
+        <pre><code class="language-cpp">#include &lt;stack&gt;
+
+stack&lt;int&gt; s;
+s.push(1);        // 压栈
+s.top();          // 取栈顶，不删除
+s.pop();          // 删除栈顶，不返回
+s.size();         // 元素个数
+s.empty();        // 是否为空</code></pre>
+
+        <p>
+            <strong>经典用例：HDU 1062 Text Reverse。</strong>输入 <code>olleh !dlrow</code>，输出 <code>hello world!</code>。
+            把每个单词的字符依次压栈，遇到空格或换行就全部弹出，天然实现“单词内逆序、单词间顺序不变”。
+        </p>
+
+        <pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+
+int main() {
+    int T;
+    cin &gt;&gt; T;
+    cin.ignore();                       // 吃掉第一行末尾的换行
+    while (T--) {
+        string line;
+        getline(cin, line);
+        stack&lt;char&gt; st;
+        for (size_t i = 0; i &lt;= line.size(); i++) {
+            if (i &lt; line.size() &amp;&amp; line[i] != ' ') {
+                st.push(line[i]);
+            } else {
+                while (!st.empty()) { cout &lt;&lt; st.top(); st.pop(); }
+                if (i &lt; line.size()) cout &lt;&lt; ' ';
+            }
+        }
+        cout &lt;&lt; endl;
+    }
+    return 0;
+}</code></pre>
+
+        <h2>3.4 队列 queue 与优先队列 priority_queue</h2>
+
+        <pre><code class="language-cpp">#include &lt;queue&gt;
+
+queue&lt;int&gt; q;      // 先进先出
+q.push(1); q.front(); q.back(); q.pop(); q.size(); q.empty();
+
+// 优先队列：默认大根堆，每次取最大值
+priority_queue&lt;int&gt; pq;
+pq.push(3); pq.top(); pq.pop();
+
+// 小根堆：用 greater
+priority_queue&lt;int, vector&lt;int&gt;, greater&lt;int&gt;&gt; pqmin;
+
+// 自定义优先级（例如按距离最小）
+struct Node { int d, id; };
+struct cmp { bool operator()(const Node&amp; a, const Node&amp; b) const { return a.d &gt; b.d; } };
+priority_queue&lt;Node, vector&lt;Node&gt;, cmp&gt; pqnode;</code></pre>
+
+        <p>
+            优先队列底层是二叉堆，<code>push</code>/<code>pop</code> 都是 O(log n)。用它排序就是把所有数压进去再一个个取出来，
+            总复杂度 O(n log n)——和 <code>sort</code> 同阶，但常数更大，所以排序还是用 <code>sort</code>。
+        </p>
+
+        <p>
+            <strong>它在图论里才是主角：</strong>Dijkstra 需要每次取出当前距离最小的点，用 <code>priority_queue</code>
+            可以把“找最小”从 O(n) 降到 O(log n)，整个算法从 O(n<sup>2</sup>) 降到 O(m log n)。第 10 章会看到完整代码。
+        </p>
+
+        <p>
+            <strong>用例 HDU 1873 看病要排队：</strong>三个医生，每个病人有优先级，优先级高的先看，同优先级按先来后到。
+            这就是一个“优先队列 + 入队序号”的经典题：比较时先比优先级，再比入队时间。
+        </p>
+
+        <h2>3.5 链表 list</h2>
+
+        <p>
+            <code>list</code> 是双向链表，内存不连续，通过指针访问。它和 <code>vector</code> 的优缺点正好相反：
+        </p>
+
+        <table>
+            <thead><tr><th></th><th>vector</th><th>list</th></tr></thead>
+            <tbody>
+                <tr><td>随机访问 <code>a[i]</code></td><td>O(1)</td><td>不支持，只能迭代器移动</td></tr>
+                <tr><td>中间插入/删除（已定位）</td><td>O(n)，要搬移元素</td><td>O(1)，只改指针</td></tr>
+                <tr><td>内存占用</td><td>紧凑</td><td>每个节点额外存两个指针</td></tr>
+                <tr><td>缓存友好性</td><td>好</td><td>差，实际常数大</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            所以结论很实用：<strong>插入删除少、随机访问多 → vector；插入删除频繁、随机访问少 → list</strong>。
+            <strong>用例 HDU 1276 士兵队列训练：</strong>1 到 2 报数，报 2 的出列；再从队头 1 到 3 报数，报 3 的出列；
+            循环直到剩下不超过 3 人。<code>list::erase</code> 是 O(1)，正好合适。
+        </p>
+
+        <h2>3.6 set 与 map：有序的平衡树</h2>
+
+        <p>
+            两者底层都是红黑树，插入、删除、查找都是 O(log n)，并且<strong>自动保持有序</strong>。
+            <code>set</code> 只有键，<code>map</code> 是键值对。它们都会自动去重。
+        </p>
+
+        <pre><code class="language-cpp">#include &lt;set&gt;
+#include &lt;map&gt;
+
+set&lt;int&gt; s;
+s.insert(3);                 // 插入，重复元素不会插入
+s.erase(3);                  // 删除
+s.count(3);                  // 存在返回 1，否则 0
+s.find(3);                   // 返回迭代器，找不到返回 s.end()
+*s.begin();                  // 最小值
+*s.rbegin();                 // 最大值
+
+// 找前驱/后继（C++ 迭代器不支持 +1，要用 lower_bound）
+auto it = s.lower_bound(x);  // 第一个 >= x 的元素
+
+map&lt;string, int&gt; mp;
+mp["apple"] += 2;            // 不存在时默认构造 0
+mp.count("apple");           // 是否出现过
+for (auto&amp; p : mp) cout &lt;&lt; p.first &lt;&lt; " " &lt;&lt; p.second &lt;&lt; endl;</code></pre>
+
+        <p>
+            <strong>用例：按店铺名字累加价格并排名。</strong>题面给若干条“价格 店铺名”，要求对每个时刻输出 memory 这家店的价格排名
+            （1 表示最贵）。直接用 <code>map&lt;string,int&gt;</code> 累加，再遍历比较即可。
+        </p>
+
+        <pre><code class="language-cpp">map&lt;string, int&gt; shop;
+while (cin &gt;&gt; n) {
+    string s;
+    for (int i = 1; i &lt;= n; i++) cin &gt;&gt; s;     // 店名，实际用不到
+    cin &gt;&gt; m;
+    while (m--) {
+        int p; string name;
+        cin &gt;&gt; p &gt;&gt; name;
+        shop[name] += p;                        // 直接按键累加
+    }
+    int rank = 1;
+    for (auto it = shop.begin(); it != shop.end(); it++)
+        if (it-&gt;second &gt; shop["memory"]) rank++;  // 数有几个比它贵
+    cout &lt;&lt; rank &lt;&lt; endl;
+    shop.clear();
+}</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>三处常见错误：</strong>
+            ① 用 <code>mp[key]</code> 查询不存在的键，会<em>插入</em>一个默认值，后续遍历就多了一条脏数据——查询请用 <code>find</code> 或 <code>count</code>；
+            ② 一边遍历 <code>map</code> 一边 <code>erase</code>，迭代器会失效，正确写法是 <code>it = mp.erase(it)</code>；
+            ③ <code>unordered_map</code> 在极端数据下会被卡成 O(n)，需要防哈希冲突（加随机偏移或换 <code>map</code>）。
+        </div>
+
+        <h2>3.7 sort：竞赛里用得最多的函数</h2>
+
+        <p>
+            两种形式：
+        </p>
+
+        <pre><code class="language-cpp">void sort(iterator first, iterator last);                  // 默认升序
+void sort(iterator first, iterator last, Compare comp);    // 自定义比较</code></pre>
+
+        <p>
+            排序范围是 <code>[first, last)</code>——包含 <code>first</code>，不包含 <code>last</code>。返回值为空。复杂度 O(n log n)。
+        </p>
+
+        <pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+
+bool my_less(int i, int j)    { return i &lt; j; }    // 自定义小于
+bool my_greater(int i, int j) { return i &gt; j; }    // 自定义大于
+
+int main() {
+    vector&lt;int&gt; a = {3, 7, 2, 5, 6, 8, 5, 4};
+    sort(a.begin(), a.begin() + 4);                    // 只排前 4 个：2 3 5 7 6 8 5 4
+    sort(a.begin(), a.end());                          // 升序：2 3 4 5 5 6 7 8
+    sort(a.begin(), a.end(), greater&lt;int&gt;());          // 降序：8 7 6 5 5 4 3 2
+    sort(a.begin(), a.end(), my_greater);              // 同上，用自定义函数
+    for (int x : a) cout &lt;&lt; x &lt;&lt; " ";
+    return 0;
+}</code></pre>
+
+        <h3>3.7.1 给结构体排序</h3>
+
+        <pre><code class="language-cpp">struct Student {
+    char name[256];
+    int score;
+};
+
+// 按分数从大到小；分数相同按名字升序（保证严格弱序）
+bool cmp(const Student&amp; a, const Student&amp; b) {
+    if (a.score != b.score) return a.score &gt; b.score;
+    return strcmp(a.name, b.name) &lt; 0;
+}
+
+vector&lt;Student&gt; v;
+sort(v.begin(), v.end(), cmp);</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>比较函数必须满足“严格弱序”。</strong>写成 <code>return a.score &lt;= b.score;</code> 会在相等元素上返回 true，
+            导致 <code>sort</code> 内部判断混乱，轻则结果无序，重则<em>段错误</em>。记住：比较函数里永远用 <code>&lt;</code> 或 <code>&gt;</code>，
+            不要用 <code>&lt;=</code> 或 <code>&gt;=</code>。
+        </div>
+
+        <h3>3.7.2 三个衍生函数</h3>
+
+        <pre><code class="language-cpp">stable_sort(v.begin(), v.end(), cmp);   // 稳定排序：相等元素保持原相对顺序
+partial_sort(v.begin(), v.begin() + k, v.end());  // 只保证前 k 个有序，O(n log k)
+nth_element(v.begin(), v.begin() + k, v.end());   // 第 k 小归位，左边都比它小，O(n) 均摊</code></pre>
+
+        <p>
+            <code>partial_sort</code> 的典型场景：10 个数里找最小的 5 个。用 <code>sort</code> 要全排一遍，
+            用 <code>partial_sort</code> 只需要排前 5 个。第 2 章那道“输出前 m 大”的题，它就是一个折中方案。
+        </p>
+
+        <h2>3.8 next_permutation：枚举全排列</h2>
+
+        <p>
+            它按字典序生成“下一个排列”，返回 false 表示已经是最后一个。3 个字符 a、b、c 会依次得到
+            <code>abc, acb, bac, bca, cab, cba</code> 共 6 个。
+        </p>
+
+        <pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+
+int main() {
+    int a[] = {1, 2, 3};
+    do {
+        for (int i = 0; i &lt; 3; i++) cout &lt;&lt; a[i] &lt;&lt; " ";
+        cout &lt;&lt; endl;
+    } while (next_permutation(a, a + 3));
+    return 0;
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>必须先升序排列。</strong><code>next_permutation</code> 从当前排列往后找，如果初始序列不是字典序最小的，
+            前面的排列会被漏掉。做全排列前一律先 <code>sort</code>。
+            另外它的复杂度是 O(n!·n)，n 超过 10 就不要想枚举了。
+        </div>
+
+        <h2>自测清单</h2>
+        <table>
+            <thead><tr><th>问题</th><th>要点</th></tr></thead>
+            <tbody>
+                <tr><td><code>vector::erase</code> 在循环里用为什么不安全？</td><td>每次 O(n) 搬移，且迭代器失效，容易越界</td></tr>
+                <tr><td><code>priority_queue</code> 默认是大根堆还是小根堆？</td><td>大根堆；小根堆要写 <code>greater&lt;int&gt;</code></td></tr>
+                <tr><td>比较函数里写了 <code>&lt;=</code> 会怎样？</td><td>违反严格弱序，可能乱序或崩溃</td></tr>
+                <tr><td><code>map</code> 用 <code>[]</code> 查询有什么副作用？</td><td>不存在的键会被插入默认值</td></tr>
+                <tr><td><code>next_permutation</code> 前为什么要先排序？</td><td>否则漏掉更小的排列</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习题</h2>
+        <ol>
+            <li>HDU 4841 圆桌问题：用 <code>vector</code> 写一遍，再用 <code>list</code> 写一遍，比较 n = 10<sup>5</sup> 时的耗时差异。</li>
+            <li>HDU 1062 Text Reverse：分别用 <code>stack</code> 和 <code>reverse</code> 两种写法实现。</li>
+            <li>HDU 1873 看病要排队：先把“优先级 + 到达顺序”写成自定义比较结构，再用 <code>priority_queue</code> 实现。</li>
+            <li>用 <code>next_permutation</code> 输出 1–8 的所有排列并计数，验证结果是 40320；再测 1–10，观察程序还能不能跑完。</li>
+            <li>构造一组数据让 <code>sort</code> 的比较函数写成 <code>&lt;=</code> 时崩溃（提示：大量相同元素 + 小数组），解释崩溃原因。</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="02-复杂度与算法评估.html">← 第 2 章 复杂度与算法评估</a>
+            <a href="04-搜索技术.html">第 4 章 搜索技术 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

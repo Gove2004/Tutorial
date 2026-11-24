@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>附录 模板速查与提交清单 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="12-ICPC真题解析.html">← 上一章</a>
+        <a href="index.html">返回目录</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>附录：模板速查与提交清单</h1>
+
+        <p class="intro">
+            这一页不是新知识，而是把全书散落在各章的模板、复杂度和检查项压成一张表。
+            比赛时它是最该背下来的东西：<strong>模板决定你写得多快，清单决定你罚时多少</strong>。
+        </p>
+
+        <h2>A.1 按用途查模板</h2>
+
+        <p>下表每一行对应全书中的一个完整实现，点章节名可以直接跳过去抄。</p>
+
+        <table>
+            <thead><tr><th>用途</th><th>核心写法</th><th>复杂度</th><th>章节</th></tr></thead>
+            <tbody>
+                <tr><td>容器选型</td><td>vector / set / map / priority_queue</td><td>按容器而定</td><td><a href="03-STL与基本数据结构.html">第 3 章</a></td></tr>
+                <tr><td>全排列 / 子集枚举</td><td><code>next_permutation</code>、<code>k &amp; (k-1)</code></td><td>O(n!) / O(2<sup>n</sup>)</td><td><a href="04-搜索技术.html">第 4 章</a></td></tr>
+                <tr><td>BFS 最短路（无权）</td><td>队列 + 入队即标记</td><td>O(n+m)</td><td><a href="04-搜索技术.html">第 4 章</a></td></tr>
+                <tr><td>状态判重</td><td>康托展开</td><td>O(n!) → O(1) 映射</td><td><a href="04-搜索技术.html">第 4 章</a></td></tr>
+                <tr><td>并查集</td><td>路径压缩 + 按秩合并</td><td>O(α(n)) ≈ O(1)</td><td><a href="05-高级数据结构.html">第 5 章</a></td></tr>
+                <tr><td>区间查询 + 区间修改</td><td>线段树 + 懒标记</td><td>O(log n)</td><td><a href="05-高级数据结构.html">第 5 章</a></td></tr>
+                <tr><td>单点修改 + 前缀和</td><td>树状数组</td><td>O(log n)</td><td><a href="05-高级数据结构.html">第 5 章</a></td></tr>
+                <tr><td>逆序对</td><td>归并排序计数 / 树状数组</td><td>O(n log n)</td><td><a href="06-基础算法思想.html">第 6 章</a></td></tr>
+                <tr><td>二分答案</td><td>单调判定 + 二分</td><td>O(log C × check)</td><td><a href="06-基础算法思想.html">第 6 章</a></td></tr>
+                <tr><td>0/1 背包</td><td>倒序枚举容量</td><td>O(nV)</td><td><a href="07-动态规划.html">第 7 章</a></td></tr>
+                <tr><td>LIS</td><td>二分优化</td><td>O(n log n)</td><td><a href="07-动态规划.html">第 7 章</a></td></tr>
+                <tr><td>区间 DP</td><td>枚举长度 + 断点</td><td>O(n<sup>3</sup>)</td><td><a href="07-动态规划.html">第 7 章</a></td></tr>
+                <tr><td>数位 DP</td><td>DFS + <code>ismax</code> 标记</td><td>O(log n × 状态)</td><td><a href="07-动态规划.html">第 7 章</a></td></tr>
+                <tr><td>状压 DP</td><td>子集合法性预判 + 逐行转移</td><td>O(n × 2<sup>m</sup>)</td><td><a href="07-动态规划.html">第 7 章</a></td></tr>
+                <tr><td>快速幂</td><td>二进制拆指数</td><td>O(log n)</td><td><a href="08-数学.html">第 8 章</a></td></tr>
+                <tr><td>gcd / lcm / 逆元</td><td>辗转相除、扩欧、费马小定理</td><td>O(log n)</td><td><a href="08-数学.html">第 8 章</a></td></tr>
+                <tr><td>线性筛</td><td><code>i % prime[j] == 0</code> 即 break</td><td>O(n)</td><td><a href="08-数学.html">第 8 章</a></td></tr>
+                <tr><td>组合数取模</td><td>杨辉三角 / 阶乘 + 逆元</td><td>O(n<sup>2</sup>) / O(n)</td><td><a href="08-数学.html">第 8 章</a></td></tr>
+                <tr><td>SG 函数 / Nim</td><td>mex + 异或</td><td>O(状态 × 转移)</td><td><a href="08-数学.html">第 8 章</a></td></tr>
+                <tr><td>字符串哈希</td><td>BKDR + 前缀哈希</td><td>O(n) 预处理</td><td><a href="09-字符串.html">第 9 章</a></td></tr>
+                <tr><td>字典树</td><td><code>trie[u][26]</code> 数组实现</td><td>O(总长度)</td><td><a href="09-字符串.html">第 9 章</a></td></tr>
+                <tr><td>单模式匹配</td><td>KMP（<code>nxt[0] = -1</code>）</td><td>O(n+m)</td><td><a href="09-字符串.html">第 9 章</a></td></tr>
+                <tr><td>多模式匹配</td><td>AC 自动机（fail + 路径压缩）</td><td>O(总长 + 文本)</td><td><a href="09-字符串.html">第 9 章</a></td></tr>
+                <tr><td>不同子串计数</td><td>后缀数组 + height</td><td>O(n log n)</td><td><a href="09-字符串.html">第 9 章</a></td></tr>
+                <tr><td>图的存储</td><td>链式前向星</td><td>O(n+m)</td><td><a href="10-图论.html">第 10 章</a></td></tr>
+                <tr><td>判环 / 拓扑序</td><td>Kahn（优先队列求字典序）</td><td>O((n+m)log n)</td><td><a href="10-图论.html">第 10 章</a></td></tr>
+                <tr><td>割点 / 割边 / SCC</td><td>Tarjan（num + low）</td><td>O(n+m)</td><td><a href="10-图论.html">第 10 章</a></td></tr>
+                <tr><td>单源最短路（非负）</td><td>Dijkstra + 堆</td><td>O((n+m)log n)</td><td><a href="10-图论.html">第 10 章</a></td></tr>
+                <tr><td>单源最短路（负权）</td><td>SPFA / Bellman-Ford</td><td>O(kE) / O(VE)</td><td><a href="10-图论.html">第 10 章</a></td></tr>
+                <tr><td>多源最短路</td><td>Floyd（k 最外层）</td><td>O(n<sup>3</sup>)</td><td><a href="10-图论.html">第 10 章</a></td></tr>
+                <tr><td>最小生成树</td><td>Kruskal + 并查集</td><td>O(m log m)</td><td><a href="10-图论.html">第 10 章</a></td></tr>
+                <tr><td>最大流 / 最小割</td><td>Dinic（i^1 反向边 + 当前弧）</td><td>O(V<sup>2</sup>E)</td><td><a href="10-图论.html">第 10 章</a></td></tr>
+                <tr><td>二分图最大匹配</td><td>匈牙利（瞬时 <code>vis</code>）</td><td>O(VE)</td><td><a href="10-图论.html">第 10 章</a></td></tr>
+                <tr><td>点积 / 叉积 / 面积</td><td><code>Point</code> + <code>sgn</code></td><td>O(1)</td><td><a href="11-计算几何.html">第 11 章</a></td></tr>
+                <tr><td>线段相交 / 直线交点</td><td>跨立 + 共线特判</td><td>O(1)</td><td><a href="11-计算几何.html">第 11 章</a></td></tr>
+                <tr><td>凸包</td><td>Andrew 两次扫描</td><td>O(n log n)</td><td><a href="11-计算几何.html">第 11 章</a></td></tr>
+                <tr><td>最近点对</td><td>分治 + 按 y 归并</td><td>O(n log n)</td><td><a href="11-计算几何.html">第 11 章</a></td></tr>
+                <tr><td>凸包直径</td><td>旋转卡壳</td><td>O(n)</td><td><a href="11-计算几何.html">第 11 章</a></td></tr>
+                <tr><td>半平面交</td><td>增量裁剪 / 双端队列</td><td>O(nm) / O(n log n)</td><td><a href="11-计算几何.html">第 11 章</a></td></tr>
+                <tr><td>圆与直线/圆求交</td><td>判别式 + 余弦定理</td><td>O(1)</td><td><a href="11-计算几何.html">第 11 章</a></td></tr>
+                <tr><td>最小圆覆盖</td><td>随机增量</td><td>期望 O(n)</td><td><a href="11-计算几何.html">第 11 章</a></td></tr>
+                <tr><td>真题打法</td><td>读题 → 定复杂度 → 选算法</td><td>—</td><td><a href="12-ICPC真题解析.html">第 12 章</a></td></tr>
+            </tbody>
+        </table>
+
+        <h2>A.2 由数据规模倒推算法</h2>
+
+        <p>时间限制按 1 秒 ≈ 10<sup>8</sup> 次基本运算估算，超过一档就该换算法。</p>
+
+        <table>
+            <thead><tr><th>n 的上限</th><th>可接受的复杂度</th><th>典型算法</th></tr></thead>
+            <tbody>
+                <tr><td>≤ 20</td><td>O(2<sup>n</sup>)、O(n!)</td><td>子集 DP、暴搜、状压</td></tr>
+                <tr><td>≤ 40</td><td>O(2<sup>n/2</sup>)</td><td>折半枚举（meet in the middle）</td></tr>
+                <tr><td>≤ 100</td><td>O(n<sup>4</sup>) 勉强、O(n<sup>3</sup>) 稳</td><td>Floyd、区间 DP、DP 套 DP</td></tr>
+                <tr><td>≤ 300</td><td>O(n<sup>3</sup>)</td><td>Floyd、矩阵乘、部分网络流</td></tr>
+                <tr><td>≤ 1000</td><td>O(n<sup>2</sup>)</td><td>朴素 DP、双重循环、EK</td></tr>
+                <tr><td>≤ 10<sup>5</sup></td><td>O(n log n)、O(n√n)</td><td>排序、线段树、树状数组、Dijkstra</td></tr>
+                <tr><td>≤ 10<sup>6</sup></td><td>O(n)、O(n log n) 且常数小</td><td>线性筛、KMP、单调栈</td></tr>
+                <tr><td>≤ 10<sup>18</sup></td><td>O(log n)、O(√n)</td><td>快速幂、gcd、数位 DP、矩阵快速幂</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>这张表是“上限”不是“目标”。</strong>同样 O(n log n)，线段树常数是排序的十几倍；
+            n = 10<sup>6</sup> 时写得丑的 O(n log n) 一样会超时。估完复杂度还要估常数。
+        </div>
+
+        <h2>A.3 提交前的 18 项检查</h2>
+
+        <p>按这个顺序过一遍，能消掉绝大多数“样例过、提交 WA/TLE/RE”。</p>
+
+        <table>
+            <thead><tr><th>类别</th><th>检查项</th></tr></thead>
+            <tbody>
+                <tr><td>输入</td><td>① 多组数据是否读到文件尾（<code>while (scanf(...) != EOF)</code>）<br>
+                ② 每组数据前是否清空数组/容器/计数器<br>
+                ③ 输入规模是否用了 <code>%lld</code> / <code>cin</code> 同步关闭</td></tr>
+                <tr><td>边界</td><td>④ n = 0、n = 1 是否特判<br>
+                ⑤ 下标从 0 还是从 1，是否混用<br>
+                ⑥ 数组开够了吗（线段树要 4n，链式前向星要 2m）</td></tr>
+                <tr><td>溢出</td><td>⑦ 中间结果是否超过 int（乘法、累加、平方和）<br>
+                ⑧ INF 取 0x3f3f3f3f 还是 1e18，加法会不会溢出</td></tr>
+                <tr><td>精度</td><td>⑨ 浮点比较是否用了 <code>sgn</code><br>
+                ⑩ 输出是 <code>%.2f</code> 而不是 <code>%lf</code><br>
+                ⑪ <code>-0.00</code> 是否需要处理</td></tr>
+                <tr><td>格式</td><td>⑫ <code>Case #x:</code> 的 x 从 1 开始、大小写、空格<br>
+                ⑬ 行末是否有多余空格、最后一行是否要空行</td></tr>
+                <tr><td>算法</td><td>⑭ 复杂度是否和数据规模匹配<br>
+                ⑮ 是否处理了“无解”分支（输出 -1 / No / 0）<br>
+                ⑯ 递归深度是否会爆栈（1e5 层要改迭代或加栈）</td></tr>
+                <tr><td>其他</td><td>⑰ <code>freopen</code> 是否注释掉了<br>
+                ⑱ 输出是否用了 <code>endl</code> 刷了太多行（TLE 常见原因）</td></tr>
+            </tbody>
+        </table>
+
+        <h2>A.4 WA 的六种常见原因</h2>
+
+        <table>
+            <thead><tr><th>现象</th><th>最可能的原因</th><th>怎么查</th></tr></thead>
+            <tbody>
+                <tr><td>样例过、提交 WA</td><td>没考虑多组数据、边界值</td><td>自己造 n=1、全相同、极值的用例</td></tr>
+                <tr><td>大数据 WA、小数据对</td><td>溢出或精度</td><td>把 int 全换 long long 试一次</td></tr>
+                <tr><td>部分用例 WA</td><td>特判漏了（0、负数、重复元素）</td><td>随机小数据 + 暴力对拍</td></tr>
+                <tr><td>TLE</td><td>复杂度选错、常数过大、I/O 慢</td><td>看 n 的量级，换算法或关同步</td></tr>
+                <tr><td>RE</td><td>数组越界、除零、递归爆栈</td><td>把数组开大 10 倍先试</td></tr>
+                <tr><td>MLE</td><td>开了 n<sup>2</sup> 的数组、容器没清</td><td>算一遍内存：int 数组 1e8 就是 400MB</td></tr>
+            </tbody>
+        </table>
+
+        <h2>A.5 对拍的标准流程</h2>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content"><strong>写暴力：</strong>复杂度可以是 O(n<sup>3</sup>) 甚至 O(2<sup>n</sup>)，但一定要<em>确定正确</em>。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content"><strong>写数据生成器：</strong>先小数据（n ≤ 8）覆盖所有边界，再逐步放大。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content"><strong>循环对拍：</strong>生成 → 跑两个程序 → <code>fc</code> / <code>diff</code> 比较，不一致就停下来看数据。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content"><strong>定位：</strong>把不一致的输入缩到最小，再手工推一遍，找出是哪个分支错了。</div>
+            </div>
+        </div>
+
+        <pre><code class="language-cpp">// 数据生成器（Linux/Win 通用写法：直接用 rand）
+int main() {
+    srand(time(0));
+    int n = rand() % 10 + 1;                 // 先从小数据开始
+    printf("%d\n", n);
+    for (int i = 1; i &lt;= n; i++) printf("%d ", rand() % 100);
+    puts("");
+    return 0;
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>对拍的价值在于“可信”。</strong>正解写错时你自己看不出来，但暴力几乎不会错。
+            只要暴力可信，对拍就是最可靠的调试手段——比盯着代码看半小时有效得多。
+        </div>
+
+        <h2>A.6 这些模板验过吗</h2>
+
+        <p>
+            抄模板最怕抄到一个“看起来对、结果是错的”版本。这一页的模板按下面这些方式验过，验法也写出来，方便你自己复核。
+        </p>
+
+        <table>
+            <thead><tr><th>范围</th><th>怎么验的</th><th>结果</th></tr></thead>
+            <tbody>
+                <tr><td>第 11 章全部模板</td><td>g++ 11.4、<code>-std=c++17 -O2 -Wall</code>，16 段拼成单文件编译</td>
+                <td>编译通过、无告警</td></tr>
+                <tr><td>几何函数</td><td>40 项断言：面积、凸包、凸包直径、最近点对、半平面交、圆交点、圆-三角形面积、三点定圆最小圆覆盖、三维距离与共面</td>
+                <td>全部通过；最近点对另跑 15 轮 × 60 点与 O(n²) 暴力对拍一致</td></tr>
+                <tr><td>第 12 章 L / B 题</td><td>直接跑输入样例</td>
+                <td>L 题 (6,10)→1、(6,8)→2、(2,8)→3；B 题 n=5/K=3 输出 −1+2+4、n=10/K=4 输出 −1−2+4+9</td></tr>
+                <tr><td>第 10 章 SPFA</td><td>30 轮随机图与 Floyd 对拍；另测负权与负环</td>
+                <td>最短路一致，负环正确返回 <code>false</code></td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-warning">
+            <strong>没验到的要说清楚。</strong>Dinic、线段树、AC 自动机、后缀数组这些模板，这轮只做了人工核对，
+            <strong>既没有编译也没有跑数据</strong>。抄之前建议自己拿一道板子题过一遍。<strong>A.2 的复杂度表是量级估计，不是实测数据。</strong>
+        </div>
+
+        <div class="callout callout-info">
+            <strong>一条真实的踩坑记录。</strong>圆-三角形面积交最初写成“<code>acos</code> 无符号角算扇形 + 三角形取绝对值”，
+            在弦接近直径时会算到另一侧的弧上：300 组随机用例里 73 组错，最大偏差 1.84。
+            改成“按交点切段 + <code>atan2</code> 有向角 + 有向三角形”后零偏差。第 11 章那段代码旁边的警告就是这么来的。
+        </div>
+
+        <h2>A.7 全站地图</h2>
+
+        <table>
+            <thead><tr><th>阶段</th><th>章节</th><th>读完的标志</th></tr></thead>
+            <tbody>
+                <tr><td>能上机</td><td><a href="01-竞赛入门与训练方法.html">1</a> → <a href="02-复杂度与算法评估.html">2</a> → <a href="03-STL与基本数据结构.html">3</a></td>
+                <td>能在 OJ 上稳定 AC 简单题，会按数据规模选算法</td></tr>
+                <tr><td>能建模</td><td><a href="04-搜索技术.html">4</a> → <a href="06-基础算法思想.html">6</a> → <a href="07-动态规划.html">7</a></td>
+                <td>看到题能想到搜索/贪心/DP 的模型，并能写出可对拍的正解</td></tr>
+                <tr><td>能上强度</td><td><a href="05-高级数据结构.html">5</a> → <a href="08-数学.html">8</a> → <a href="09-字符串.html">9</a> → <a href="10-图论.html">10</a></td>
+                <td>模板能默写，中档题不再卡壳</td></tr>
+                <tr><td>能打比赛</td><td><a href="11-计算几何.html">11</a> → <a href="12-ICPC真题解析.html">12</a></td>
+                <td>能在 5 小时内稳定拿下 5~6 题</td></tr>
+            </tbody>
+        </table>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="12-ICPC真题解析.html">第 12 章 ICPC 区域赛真题解析</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

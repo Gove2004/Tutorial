@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>第 8 章 数学 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="07-动态规划.html">← 上一章</a>
+        <a href="09-字符串.html">下一章 →</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>第 8 章 数学</h1>
+
+        <p class="intro">
+            竞赛数学不是“高数”，而是数论、组合计数、概率期望和博弈论。它的特点是：公式一旦想对，代码只有十几行；
+            公式想错，怎么调都过不了。这一章把最常考的几块按“结论 + 代码 + 为什么”讲清楚。
+        </p>
+
+        <div class="definition">
+            <h4>学完本章，你应该能做到</h4>
+            <ul>
+                <li>写出高精度加减乘，知道为什么不能直接用 <code>long long</code>；</li>
+                <li>用快速幂在 O(log n) 内算 a<sup>n</sup> mod m，并解释为什么除法不能直接取模；</li>
+                <li>用扩展欧几里得求 ax + by = gcd(a,b) 的一组解，并据此求逆元；</li>
+                <li>用线性筛在 O(n) 内筛出所有素数；</li>
+                <li>判断巴什博弈与尼姆博弈的胜负，必要时用 SG 函数；</li>
+                <li>算期望时能正确使用线性性质。</li>
+            </ul>
+        </div>
+
+        <h2>8.1 高精度计算</h2>
+
+        <p>
+            <code>long long</code> 大约能存 9×10<sup>18</sup>。超过这个范围（比如 100!、2<sup>1000</sup>），就必须用数组模拟手算：
+            每一位存一位数字，按位加、按位乘、处理进位。
+        </p>
+
+        <pre><code class="language-cpp">// 高精度加法：字符串读入，倒序存进数组
+string add(string a, string b) {
+    if (a.size() &lt; b.size()) swap(a, b);
+    int n = a.size(), m = b.size();
+    vector&lt;int&gt; x(n), y(n, 0), z(n + 1, 0);
+    for (int i = 0; i &lt; n; i++) x[i] = a[n - 1 - i] - '0';        // 倒序
+    for (int i = 0; i &lt; m; i++) y[i] = b[m - 1 - i] - '0';
+
+    int carry = 0;
+    for (int i = 0; i &lt; n; i++) {
+        int s = x[i] + y[i] + carry;
+        z[i] = s % 10;
+        carry = s / 10;
+    }
+    if (carry) z[n] = carry;
+
+    string res;
+    int i = n;
+    while (i &gt;= 0 &amp;&amp; z[i] == 0) i--;        // 去掉前导零
+    for (; i &gt;= 0; i--) res += char('0' + z[i]);
+    return res.empty() ? "0" : res;
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>实现要点：</strong>倒序存储是为了让“低位对齐”，进位方向与数组下标增长方向一致。
+            乘法需要双重循环 + 进位延迟处理，复杂度 O(nm)；如果题目只要结果对某个数取模，直接用同余性质边算边取模，不必高精度。
+        </div>
+
+        <h2>8.2 数论</h2>
+
+        <h3>8.2.1 模运算与它的边界</h3>
+
+        <p>
+            <code>a mod m = a % m</code>，结果在 [0, m−1]。它满足加法、减法、乘法的分配律：
+        </p>
+
+        <pre><code class="language-plaintext">(a + b) mod m = ((a mod m) + (b mod m)) mod m
+(a - b) mod m = ((a mod m) - (b mod m) + m) mod m
+(a * b) mod m = ((a mod m) * (b mod m)) mod m</code></pre>
+
+        <p>
+            但<strong>除法不满足</strong>：
+        </p>
+
+        <pre><code class="language-plaintext">(100 / 50) mod 20 = 2
+((100 mod 20) / (50 mod 20)) mod 20 = (0 / 10) mod 20 = 0     // 错</code></pre>
+
+        <p>
+            要用“逆元”来代替除法，这就是 8.2.4 的内容。
+        </p>
+
+        <h3>8.2.2 快速幂</h3>
+
+        <p>
+            求 a<sup>n</sup> mod m。n 可能到 10<sup>9</sup>，逐个乘是 O(n)，必然超时。分治的思路是：
+            a<sup>n</sup> = (a<sup>n/2</sup>)<sup>2</sup>（n 为偶数），a<sup>n</sup> = (a<sup>⌊n/2⌋</sup>)<sup>2</sup> · a（n 为奇数）。
+        </p>
+
+        <pre><code class="language-cpp">// 递归版
+int fastPow(int a, int n) {
+    if (n == 1) return a;
+    int temp = fastPow(a, n / 2);
+    if (n % 2 == 1) return temp * temp * a;
+    else            return temp * temp;
+}
+
+// 位运算版（推荐，无递归开销）
+long long fastPow(long long a, long long n, long long mod) {
+    long long ans = 1;
+    a %= mod;
+    while (n) {
+        if (n &amp; 1) ans = ans * a % mod;   // 这一位为 1，乘进去
+        a = a * a % mod;                  // 底数平方
+        n &gt;&gt;= 1;
+    }
+    return ans;
+}</code></pre>
+
+        <p>
+            位运算版的原理：把指数 n 拆成二进制，a<sup>n</sup> = a<sup>2<sup>k1</sup></sup> · a<sup>2<sup>k2</sup></sup> · …，
+            每轮把底数平方、把指数右移一位，正好对应二进制位。复杂度 O(log n)。
+        </p>
+
+        <p>
+            同一个模板换成矩阵乘法，就是<strong>矩阵快速幂</strong>，用来在 O(log n) 内求 Fibonacci 第 n 项、线性递推第 n 项。
+        </p>
+
+        <pre><code class="language-cpp">// 矩阵快速幂求 Fibonacci 第 n 项（模 1e9+7）
+struct Mat { long long a[2][2]; };
+Mat mul(Mat x, Mat y, long long mod) {
+    Mat z{};
+    for (int i = 0; i &lt; 2; i++)
+        for (int k = 0; k &lt; 2; k++) if (x.a[i][k])
+            for (int j = 0; j &lt; 2; j++)
+                z.a[i][j] = (z.a[i][j] + x.a[i][k] * y.a[k][j]) % mod;
+    return z;
+}
+// 初始矩阵 [[1,1],[1,0]] 的 n 次方，左上角就是 F(n+1)</code></pre>
+
+        <h3>8.2.3 GCD 与 LCM</h3>
+
+        <pre><code class="language-cpp">int gcd(int a, int b) { return b == 0 ? a : gcd(b, a % b); }
+int lcm(int a, int b) { return a / gcd(a, b) * b; }   // 先除后乘，防溢出</code></pre>
+
+        <p>
+            <code>gcd</code> 是欧几里得算法，复杂度 O(log min(a,b))。<strong>LCM 一定要先除后乘</strong>：
+            <code>a * b</code> 可能溢出，而 <code>a / gcd(a,b)</code> 一定整除。
+        </p>
+
+        <h3>8.2.4 扩展欧几里得与二元一次不定方程</h3>
+
+        <p>
+            求 <code>ax + by = gcd(a, b)</code> 的一组整数解。递推关系来自 <code>gcd(a,b) = gcd(b, a mod b)</code>：
+            先解出 <code>b·x' + (a mod b)·y' = gcd</code>，再回代得到 <code>x = y'</code>、<code>y = x' − ⌊a/b⌋·y'</code>。
+        </p>
+
+        <pre><code class="language-cpp">// 返回 gcd(a,b)，并顺带求出 ax + by = gcd 的一组解
+long long exgcd(long long a, long long b, long long&amp; x, long long&amp; y) {
+    if (b == 0) { x = 1; y = 0; return a; }
+    long long d = exgcd(b, a % b, x, y);
+    long long t = x;
+    x = y;
+    y = t - (a / b) * y;
+    return d;
+}</code></pre>
+
+        <p>
+            对于一般的 <code>ax + by = c</code>：当且仅当 <code>gcd(a,b) | c</code> 时有解。
+            先解出 <code>ax₀ + by₀ = gcd</code>，再整体乘以 <code>c / gcd</code>，就得到一组特解；
+            通解是 <code>x = x₀ + k·(b/g)</code>、<code>y = y₀ − k·(a/g)</code>。
+        </p>
+
+        <h3>8.2.5 同余与逆元</h3>
+
+        <p>
+            若 <code>a mod m = b mod m</code>，称 a 与 b 对模 m 同余，记作 <code>a ≡ b (mod m)</code>。
+            一元线性同余方程 <code>ax ≡ b (mod m)</code> 可以改写成 <code>ax − my = b</code>，于是又回到扩展欧几里得。
+        </p>
+
+        <p>
+            <strong>逆元：</strong>求 x 使 <code>ax ≡ 1 (mod m)</code>，记 <code>x = a<sup>−1</sup></code>。
+            有了逆元，“除以 a”就变成“乘以 a<sup>−1</sup>”，除法取模的问题就解决了。
+        </p>
+
+        <pre><code class="language-cpp">// 方法一：扩展欧几里得（要求 gcd(a,m)=1）
+long long inv_exgcd(long long a, long long m) {
+    long long x, y;
+    exgcd(a, m, x, y);
+    return (x % m + m) % m;
+}
+
+// 方法二：费马小定理（要求 m 是素数）
+long long inv_fermat(long long a, long long m) {
+    return fastPow(a, m - 2, m);          // a^(p-2) ≡ a^(-1) (mod p)
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>两条前提别记混：</strong>扩展欧几里得要求 <code>gcd(a, m) = 1</code>；费马小定理要求 m 是<em>素数</em>且 a 不是 m 的倍数。
+            题目给 10<sup>9</sup>+7 时用费马；给任意模数时用扩展欧几里得。
+        </div>
+
+        <h3>8.2.6 素数</h3>
+
+        <pre><code class="language-cpp">// 试除法判素数：O(sqrt(n))
+bool isPrime(int n) {
+    if (n &lt; 2) return false;
+    for (int i = 2; (long long)i * i &lt;= n; i++)
+        if (n % i == 0) return false;
+    return true;
+}
+
+// 埃氏筛：O(n log log n)
+const int MAXN = 1000005;
+bool vis[MAXN];
+void sieve(int n) {
+    vis[0] = vis[1] = true;
+    for (int i = 2; (long long)i * i &lt;= n; i++)
+        if (!vis[i])
+            for (int j = i * i; j &lt;= n; j += i) vis[j] = true;
+}
+
+// 线性筛（欧拉筛）：O(n)，每个合数只被它的最小质因子筛一次
+int prime[MAXN], cnt;
+void linear_sieve(int n) {
+    for (int i = 2; i &lt;= n; i++) {
+        if (!vis[i]) prime[++cnt] = i;
+        for (int j = 1; j &lt;= cnt &amp;&amp; i * prime[j] &lt;= n; j++) {
+            vis[i * prime[j]] = true;
+            if (i % prime[j] == 0) break;      // 保证只被最小质因子筛
+        }
+    }
+}</code></pre>
+
+        <p>
+            线性筛的 <code>break</code> 是精髓：当 <code>i</code> 能被 <code>prime[j]</code> 整除时，后面的合数一定已经被更小的质因子筛过，
+            继续下去就是重复。这一行让复杂度从 O(n log log n) 降到 O(n)。
+        </p>
+
+        <h2>8.3 组合数学</h2>
+
+        <h3>8.3.1 鸽巢原理</h3>
+
+        <p>
+            n+1 个物品放进 n 个盒子，至少有一个盒子有 2 个物品。推广：kn+1 个物品放进 n 个盒子，
+            至少一个盒子有 k+1 个。它常用来证明“某种结构必然存在”，而不是直接算答案。
+        </p>
+
+        <h3>8.3.2 杨辉三角与二项式系数</h3>
+
+        <pre><code class="language-cpp">// C(n, m) 递推，O(n^2) 预处理
+long long C[1010][1010];
+for (int i = 0; i &lt;= n; i++) {
+    C[i][0] = C[i][i] = 1;
+    for (int j = 1; j &lt; i; j++) C[i][j] = (C[i-1][j-1] + C[i-1][j]) % MOD;
+}
+
+// 单个组合数：阶乘 + 逆元，O(n) 预处理后 O(1) 查询
+fac[0] = 1;
+for (int i = 1; i &lt;= n; i++) fac[i] = fac[i-1] * i % MOD;
+inv_fac[n] = fastPow(fac[n], MOD - 2, MOD);
+for (int i = n; i &gt; 0; i--) inv_fac[i-1] = inv_fac[i] * i % MOD;
+// C(n, m) = fac[n] * inv_fac[m] % MOD * inv_fac[n-m] % MOD</code></pre>
+
+        <h3>8.3.3 容斥原理</h3>
+
+        <p>
+            求“至少满足一个条件”的并集大小：|A∪B∪C| = |A|+|B|+|C| − |A∩B| − |A∩C| − |B∩C| + |A∩B∩C|。
+            一般形式是“奇数个交集加、偶数个交集减”。
+        </p>
+
+        <pre><code class="language-cpp">// 容斥标准写法：枚举子集，按位数奇偶决定加减
+long long ans = 0;
+for (int mask = 1; mask &lt; (1 &lt; n); mask++) {
+    long long l = 1, bits = 0;
+    for (int i = 0; i &lt; n; i++) if (mask &amp; (1 &lt; i)) { l = lcm(l, v[i]); bits++; }
+    if (bits &amp; 1) ans += N / l;
+    else          ans -= N / l;
+}</code></pre>
+
+        <h3>8.3.4 Fibonacci 数列</h3>
+
+        <p>
+            F(1)=F(2)=1，F(n)=F(n−1)+F(n−2)。三种求法：递推 O(n)、矩阵快速幂 O(log n)、通项公式（含浮点误差，竞赛不用）。
+            它的前几项 1,1,2,3,5,8,13… 要能背出来，很多计数题的答案就是这个数列。
+        </p>
+
+        <h3>8.3.5 母函数</h3>
+
+        <p>
+            母函数把“组合计数”变成“多项式乘法”。对每个可选物品构造多项式 <code>(1 + x + x² + …)</code>，
+            n 个物品的方案数就是这些多项式相乘后 x<sup>k</sup> 的系数。
+        </p>
+
+        <pre><code class="language-cpp">// 整数拆分：用 1..n 组成和为 m 的方案数（完全背包式母函数）
+int dp[M] = {1};
+for (int i = 1; i &lt;= n; i++)              // 枚举物品（面值）
+    for (int j = i; j &lt;= m; j++)          // 正序，表示可重复使用
+        dp[j] += dp[j - i];</code></pre>
+
+        <p>
+            这一段和完全背包的代码完全一样——这不是巧合，母函数的多项式乘法在实现上就是背包的转移。
+        </p>
+
+        <h3>8.3.6 特殊计数</h3>
+
+        <table>
+            <thead><tr><th>数列</th><th>含义</th><th>前几项</th></tr></thead>
+            <tbody>
+                <tr><td>Catalan 数</td><td>合法括号序列数、二叉树形态数</td><td>1, 1, 2, 5, 14, 42…</td></tr>
+                <tr><td>错排 D(n)</td><td>n 个元素全不在原位的排列数</td><td>0, 1, 2, 9, 44, 265…</td></tr>
+                <tr><td>Stirling 数</td><td>n 个元素分 k 个非空集合/环的方案数</td><td>按第二类/第一类分别记</td></tr>
+                <tr><td>Bell 数</td><td>n 个元素的划分方案总数</td><td>1, 2, 5, 15, 52…</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            Catalan 的常用递推：<code>C(n) = C(n−1) · (4n−2)/(n+1)</code>，取模时要用逆元。
+        </p>
+
+        <h2>8.4 概率与数学期望</h2>
+
+        <p>
+            期望的定义是 <code>E(X) = Σ x<sub>i</sub> · p<sub>i</sub></code>。真正好用的是它的<strong>线性性质</strong>：
+        </p>
+
+        <div class="definition">
+            <h4>两条必记性质</h4>
+            <p><code>E(X + Y) = E(X) + E(Y)</code>，无论 X 与 Y 是否独立。</p>
+            <p><code>E(aX + b) = a·E(X) + b</code>。</p>
+        </div>
+
+        <p>
+            这两条让很多“看起来要算联合分布”的题变成“分别算每一部分的期望再相加”。
+            例如“n 个位置，每个位置被选中的概率是 p，求被选中位置个数的期望”，答案直接是 n·p，不用管相关性。
+        </p>
+
+        <p>
+            常见的期望模型还有：几何分布（首次成功的期望次数 = 1/p）、全期望公式（按条件分组求加权和）。
+            算期望时优先考虑“拆成指示变量之和”，这是竞赛里最省事的思路。
+        </p>
+
+        <h2>8.5 公平组合游戏</h2>
+
+        <p>
+            两个玩家轮流操作，规则对双方一致，无法操作者输——这类游戏叫公平组合游戏（ICG）。
+            判断胜负的核心是 <strong>P-position / N-position</strong>：P 表示先手必败，N 表示先手必胜。
+        </p>
+
+        <h3>8.5.1 巴什博弈</h3>
+
+        <p>
+            只有一堆 n 个石子，每人每次取 1 到 m 个，取到最后一个的人赢。
+            结论：<strong>n % (m+1) == 0 时先手必败</strong>，否则先手必胜（先取 n mod (m+1) 个，之后每轮凑成 m+1）。
+        </p>
+
+        <p>
+            如果取法不是连续的 1..m，而是任意一个集合（比如只能取 1 或 4 个），就要画 P/N 表找周期。
+            原书给了两张表：
+        </p>
+
+        <table>
+            <thead><tr><th>x（石子数）</th><th>0</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th></tr></thead>
+            <tbody>
+                <tr><td>只能取 {1,4}</td><td>P</td><td>N</td><td>P</td><td>N</td><td>N</td><td>P</td><td>N</td><td>P</td><td>N</td><td>N</td><td>P</td></tr>
+                <tr><td>只能取 {1,3,4}</td><td>P</td><td>N</td><td>P</td><td>N</td><td>N</td><td>N</td><td>N</td><td>P</td><td>N</td><td>P</td><td>N</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            {1,4} 的周期是 5，{1,3,4} 的周期是 7。这类题的做法就是打表找规律，然后按周期取余。
+            HDU 1846 是最简单的巴什，直接套 <code>n % (m+1)</code>。
+        </p>
+
+        <h3>8.5.2 尼姆博弈</h3>
+
+        <p>
+            有 n 堆石子，每人可以从<em>任意一堆</em>取走任意多个（至少一个），取走最后一个的人赢。
+            结论极其简洁：<strong>所有堆石子数的异或和不为 0 则先手必胜，为 0 则先手必败</strong>。
+        </p>
+
+        <pre><code class="language-cpp">int x = 0;
+for (int i = 1; i &lt;= n; i++) x ^= a[i];
+puts(x ? "First" : "Second");</code></pre>
+
+        <p>
+            为什么？因为异或和为 0 时，无论怎么取，异或和都会变成非 0；而异或和非 0 时，总能找到一种取法让它变回 0。
+            于是“异或和为 0”就是那个必败态。
+        </p>
+
+        <h3>8.5.3 SG 函数</h3>
+
+        <p>
+            当游戏可以拆成多个互不影响的子游戏时，用 SG 函数把每个子游戏映射成一个非负整数，
+            整个游戏的 SG 值等于各子游戏 SG 值的异或和。SG 为 0 必败。
+        </p>
+
+        <pre><code class="language-cpp">// SG 函数：sg[u] = mex{ sg[v] | v 是 u 能到达的状态 }
+int sg[MAXN];
+bool vis[MAXN + 1];
+
+void getSG(int n) {
+    for (int i = 1; i &lt;= n; i++) {
+        memset(vis, 0, sizeof(vis));
+        for (int j = 1; j &lt;= k; j++)          // 枚举所有可走的步数
+            if (i - move[j] &gt;= 0) vis[sg[i - move[j]]] = true;
+        int g = 0;
+        while (vis[g]) g++;                    // mex：最小的未出现值
+        sg[i] = g;
+    }
+}</code></pre>
+
+        <h3>8.5.4 威佐夫博弈</h3>
+
+        <p>
+            两堆石子 (a, b)，每次可以从一堆取任意个，或从两堆同时取相同个数。必败态是
+            (0,0)、(1,2)、(3,5)、(4,7)、(6,10)…，通项与黄金分割有关：
+        </p>
+
+        <div class="definition">
+            <h4>判定公式</h4>
+            <p>设 <code>a ≤ b</code>、<code>d = b − a</code>，若 <code>a == ⌊d · (1+√5)/2⌋</code>，则先手必败。</p>
+        </div>
+
+        <pre><code class="language-cpp">double gold = (sqrt(5.0) + 1) / 2;
+int d = b - a;
+if ((int)(d * gold) == a) puts("Second");   // 必败
+else                      puts("First");</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>浮点误差：</strong>数据大时 <code>d * gold</code> 可能差 1。稳妥做法是用整数版：
+            <code>a == (long long)(d * 1.6180339887498949)</code> 并配合 ±1 校正，或直接预处理必败态表。
+        </div>
+
+        <h2>自测清单</h2>
+        <table>
+            <thead><tr><th>问题</th><th>要点</th></tr></thead>
+            <tbody>
+                <tr><td>为什么除法不能直接取模？</td><td>取模后信息丢失，必须用逆元</td></tr>
+                <tr><td>费马小定理求逆元的前提？</td><td>模数为素数且 a 不被模数整除</td></tr>
+                <tr><td>扩展欧几里得能求什么？</td><td>ax+by=gcd 的一组解，进而求逆元、解同余方程</td></tr>
+                <tr><td>线性筛为什么是 O(n)？</td><td>每个合数只被最小质因子筛一次</td></tr>
+                <tr><td>Nim 的必败条件？</td><td>所有堆异或和为 0</td></tr>
+                <tr><td>期望的线性性质需要独立性吗？</td><td>不需要</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习题</h2>
+        <ol>
+            <li>POJ 1061 / HDU 1576：用扩展欧几里得求同余方程的解。</li>
+            <li>HDU 1061：求 n<sup>n</sup> 的个位数，验证快速幂与找规律两种做法。</li>
+            <li>用线性筛求 10<sup>7</sup> 内的素数个数，与埃氏筛比较运行时间。</li>
+            <li>HDU 1846 巴什博弈：写 <code>n%(m+1)</code> 判定；再手工打表验证只能取 {1,4} 时周期为 5。</li>
+            <li>写一个 SG 函数版本，处理“只能取 {1,3,4}”的取石子游戏，与打表结果对照。</li>
+            <li>计算“n 个点的随机二叉树期望高度”，用指示变量拆分的方法推导。</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="07-动态规划.html">← 第 7 章 动态规划</a>
+            <a href="09-字符串.html">第 9 章 字符串 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

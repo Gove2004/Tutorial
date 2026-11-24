@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>第 5 章 高级数据结构 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="04-搜索技术.html">← 上一章</a>
+        <a href="06-基础算法思想.html">下一章 →</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>第 5 章 高级数据结构</h1>
+
+        <p class="intro">
+            “修改一个元素、查询一个区间”是最常见的题目骨架。朴素写法 O(n) 查询、O(1) 修改，m 次操作就是 O(nm)；
+            n、m 上 10<sup>5</sup> 就必然超时。线段树和树状数组把两个操作都压到 O(log n)。
+            并查集则是另一类问题的答案：动态合并集合。
+        </p>
+
+        <div class="definition">
+            <h4>学完本章，你应该能做到</h4>
+            <ul>
+                <li>写出带路径压缩的并查集，并解释它为什么接近 O(1)；</li>
+                <li>独立写出线段树的建树、单点修改、区间查询，并能加上懒标记做区间修改；</li>
+                <li>解释线段树为什么开 4n 空间；</li>
+                <li>写出树状数组的 <code>add</code> 与 <code>sum</code>，并知道它为什么只能做“前缀可减”的信息；</li>
+                <li>知道 Treap / Splay 解决的是什么问题（有序集合的第 k 大、区间翻转）。</li>
+            </ul>
+        </div>
+
+        <h2>5.1 并查集：动态合并集合</h2>
+
+        <p>
+            城市里有 n 个人，分成不同帮派。给出“1 号和 2 号是朋友”“1 号和 3 号是朋友”这类关系，
+            问最后有多少帮派、每个人属于哪个帮派。n 可以到 10<sup>5</sup>。
+        </p>
+
+        <p>
+            并查集（Disjoint Set）为每个集合选一个“代表”，只维护“谁的代表是谁”。三个操作：
+            <strong>初始化</strong>（每人自成一个集合）、<strong>合并</strong>（把两个集合的代表连起来）、<strong>查找</strong>（找某人的代表）。
+        </p>
+
+        <pre><code class="language-cpp">// 朴素实现：s[i] 表示 i 所属集合的代表
+int s[MAXN];
+void init(int n) { for (int i = 1; i &lt;= n; i++) s[i] = i; }
+
+int find(int x) {                 // 找 x 所在集合的代表
+    while (s[x] != x) x = s[x];   // 一路往上爬
+    return x;
+}
+
+void merge(int x, int y) {        // 合并两个集合
+    s[find(x)] = find(y);         // 把 x 的代表挂到 y 的代表下
+}</code></pre>
+
+        <p>
+            朴素版本在极端情况下会退化成一串很长的链，<code>find</code> 变成 O(n)。两个优化让它几乎变成 O(1)：
+        </p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content"><strong>路径压缩。</strong>查找时把路径上所有节点直接挂到代表下面，下次再查就是一步。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content"><strong>按秩合并。</strong>合并时把“矮的树”挂到“高的树”下面，避免树变高。用 <code>rank</code> 或集合大小记录高度。</div>
+            </div>
+        </div>
+
+        <pre><code class="language-cpp">// 竞赛标准版：路径压缩 + 按秩合并
+int s[MAXN], rk[MAXN];
+
+void init(int n) {
+    for (int i = 1; i &lt;= n; i++) { s[i] = i; rk[i] = 0; }
+}
+
+int find(int x) {                       // 递归写法，压缩路径
+    return s[x] == x ? x : s[x] = find(s[x]);
+}
+
+void merge(int x, int y) {
+    x = find(x); y = find(y);
+    if (x == y) return;                 // 已经在同一个集合
+    if (rk[x] &lt; rk[y]) s[x] = y;
+    else if (rk[x] &gt; rk[y]) s[y] = x;
+    else { s[y] = x; rk[x]++; }         // 高度相同，合并后高度 +1
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>复杂度：</strong>只用路径压缩，均摊 O(log n)；两者都用，均摊 O(α(n))，其中 α 是反阿克曼函数，
+            在 n ≤ 10<sup>9</sup> 时不超过 5。可以当作常数。
+        </div>
+
+        <p>
+            并查集的典型应用：连通子图计数、Kruskal 最小生成树（第 10 章）、最近公共祖先（LCA）。
+            <strong>注意它只能合并，不能拆分</strong>——需要“删除”操作的题要用可持久化并查集或换数据结构。
+        </p>
+
+        <h2>5.2 二叉树：从存储到平衡</h2>
+
+        <h3>5.2.1 二叉树的存储</h3>
+
+        <p>
+            两种存法：数组（堆式，节点 i 的左右儿子是 2i、2i+1，适合完全二叉树）和链式（每个节点存左右指针，适合任意形态）。
+            线段树用的是数组存法，因为它本身就是一棵“结构固定的完全二叉树”。
+        </p>
+
+        <h3>5.2.2 遍历</h3>
+
+        <pre><code class="language-cpp">void preorder(int u)  { if (!u) return; cout &lt;&lt; u; preorder(lc[u]); preorder(rc[u]); }  // 根左右
+void inorder(int u)   { if (!u) return; inorder(lc[u]); cout &lt;&lt; u; inorder(rc[u]); }   // 左根右
+void postorder(int u) { if (!u) return; postorder(lc[u]); postorder(rc[u]); cout &lt;&lt; u; } // 左右根</code></pre>
+
+        <p>
+            中序遍历二叉搜索树会得到<strong>有序序列</strong>，这条性质是后面所有平衡树的基础。
+        </p>
+
+        <h3>5.2.3 二叉搜索树与它的退化</h3>
+
+        <p>
+            BST 的性质：左子树所有值小于根，右子树所有值大于根。查找、插入、删除平均 O(log n)。
+            但如果按 1、2、3、4、5 的顺序插入，树会退化成一条链，所有操作变成 O(n)。这就是需要平衡树的原因。
+        </p>
+
+        <h3>5.2.4 Treap 与 Splay</h3>
+
+        <p>
+            平衡树的目标是：在保持 BST 性质的同时，把树高控制在 O(log n)。竞赛里最常用的两种：
+        </p>
+
+        <table>
+            <thead><tr><th></th><th>Treap</th><th>Splay</th></tr></thead>
+            <tbody>
+                <tr><td>平衡方式</td><td>给每个节点一个随机优先级，按堆性质旋转</td><td>每次访问后把节点旋转到根（自适应）</td></tr>
+                <tr><td>实现难度</td><td>较简单，代码短</td><td>较复杂，但能做区间操作</td></tr>
+                <tr><td>均摊复杂度</td><td>O(log n)（期望）</td><td>O(log n)（均摊）</td></tr>
+                <tr><td>擅长</td><td>第 k 大、前驱后继、排名</td><td>区间翻转、区间分裂合并、可持久化</td></tr>
+            </tbody>
+        </table>
+
+        <pre><code class="language-cpp">// Treap 核心：旋转 + 插入（带随机优先级）
+struct Node { int l, r, val, pri, cnt, siz; } t[MAXN];
+int tot = 0;
+
+void pushup(int u) { t[u].siz = t[t[u].l].siz + t[t[u].r].siz + t[u].cnt; }
+
+void rotate_right(int&amp; u) {          // 右旋
+    int v = t[u].l;
+    t[u].l = t[v].r;
+    t[v].r = u;
+    pushup(u); pushup(v);
+    u = v;
+}
+
+void rotate_left(int&amp; u) {           // 左旋
+    int v = t[u].r;
+    t[u].r = t[v].l;
+    t[v].l = u;
+    pushup(u); pushup(v);
+    u = v;
+}
+
+void insert(int&amp; u, int x) {
+    if (!u) {                        // 新建节点
+        u = ++tot;
+        t[u] = {0, 0, x, rand(), 1, 1};
+        return;
+    }
+    if (x == t[u].val) { t[u].cnt++; pushup(u); return; }
+    if (x &lt; t[u].val) {
+        insert(t[u].l, x);
+        if (t[t[u].l].pri &gt; t[u].pri) rotate_right(u);   // 维护大根堆性质
+    } else {
+        insert(t[u].r, x);
+        if (t[t[u].r].pri &gt; t[u].pri) rotate_left(u);
+    }
+    pushup(u);
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>不要用 <code>rand()</code> 直接当优先级。</strong>部分平台的 <code>rand()</code> 周期短、低位规律明显，
+            会被构造数据卡成链。用 <code>mt19937</code> 或者手写 xorshift。
+        </div>
+
+        <p>
+            Splay 的核心是 <code>splay(x)</code>：把节点 x 一路双旋到根。它把“最近访问的节点”放到最容易访问的位置，
+            因此适合处理有局部性的访问序列。区间操作时，把区间左右端点分别 splay 到根和根的右儿子，中间那棵子树就是目标区间。
+        </p>
+
+        <h2>5.3 线段树</h2>
+
+        <h3>5.3.1 它解决什么问题</h3>
+
+        <p>
+            有一类 RMQ（Range Minimum/Maximum Query）问题：给定长度 n 的数列，需要①查询区间 [i, j] 的最值；②修改某个元素。
+        </p>
+
+        <table>
+            <thead><tr><th>做法</th><th>单次查询</th><th>单次修改</th><th>m 次操作总计</th></tr></thead>
+            <tbody>
+                <tr class="bad"><td>朴素数组</td><td>O(n)</td><td>O(1)</td><td>O(nm)，n=m=10<sup>5</sup> 时 10<sup>10</sup></td></tr>
+                <tr class="good"><td>线段树</td><td>O(log n)</td><td>O(log n)</td><td>O(m log n)，约 1.7×10<sup>6</sup></td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            线段树是一棵二叉树，每个节点代表一条线段（区间）[L, R]：
+        </p>
+
+        <ul>
+            <li>若 L = R，此节点是叶子，对应数列中的一个点；</li>
+            <li>若 L &lt; R，取中点 M = (L + R) / 2，左儿子代表 [L, M]，右儿子代表 [M+1, R]。</li>
+        </ul>
+
+        <p>
+            每次区间对半拆分，所以树高 log<sub>2</sub> n，查找一个点或查询一个区间最多走 log<sub>2</sub> n 层——
+            这就是它高效的原因：把“扫一遍区间”换成了“折半定位”。
+        </p>
+
+        <h3>5.3.2 建树与单点修改</h3>
+
+        <pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+const int MAXN = 100005;
+int a[MAXN];
+long long sum[MAXN * 4];             // 4 倍空间：见下文说明
+
+void build(int u, int l, int r) {
+    if (l == r) { sum[u] = a[l]; return; }
+    int mid = (l + r) &gt;&gt; 1;
+    build(u &lt;&lt; 1, l, mid);
+    build(u &lt;&lt; 1 | 1, mid + 1, r);
+    sum[u] = sum[u &lt;&lt; 1] + sum[u &lt;&lt; 1 | 1];   // 区间和 = 左右儿子之和
+}
+
+void update(int u, int l, int r, int pos, int val) {   // 把 a[pos] 改成 val
+    if (l == r) { sum[u] = val; return; }
+    int mid = (l + r) &gt;&gt; 1;
+    if (pos &lt;= mid) update(u &lt;&lt; 1, l, mid, pos, val);
+    else            update(u &lt;&lt; 1 | 1, mid + 1, r, pos, val);
+    sum[u] = sum[u &lt;&lt; 1] + sum[u &lt;&lt; 1 | 1];   // 回溯时更新父亲
+}
+
+long long query(int u, int l, int r, int ql, int qr) { // 查询 [ql, qr] 的和
+    if (ql &lt;= l &amp;&amp; r &lt;= qr) return sum[u];      // 完全覆盖，直接返回
+    int mid = (l + r) &gt;&gt; 1;
+    long long ans = 0;
+    if (ql &lt;= mid)     ans += query(u &lt;&lt; 1, l, mid, ql, qr);
+    if (qr &gt; mid)      ans += query(u &lt;&lt; 1 | 1, mid + 1, r, ql, qr);
+    return ans;
+}</code></pre>
+
+        <div class="callout callout-info">
+            <strong>为什么开 4n？</strong>线段树的节点数不是恰好 2n−1。当 n 不是 2 的幂时，树的最后一层会有空洞，
+            最坏情况下编号会超过 2n。取 4n 是为了让编号 <code>u &lt;&lt; 1 | 1</code> 永远不越界。
+            这个结论原书在程序注释里也点了名——面试常考。
+        </div>
+
+        <h3>5.3.3 区间修改与懒标记</h3>
+
+        <p>
+            如果要把 [a, b] 中每个元素都加上 c，不能逐个点更新（那是 O(n log n)）。
+            做法是：给整段被打上“懒标记”lazy，表示“这个区间的每个元素都还没实际加上 c”，
+            只有真正需要访问子区间时才把标记下推。
+        </p>
+
+        <pre><code class="language-cpp">long long sum[MAXN * 4], lazy[MAXN * 4];
+
+void push_down(int u, int len) {      // len 是当前区间长度
+    if (!lazy[u]) return;
+    lazy[u &lt;&lt; 1] += lazy[u];
+    lazy[u &lt;&lt; 1 | 1] += lazy[u];
+    sum[u &lt;&lt; 1] += lazy[u] * (len - len / 2);
+    sum[u &lt;&lt; 1 | 1] += lazy[u] * (len / 2);
+    lazy[u] = 0;
+}
+
+void update_range(int u, int l, int r, int ql, int qr, long long c) {
+    if (ql &lt;= l &amp;&amp; r &lt;= qr) {        // 完全覆盖，打标记就返回
+        sum[u] += c * (r - l + 1);
+        lazy[u] += c;
+        return;
+    }
+    push_down(u, r - l + 1);
+    int mid = (l + r) &gt;&gt; 1;
+    if (ql &lt;= mid) update_range(u &lt;&lt; 1, l, mid, ql, qr, c);
+    if (qr &gt; mid)  update_range(u &lt;&lt; 1 | 1, mid + 1, r, ql, qr, c);
+    sum[u] = sum[u &lt;&lt; 1] + sum[u &lt;&lt; 1 | 1];
+}
+
+long long query_range(int u, int l, int r, int ql, int qr) {
+    if (ql &lt;= l &amp;&amp; r &lt;= qr) return sum[u];
+    push_down(u, r - l + 1);          // 查询前必须下推，否则子节点的 sum 是旧的
+    int mid = (l + r) &gt;&gt; 1;
+    long long ans = 0;
+    if (ql &lt;= mid) ans += query_range(u &lt;&lt; 1, l, mid, ql, qr);
+    if (qr &gt; mid)  ans += query_range(u &lt;&lt; 1 | 1, mid + 1, r, ql, qr);
+    return ans;
+}</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>懒标记最容易错的两处：</strong>
+            ① <code>query</code> 时忘了先 <code>push_down</code>，读到的是没有被加过的旧值；
+            ② 下推时左右儿子的长度算错（左儿子长度是 <code>len − len/2</code>，不是 <code>len/2</code>）。
+        </div>
+
+        <h3>5.3.4 离散化</h3>
+
+        <p>
+            如果坐标范围是 10<sup>9</sup>，线段树开不下。做法是把所有会用到的坐标收集起来排序去重，
+            用下标代替原值——这样 n 个坐标就压进 [1, n]。
+        </p>
+
+        <pre><code class="language-cpp">vector&lt;int&gt; xs;
+// 收集所有坐标后：
+sort(xs.begin(), xs.end());
+xs.erase(unique(xs.begin(), xs.end()), xs.end());
+int id = lower_bound(xs.begin(), xs.end(), x) - xs.begin() + 1;   // 原值 → 下标</code></pre>
+
+        <h3>5.3.5 练习路线</h3>
+
+        <table>
+            <thead><tr><th>难度</th><th>题目</th></tr></thead>
+            <tbody>
+                <tr><td>简单</td><td>HDU 1166（单点修改+区间查询）、HDU 1394、HDU 1698、HDU 1754（区间最值）、POJ 2182（用线段树找第 k 个空位）</td></tr>
+                <tr><td>中等</td><td>HDU 1540（区间连续长度）、HDU 1823、HDU 4027、POJ 2155（二维树状数组/线段树）、POJ 2528（离散化+染色）</td></tr>
+                <tr><td>综合</td><td>HDU 1255、HDU 1542（扫描线求矩形面积）、HDU 3642、HDU 3974、HDU 4578（多种懒标记）</td></tr>
+            </tbody>
+        </table>
+
+        <h2>5.4 树状数组</h2>
+
+        <p>
+            树状数组（Binary Indexed Tree，BIT）利用整数的二进制特征做检索，代码极短，常数极小。
+        </p>
+
+        <p>
+            它支持两个操作：<strong>add(k, x)</strong> 把 a<sub>k</sub> 加上 x；<strong>sum(x)</strong> 求 a<sub>1</sub>+…+a<sub>x</sub>。
+            区间和 a<sub>i</sub>+…+a<sub>j</sub> = sum(j) − sum(i−1)。
+        </p>
+
+        <pre><code class="language-cpp">int n, bit[MAXN];
+
+inline int lowbit(int x) { return x &amp; -x; }   // 取出最低位的 1
+
+void add(int k, int x) {                       // 单点加
+    for (; k &lt;= n; k += lowbit(k)) bit[k] += x;
+}
+
+int sum(int x) {                               // 前缀和
+    int s = 0;
+    for (; x &gt; 0; x -= lowbit(x)) s += bit[x];
+    return s;
+}
+
+int range_sum(int l, int r) { return sum(r) - sum(l - 1); }</code></pre>
+
+        <div class="callout callout-info">
+            <strong>为什么它能工作？</strong>下标 k 的节点维护的是“以 k 结尾、长度为 lowbit(k)”的那一段和。
+            查询时每次减去 lowbit，正好把前缀拆成 log n 段；更新时每次加上 lowbit，正好把所有覆盖它的节点都更新。
+            两边的步数都是 O(log n)。
+        </div>
+
+        <p>
+            树状数组的局限很明确：它只适合<strong>可减、可结合</strong>的信息（和、异或、计数）。
+            区间最值这种“不可减”的信息，必须用线段树。需要区间加 + 区间求和时，要用两个树状数组（差分）。
+        </p>
+
+        <h2>自测清单</h2>
+        <table>
+            <thead><tr><th>问题</th><th>要点</th></tr></thead>
+            <tbody>
+                <tr><td>并查集的 <code>find</code> 为什么要压缩路径？</td><td>否则极端情况退化成 O(n) 的链</td></tr>
+                <tr><td>线段树为什么开 4n？</td><td>n 非 2 的幂时末层有空洞，编号可能超过 2n</td></tr>
+                <tr><td>懒标记在查询时为什么必须下推？</td><td>子节点的 sum 还没包含父区间的增量</td></tr>
+                <tr><td>树状数组为什么不能求区间最值？</td><td>最值不可减，无法用 sum(r)−sum(l−1) 得到</td></tr>
+                <tr><td>Treap 靠什么保持平衡？</td><td>随机优先级 + 旋转维持堆性质</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习题</h2>
+        <ol>
+            <li>实现并查集，处理 10<sup>5</sup> 次合并与查询，统计最终集合个数。</li>
+            <li>HDU 1166 敌兵布阵：用线段树和树状数组各写一遍，比较代码长度与运行时间。</li>
+            <li>POJ 2182 Lost Cows：用线段树“找第 k 个未占用的位置”，体会 <code>tree[u].len</code> 的作用。</li>
+            <li>写一个带懒标记的区间加、区间求和线段树，自己造对拍数据与暴力版本比对。</li>
+            <li>用 Treap 实现一个“可重集合”，支持插入、删除、查第 k 小、查 x 的排名。</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="04-搜索技术.html">← 第 4 章 搜索技术</a>
+            <a href="06-基础算法思想.html">第 6 章 基础算法思想 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

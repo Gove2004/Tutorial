@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>第 1 章 算法竞赛入门与训练方法 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="index.html">← 上一章</a>
+        <a href="02-复杂度与算法评估.html">下一章 →</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>第 1 章 算法竞赛入门与训练方法</h1>
+
+        <p class="intro">
+            这一章不教算法。它解决的是更前面的问题：你写的代码为什么会错？错在哪里？什么样的训练方式能让能力真正长起来？
+            很多人卡在“刷了两百题还是青铜”，原因往往不在算法，而在判题机制、输入输出细节和调试方法上。
+        </p>
+
+        <div class="definition">
+            <h4>学完本章，你应该能做到</h4>
+            <ul>
+                <li>说清 ICPC/CCPC 的赛制，知道一场比赛的时间里到底在比什么；</li>
+                <li>解释 OJ 判一道题“正确”的含义，理解测试数据为什么比题面更重要；</li>
+                <li>正确处理多组输入、文件重定向、大数据量 I/O，不再因为 <code>cin</code> 慢而 TLE；</li>
+                <li>用“对拍”验证自己的程序，而不是靠肉眼盯着输出发呆；</li>
+                <li>建立自己的模板与代码规范，在赛场上少写、少错、写得快。</li>
+            </ul>
+        </div>
+
+        <h2>1.1 算法竞赛到底在比什么</h2>
+
+        <p>
+            ICPC（International Collegiate Programming Contest）与 CCPC（中国大学生程序设计竞赛）是目前国内影响力最大的两项大学生计算机竞赛。
+            三人一队、一台机器、五个小时、十道左右的题目，按通过题数与罚时分排名。这个规则直接决定了它的能力结构：
+        </p>
+
+        <table>
+            <thead><tr><th>被考察的能力</th><th>在赛场上的具体表现</th><th>怎么练</th></tr></thead>
+            <tbody>
+                <tr><td>代码量</td><td>能把一个想法在两小时内写成 150 行无 bug 的代码</td><td>大量重复写，形成肌肉记忆</td></tr>
+                <tr><td>算法知识</td><td>看到“区间加、区间求和”立刻想到线段树</td><td>按专题刷题，不是随机刷</td></tr>
+                <tr><td>计算思维与逻辑</td><td>能把现实问题抽象成图、树、状态空间</td><td>做完题写一句“这题的本质是什么”</td></tr>
+                <tr><td>团队协作</td><td>三人分工读题、一人主敲、一人验算</td><td>长期一起训练，而不是临时组队</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            原书里有一张很有名的曲线，把程序员的成长分成四个阶段：<em>hand-holding honeymoon</em>（跟着教程做，信心爆棚）、
+            <em>cliff of confusion</em>（离开教程就写不出，信心骤降）、<em>desert of despair</em>（大量练习但没有正反馈，最难受的阶段）、
+            <em>upswing of awesome</em>（能力开始自增长，越写越快）。绝大多数人放弃在第三个阶段。
+        </p>
+
+        <div class="callout callout-info">
+            <strong>一个校准坐标的方法：</strong>如果你能在区域赛现场拿到铜牌，说明你刚跨过“自由编程”的门槛；银牌以上，才算真正进入第四阶段。
+            这不是评价人的高低，而是给你一个判断“我现在的训练是否有效”的参照。
+        </div>
+
+        <h2>1.2 竞赛语言与训练平台</h2>
+
+        <p>
+            ICPC 允许的语言包括 C、C++、Java、Python、Kotlin。现实中的选择几乎只有两种：C++ 为主，Java/Python 为辅。
+            C++ 的优势是运行效率高、STL 现成可用，在时限 1 秒、数据量 10<sup>6</sup> 的题里，它常常是唯一能过的语言。
+        </p>
+
+        <h3>1.2.1 OJ：你真正的训练场</h3>
+
+        <p>
+            竞赛选手的主要学习方式是“刷题”，载体是 OJ（Online Judge，在线判题系统）。你把代码提交上去，服务器编译、运行、
+            用一组事先准备好的测试数据比对输出，返回 AC / WA / TLE / MLE / RE / CE 之一。
+        </p>
+
+        <ul>
+            <li><strong>国内常用：</strong>HDU（acm.hdu.edu.cn，第 2000–2099 题最适合入门）、洛谷（luogu.org，题目分类完整）、
+            bzoj（大视野，lydsy.com，偏难，杂题多）、POJ、NOI 系列。</li>
+            <li><strong>国外常用：</strong>Codeforces（比赛频率最高）、AtCoder、UVa、URAL、USACO。</li>
+            <li><strong>代理 Judge：</strong>通过 HTTP 调用宿主 OJ 的判题服务，把几十个 OJ 聚合成一个入口。好处是能快速做国外题、
+            某个 OJ 挂掉时还能用、以及把不同 OJ 的题混排成一场虚拟比赛。</li>
+        </ul>
+
+        <div class="callout callout-warning">
+            <strong>OJ 的核心价值有两个：题目，和判题用的测试数据。</strong>
+            测试数据的重要性不低于题面本身——同一道题的题面可能写得含糊，但数据会诚实地告诉你哪些边界是必须处理的。
+        </div>
+
+        <h2>1.3 判题与输入输出：WA 的高发区</h2>
+
+        <h3>1.3.1 判题机在比什么</h3>
+
+        <p>
+            OJ 不看你写得漂不漂亮，它只做一件事：把你的程序输出和标准输出逐字节比较（多数 OJ 会忽略行末空格与文末空行）。
+            所以下面这些看起来“无所谓”的细节，全部会判 WA：
+        </p>
+
+        <table class="comparison">
+            <thead><tr><th>写法</th><th>后果</th><th>正确做法</th></tr></thead>
+            <tbody>
+                <tr class="bad"><td><code>printf("ans=%d\n", x);</code></td><td>题面没要求输出前缀，直接 WA</td><td>只输出题面要求的内容</td></tr>
+                <tr class="bad"><td>每组数据后多打一个空行</td><td>部分 OJ 判格式错误（PE）甚至 WA</td><td>严格按样例格式</td></tr>
+                <tr class="bad"><td>浮点数直接 <code>printf("%f")</code></td><td>精度不足或输出位数不符</td><td>按题目要求位数，必要时加 1e-9 容差</td></tr>
+                <tr class="good"><td>多组数据读到 EOF 为止</td><td>题目要求“多组输入”时这是标准写法</td><td><code>while (~scanf("%d", &amp;n))</code></td></tr>
+            </tbody>
+        </table>
+
+        <h3>1.3.2 多组输入：<code>~scanf</code> 为什么能用</h3>
+
+        <p>
+            <code>scanf</code> 的返回值是“成功读入的变量个数”。读到输入结束时返回 <code>EOF</code>，而 <code>EOF</code> 在 C/C++ 里通常是 <code>-1</code>。
+            对 <code>-1</code> 按位取反得到 <code>0</code>，循环条件恰好为假。这就是 <code>while (~scanf("%d", &amp;n))</code> 的原理，
+            比 <code>while (scanf(...) != EOF)</code> 少写几个字符，也少一处手误。
+        </p>
+
+        <pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+
+int main() {
+    int n;
+    // 读到文件结束为止；一行一个整数
+    while (~scanf("%d", &amp;n)) {
+        printf("%d\n", n * 2);
+    }
+    return 0;
+}</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>不要用 <code>while (!cin.eof())</code>。</strong>
+            <code>eof()</code> 只在读失败<em>之后</em>才变为真，于是循环体会多跑一次，最后一行被重复处理。
+            这是初学者最经典的死循环式 WA。
+        </div>
+
+        <h3>1.3.3 本地调试与文件重定向</h3>
+
+        <p>
+            题目给的样例通常只有一组，手动粘贴很烦。两种做法：
+        </p>
+
+        <div class="tabs">
+            <div class="tab-buttons">
+                <button class="active">用 freopen（比赛时记得注释掉）</button>
+                <button>用命令行重定向（推荐）</button>
+            </div>
+            <div class="tab-content active">
+                <pre><code class="language-cpp">#define MYTEST   // 交题前删掉这一行
+#include &lt;bits/stdc++.h&gt;
+using namespace std;
+
+int main() {
+#ifdef MYTEST
+    freopen("test.in", "r", stdin);
+    freopen("test.out", "w", stdout);
+#endif
+    int n;
+    while (~scanf("%d", &amp;n)) printf("%d\n", n);
+    return 0;
+}</code></pre>
+                <p>缺点：忘了删 <code>#define MYTEST</code> 就直接交，服务器上不存在 test.in，立刻 RE。</p>
+            </div>
+            <div class="tab-content">
+                <pre class="terminal"><code class="language-bash"># Windows：程序体里什么都不用改
+abc.exe &lt; test.in &gt; test.out
+
+# Linux / macOS
+./abc &lt; test.in &gt; test.out</code></pre>
+                <p>代码里保持干净，靠 shell 做重定向。这是更安全的方式，也是原书推荐的“简单方法”。</p>
+            </div>
+        </div>
+
+        <h3>1.3.4 对拍：用暴力程序验证你的正解</h3>
+
+        <p>
+            “样例过了”没有任何说服力。复杂题目需要写两个程序：提交给 OJ 的正解，和一个肯定正确但很慢的暴力程序。
+            用暴力程序生成或校验数据，随机造数据，比较两份输出是否一致。这就是<strong>对拍</strong>。
+        </p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <strong>写一个造数据程序 <code>gen.cpp</code></strong>，用 <code>rand()</code> 或 <code>mt19937</code> 生成小规模输入。
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <strong>写暴力程序 <code>brute.cpp</code></strong>，允许 O(n<sup>2</sup>) 甚至指数级，只要对。
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <strong>写脚本循环：</strong>造数据 → 跑两个程序 → 比较输出 → 不一致就停并保留这组数据。
+                </div>
+            </div>
+        </div>
+
+        <pre class="terminal"><code class="language-bash"># Windows 批处理，比较两份输出（/n 表示忽略大小写差异以外的文本比较细节）
+abc.exe &lt; test.in &gt; test1.out
+abc_1.exe &lt; test.in &gt; test2.out
+fc test1.out test2.out /n
+
+# Linux
+diff test1.out test2.out</code></pre>
+
+        <p>
+            一旦 <code>fc</code> 报出差异，立刻把当前 <code>test.in</code> 存下来。这一组数据就是你正解漏掉的边界，
+            比看十遍代码有用得多。
+        </p>
+
+        <h2>1.4 编码速度：赛场上的隐形分数</h2>
+
+        <p>
+            竞赛代码通常只有几十到两百行，几个变量、几个循环、一个函数就结束。它不需要工程意义上的健壮性，
+            只需要<strong>快</strong>和<strong>对</strong>。原书列出的提速手段，多数和“写代码”本身无关：
+        </p>
+
+        <ul>
+            <li><strong>读题要快。</strong>题目是英文的，需要长期英文阅读训练。一个实用技巧是先看样例再读题面，
+            用样例反推题目的输入输出结构。</li>
+            <li><strong>三个人的机器只有一台。</strong>没轮到键盘的人在纸上写代码，不要盯着屏幕空想。</li>
+            <li><strong>减少调试。</strong>机时宝贵。尽量一次写对，用 <code>cout</code> 打印中间量，而不是单步跟踪。</li>
+            <li><strong>互相检查。</strong>把代码讲给队友听，讲着讲着往往自己就发现 bug 了。</li>
+            <li><strong>用 STL。</strong>需要排序、需要优先队列、需要平衡树的时候，直接调用，别自己造轮子。</li>
+        </ul>
+
+        <div class="callout callout-tip">
+            <strong>一个被低估的技巧：</strong>把长类型名重定义成短名字，一行能省下十几秒。<code>typedef long long ll;</code>
+            之后写 <code>ll a = 1234567890;</code> 就够了，而不用每次敲 <code>long long</code>。
+        </div>
+
+        <h3>1.4.1 模板：不是抄，是压缩</h3>
+
+        <p>
+            “模板”指的是选手整理好的代码片段，比赛时可以带纸质材料进场。典型的模板包含：万能头、快读、常用常量、
+            以及后面各章的数据结构实现（并查集、线段树、Dinic……）。
+        </p>
+
+        <p>
+            模板的价值不是让你“遇到题就抄”，而是把<strong>不需要思考的部分</strong>固定下来。真正需要思考的，永远是“这道题该用哪个模型”。
+            如果你连模型都判断不出来，模板一行也用不上。
+        </p>
+
+        <pre><code class="language-cpp">// 一份够用的起手模板
+#include &lt;bits/stdc++.h&gt;
+using namespace std;
+typedef long long ll;
+const int MAXN = 1000005;
+
+inline int read() {              // 快读：数据量上 1e6 时能省下几百毫秒
+    int x = 0, f = 1;
+    char c = getchar();
+    while (!isdigit(c)) { if (c == '-') f = -1; c = getchar(); }
+    while (isdigit(c)) { x = x * 10 + c - '0'; c = getchar(); }
+    return x * f;
+}
+
+int main() {
+    // 关闭同步，让 cin/cout 接近 scanf/printf 的速度
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    return 0;
+}</code></pre>
+
+        <h2>1.5 题目分类与杂题</h2>
+
+        <p>
+            竞赛题按知识点分类：基础题、数据结构、搜索、动态规划、数学、字符串、图论、计算几何，还有“杂题”。
+            每个现场赛通常有一到两道杂题，它不考算法，只考逻辑能力和编码能力——读完题你就会做，但写完要两百行，且到处是坑。
+        </p>
+
+        <p>
+            原书举的三个典型杂题：
+        </p>
+
+        <ul>
+            <li><strong>bzoj 1972 猪国杀</strong>——规则极其繁琐的模拟，代码量巨大；</li>
+            <li><strong>bzoj 1033 杀蚂蚁</strong>——需要精确模拟回合制过程与几何判定；</li>
+            <li><strong>bzoj 2548 灭鼠行动</strong>——状态多、边界多。</li>
+        </ul>
+
+        <p>
+            做杂题的目的不是“学会做杂题”，而是训练<strong>把一段自然语言规则完整翻译成状态机</strong>的能力。
+            这种能力在真实项目里同样有用。
+        </p>
+
+        <h2>1.6 代码规范：为了少出 bug，不为了好看</h2>
+
+        <p>
+            竞赛代码的规范目标和工程代码不同。工程上追求可维护，竞赛里追求<strong>不出错</strong>。下面几条是被反复验证有效的：
+        </p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content"><strong>用万能头文件。</strong><code>#include &lt;bits/stdc++.h&gt;</code> 覆盖了几乎所有标准头，
+                省掉漏 include 导致的编译错误。注意 POJ 不支持它，交 POJ 时要老老实实写完整头文件。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content"><strong>不用 C 风格头文件。</strong>写 <code>&lt;cstdio&gt;</code> 而不是 <code>&lt;stdio.h&gt;</code>，
+                避免全局命名空间污染带来的奇怪重定义。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content"><strong>K&amp;R 换行风格。</strong>左大括号不换行（跟在语句后面），右大括号单独一行。
+                这样同样的逻辑占的行数更少，一屏能看完的函数更不容易出错。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content"><strong>变量定义在最近使用的地方。</strong>循环变量 <code>i</code> 就定义在 <code>for</code> 里，
+                出了作用域自动失效，减少“这个 i 被谁改了”的排查成本。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">5</div>
+                <div class="step-content"><strong>少用宏。</strong>宏没有类型检查，展开时还可能出现 <code>MAX+1*2</code> 这种优先级陷阱。
+                常量用 <code>const int</code>，函数写成普通函数。</div>
+            </div>
+        </div>
+
+        <pre><code class="language-cpp">// 反例：宏的优先级陷阱
+#define DOUBLE(x) x * 2
+int r = DOUBLE(1 + 2);      // 展开成 1 + 2 * 2 = 5，不是 6
+
+// 正例
+const int MAXN = 1000005;   // 有类型、可调试、不会展开出错
+inline int twice(int x) { return x * 2; }</code></pre>
+
+        <h2>自测清单</h2>
+        <table>
+            <thead><tr><th>问题</th><th>能答上来说明</th></tr></thead>
+            <tbody>
+                <tr><td><code>while (~scanf("%d", &amp;n))</code> 中 <code>~</code> 在做什么？</td><td>理解 scanf 返回值与 EOF 的补码表示</td></tr>
+                <tr><td>为什么 <code>while (!cin.eof())</code> 会多处理一行？</td><td>理解流状态更新的时机</td></tr>
+                <tr><td>对拍的三件套分别是什么？</td><td>会用暴力验证正解，而不是只信样例</td></tr>
+                <tr><td>TLE 的常见非算法原因有哪些？</td><td>I/O 未优化、容器拷贝、死循环、递归过深</td></tr>
+                <tr><td>万能头在哪个 OJ 上不可用？</td><td>POJ</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习题</h2>
+        <ol>
+            <li>HDU 2000–2010：字符排序、成绩转换、水仙花数等。目标不是“做出来”，而是每道题都一次 AC，不出现 PE。</li>
+            <li>用 <code>freopen</code> 和命令行重定向两种方式各跑一遍同一道题，记录你更容易忘记删掉哪一种。</li>
+            <li>写一组对拍脚本，用它验证“求 n 以内素数个数”的暴力版和筛法版，在 n ≤ 1000 时结果必须完全一致。</li>
+            <li>把本章的快读模板封装成头文件，在你之后所有提交里使用，比较不加与加上的运行时间差异。</li>
+        </ol>
+
+        <details>
+            <summary>进阶：什么时候“低效算法”反而是正确选择？</summary>
+            <div class="details-content">
+                <p>
+                    原书在第 2 章给了一个真实判断：题目时限 1 秒，方案①高效算法 0.01 秒但代码 50 行、需要写 40 分钟；
+                    方案②低效算法 1 秒勉强过、代码 20 行、写 10 分钟。此时应该选②——因为赛场比的是总题数。
+                </p>
+                <p>
+                    但这个判断只在数据规模小的“签到题”上成立。绝大多数题目没有这种好运，
+                    所以它是技巧，不是策略。真正稳定的做法还是把复杂度算清楚。
+                </p>
+            </div>
+        </details>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="index.html">← 返回目录</a>
+            <a href="02-复杂度与算法评估.html">第 2 章 复杂度与算法评估 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

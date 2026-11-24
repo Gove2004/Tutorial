@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>第 2 章 复杂度与算法评估 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="01-竞赛入门与训练方法.html">← 上一章</a>
+        <a href="03-STL与基本数据结构.html">下一章 →</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>第 2 章 复杂度与算法评估</h1>
+
+        <p class="intro">
+            拿到一道题，职业选手的第一个动作不是写代码，而是看数据范围。范围决定算法，算法决定能不能过。
+            这一章讲的就是这个判断链条：资源有多少、算法算不算“算法”、复杂度怎么估、以及为什么同一个问题有两种写法会差一百倍。
+        </p>
+
+        <div class="definition">
+            <h4>学完本章，你应该能做到</h4>
+            <ul>
+                <li>看到 <code>n ≤ 10<sup>5</sup></code> 就排除 O(n<sup>2</sup>)，看到 <code>n ≤ 20</code> 就想到状压或指数搜索；</li>
+                <li>用“1 秒约 10<sup>8</sup> 次基本运算”把复杂度换算成可行性；</li>
+                <li>解释为什么 O(n/2) 要写成 O(n)，常数因子在什么情况下必须考虑；</li>
+                <li>区分“理论上更优”和“比赛里更划算”，知道什么时候可以用低效但好写的算法。</li>
+            </ul>
+        </div>
+
+        <h2>2.1 计算的资源：时间与空间</h2>
+
+        <p>
+            程序运行需要两种资源：计算时间和存储空间。资源是有限的，一个算法对这两种资源的使用程度，就是衡量它优劣的标准。
+            对应地，OJ 的题面通常会给出两个限制：
+        </p>
+
+        <pre><code class="language-plaintext">Time Limit     : 2000 / 1000 ms (Java / Others)
+Memory Limit   : 65536 / 65536 KB (Java / Others)</code></pre>
+
+        <p>
+            这两行是硬约束。程序必须在限定时间内结束，必须在限定内存内运行——超出任何一项，答案再对也拿不到分。
+            现场赛有时会故意不写这两个参数，需要选手自己判断，这时数据范围就成了唯一的线索。
+        </p>
+
+        <div class="callout callout-info">
+            <strong>1 秒有多快？</strong>一个经验值：C++ 在 1 秒内大约能完成 10<sup>8</sup> 次简单运算（加法、比较、数组访问）。
+            所以 <code>n = 10<sup>5</sup></code> 时，O(n<sup>2</sup>) 是 10<sup>10</sup> 次，必然超时；<code>n = 10<sup>6</sup></code> 时，O(n log n) 约 2×10<sup>7</sup> 次，安全。
+            这个数字会随常数、编译器、机器变化，但作为数量级判断足够用。
+        </div>
+
+        <h3>2.1.1 由数据范围倒推算法：一张对照表</h3>
+
+        <table>
+            <thead><tr><th>n 的量级</th><th>可以接受的复杂度</th><th>典型算法</th></tr></thead>
+            <tbody>
+                <tr><td>n ≤ 10</td><td>O(n!) / O(n<sup>n</sup>)</td><td>全排列枚举、暴力搜索</td></tr>
+                <tr><td>n ≤ 20</td><td>O(2<sup>n</sup>)</td><td>子集枚举、状态压缩 DP</td></tr>
+                <tr><td>n ≤ 100</td><td>O(n<sup>3</sup>)</td><td>Floyd、区间 DP</td></tr>
+                <tr><td>n ≤ 1000</td><td>O(n<sup>2</sup>)</td><td>朴素 DP、简单图算法</td></tr>
+                <tr><td>n ≤ 10<sup>5</sup></td><td>O(n log n)</td><td>排序、线段树、Dijkstra+堆、KMP</td></tr>
+                <tr><td>n ≤ 10<sup>6</sup></td><td>O(n) / O(n log n)</td><td>线性筛、树状数组、双指针</td></tr>
+                <tr><td>n ≤ 10<sup>9</sup></td><td>O(log n) / O(√n)</td><td>快速幂、二分、试除法判素数</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            这张表是“反推”的工具，不是死记硬背的规矩。它的用法是：先看题目给的最大范围，估出允许的复杂度，
+            再看哪个算法落在这个区间里。如果你想到的算法比这个区间高一档，说明思路大概率错了，或者需要优化。
+        </p>
+
+        <h2>2.2 算法的定义：五个特征</h2>
+
+        <p>
+            “程序 = 算法 + 数据结构”。算法是解决问题的逻辑、方法和过程，数据结构是数据在计算机中的存储和访问方式，
+            两者紧密结合。严格地说，一个算法是指令的有限序列，必须满足五条：
+        </p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content"><strong>输入：</strong>有零个或多个输入。程序可以没有输入（比如一个闹钟程序），但它的行为必须确定。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content"><strong>输出：</strong>有一个或多个输出。没有输出的算法没有意义。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content"><strong>有穷性：</strong>必须在执行有穷步之后结束，且每一步都在有穷时间内完成。死循环不是算法。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content"><strong>确定性：</strong>每条指令必须有确切的含义，相同输入只能得到相同输出。用了随机数的算法必须保证结果仍然确定（比如固定种子或多次取样）。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">5</div>
+                <div class="step-content"><strong>可行性：</strong>每一步操作都能通过已实现的基本操作执行有限次来完成。</div>
+            </div>
+        </div>
+
+        <div class="callout callout-warning">
+            <strong>第 5 条最容易被忽略。</strong>原书举了一个很妙的例子：珠排序（Bead Sort）用重力在 O(1) 或 O(√n) 时间里完成排序，
+            效率高得惊人，但它依赖物理过程，<em>无法编程实现</em>。在竞赛里，不能写成代码的算法等于不存在。
+        </div>
+
+        <p>
+            用冒泡排序对照这五条：输入是 n 个数的序列；输出是升序排列；有穷性体现为最多执行 O(n<sup>2</sup>) 次比较交换；
+            每一步是“比较相邻两个数，若逆序则交换”，确定且可实现。五条全部满足。
+        </p>
+
+        <h2>2.3 复杂度：怎么估，估到什么程度</h2>
+
+        <p>
+            竞赛里谈“复杂度”，默认指<strong>时间复杂度</strong>。原因是空间复杂度通常容易分析（数组开多大一目了然），
+            而时间复杂度直接关联算法的根本逻辑，更能说明程序优劣。
+        </p>
+
+        <div class="callout callout-tip">
+            <strong>复杂度的三条使用规则：</strong><br>
+            ① 它是估计，不需要精确计算。在 n 个数里找某个数，可能第一个就找到（O(1)），也可能最后一个才找到（O(n)），
+            但一律记为 O(n)，不写 O(n/2)。<br>
+            ② 常数系数被忽略。冒泡排序约 n<sup>2</sup>/2 次比较，仍记作 O(n<sup>2</sup>)。<br>
+            ③ OJ 判的是<em>整程序运行时间</em>，不是理论时间。同一个算法，不同人写出来可能差好几倍——这和第 1 章讲的 I/O、容器选择有关。
+        </div>
+
+        <h3>2.3.1 常见复杂度与它们的“手感”</h3>
+
+        <table>
+            <thead><tr><th>复杂度</th><th>含义</th><th>典型例子</th><th>n = 10<sup>6</sup> 时的大致运算次数</th></tr></thead>
+            <tbody>
+                <tr><td>O(1)</td><td>与 n 无关</td><td>公式计算、哈希定位、数组下标访问</td><td>1</td></tr>
+                <tr><td>O(log n)</td><td>每步把规模减半</td><td>二分查找、快速幂、平衡树高度</td><td>约 20</td></tr>
+                <tr><td>O(√n)</td><td>试除到 √n</td><td>判素数、枚举约数</td><td>1000</td></tr>
+                <tr><td>O(n)</td><td>线性扫描</td><td>遍历、前缀和、计数排序</td><td>10<sup>6</sup></td></tr>
+                <tr><td>O(n log n)</td><td>排序级别</td><td>sort、堆、树状数组、Dijkstra</td><td>2×10<sup>7</sup></td></tr>
+                <tr><td>O(n<sup>2</sup>)</td><td>双重循环</td><td>冒泡、选择排序、Floyd</td><td>10<sup>12</sup>（必超时）</td></tr>
+                <tr><td>O(2<sup>n</sup>)</td><td>子集枚举</td><td>状压 DP、暴力搜索</td><td>n 只能到 20 左右</td></tr>
+                <tr><td>O(n!)</td><td>全排列</td><td>next_permutation 暴力</td><td>n 只能到 10 左右</td></tr>
+            </tbody>
+        </table>
+
+        <h3>2.3.2 一个案例：同一个问题，三种复杂度</h3>
+
+        <p>
+            原书用一道题把所有东西串起来了：<strong>给出 n 个各不相同的整数，按从大到小的顺序输出其中前 m 大的数</strong>。
+            输入 <code>0 &lt; n, m &lt; 1000000</code>，数值范围 <code>[-500000, 500000]</code>，时限 1 秒，内存 32MB。
+        </p>
+
+        <p>先看最直白的做法：</p>
+
+        <pre><code class="language-cpp">// 解法一：冒泡排序，O(n^2)
+#include &lt;bits/stdc++.h&gt;
+using namespace std;
+int a[1000001];
+int n, m;
+
+void bubble_sort() {
+    for (int i = 1; i &lt;= n - 1; i++)
+        for (int j = 1; j &lt;= n - i; j++)
+            if (a[j] &gt; a[j + 1]) swap(a[j], a[j + 1]);
+}
+
+int main() {
+    while (~scanf("%d%d", &amp;n, &amp;m)) {
+        for (int i = 1; i &lt;= n; i++) scanf("%d", &amp;a[i]);
+        bubble_sort();
+        for (int i = n; i &gt;= n - m + 1; i--) {   // 从后往前打印前 m 大
+            if (i == n - m + 1) printf("%d\n", a[i]);
+            else printf("%d ", a[i]);
+        }
+    }
+    return 0;
+}</code></pre>
+
+        <p>
+            n 最大 10<sup>6</sup>，冒泡是 10<sup>12</sup> 级，实际跑起来要几十分钟。这个解法在 OJ 上必然是 TLE，
+            但它的价值是<strong>帮你确认题意</strong>——用小数据跑通，再去想更快的写法。
+        </p>
+
+        <pre><code class="language-cpp">// 解法二：sort，O(n log n)
+#include &lt;bits/stdc++.h&gt;
+using namespace std;
+int a[1000001];
+
+int main() {
+    int n, m;
+    while (~scanf("%d%d", &amp;n, &amp;m)) {
+        for (int i = 0; i &lt; n; i++) scanf("%d", &amp;a[i]);
+        sort(a, a + n);
+        for (int i = n - 1; i &gt;= n - m; i--) {
+            printf("%d", a[i]);
+            printf(i == n - m ? "\n" : " ");
+        }
+    }
+    return 0;
+}</code></pre>
+
+        <p>
+            <code>sort</code> 是内省排序（快排 + 堆排 + 插入排序的组合），n = 10<sup>6</sup> 时约 2×10<sup>7</sup> 次比较，
+            1 秒内能过。这是绝大多数人的第一选择。
+        </p>
+
+        <pre><code class="language-cpp">// 解法三：哈希计数，O(n)
+// 数值范围只有 [-500000, 500000]，把数直接映射到下标
+#include &lt;bits/stdc++.h&gt;
+using namespace std;
+const int MAXN = 1000001;
+int a[MAXN];
+
+int main() {
+    int n, m, t;
+    while (~scanf("%d%d", &amp;n, &amp;m)) {
+        memset(a, 0, sizeof(a));
+        for (int i = 0; i &lt; n; i++) {
+            scanf("%d", &amp;t);
+            a[500000 + t] = 1;        // 标记存在，不做显式排序
+        }
+        for (int i = MAXN - 1; m &gt; 0; i--) {
+            if (a[i]) {
+                if (m &gt; 1) printf("%d ", i - 500000);
+                else       printf("%d\n", i - 500000);
+                m--;
+            }
+        }
+    }
+    return 0;
+}</code></pre>
+
+        <p>
+            这个解法完全没有排序：插入是 O(1)，输出是 O(值域)。总复杂度 O(n + 值域)，在 HDU 上实测约 500ms。
+            它成立的前提是<strong>值域有限且可映射</strong>——这正是“哈希思想”的本质：用空间换时间，把比较换成定位。
+        </p>
+
+        <div class="callout callout-danger">
+            <strong>但它有两个前提，缺一不可：</strong>
+            ① 值域必须是常数级（这里 10<sup>6</sup>）；② 元素必须能作为下标（这里是整数）。
+            如果数值是 <code>10<sup>18</sup></code> 或者浮点数，这个解法直接作废，必须回到排序或离散化。
+        </div>
+
+        <table class="comparison">
+            <thead><tr><th>解法</th><th>复杂度</th><th>1 秒内能否过 n = 10<sup>6</sup></th><th>适用条件</th></tr></thead>
+            <tbody>
+                <tr class="bad"><td>冒泡排序</td><td>O(n<sup>2</sup>)</td><td>不能，差 4 个数量级</td><td>只适合 n ≤ 5000</td></tr>
+                <tr><td>sort</td><td>O(n log n)</td><td>能，约 0.5–1s</td><td>通用</td></tr>
+                <tr class="good"><td>哈希计数</td><td>O(n + V)</td><td>能，约 0.5s</td><td>值域小、可作下标</td></tr>
+            </tbody>
+        </table>
+
+        <h3>2.3.3 算法选择：不只看复杂度</h3>
+
+        <p>
+            原书在这里给了一个诚实的判断：并不是只有高效算法才“合理”。竞赛比的是<strong>在限定条件内完成更多题</strong>。
+            如果一道题时限 1 秒，低效算法刚好 1 秒能过、代码 20 行 10 分钟写完，而高效算法要 40 分钟，
+            那在赛场上就应该写低效的那个。
+        </p>
+
+        <p>
+            但这个判断成立的条件很窄：<em>数据规模小、属于签到题、且你有把握低效算法真的能过</em>。
+            对绝大多数题目，“能不能过”只有高效算法一个答案。
+        </p>
+
+        <div class="sidebar-note">
+            <strong>一个训练建议：</strong>每道题 AC 之后，在代码顶部用一行注释写下“本题复杂度 + 数据范围 + 为什么这个复杂度能过”。
+            三十道题之后，你会发现自己看数据范围的速度和直觉都会明显变快。
+        </div>
+
+        <h2>自测清单</h2>
+        <table>
+            <thead><tr><th>问题</th><th>参考答案要点</th></tr></thead>
+            <tbody>
+                <tr><td>1 秒大约对应多少次基本运算？</td><td>C++ 约 10<sup>8</sup> 次，用于数量级判断</td></tr>
+                <tr><td>n ≤ 20 时通常对应什么复杂度？</td><td>O(2<sup>n</sup>)，子集枚举或状压 DP</td></tr>
+                <tr><td>为什么 O(n/2) 写作 O(n)？</td><td>大 O 忽略常数系数，只看增长阶</td></tr>
+                <tr><td>珠排序为什么不能算竞赛意义上的算法？</td><td>不满足“可行性”：无法用基本操作编程实现</td></tr>
+                <tr><td>哈希解法在什么情况下会失效？</td><td>值域过大、元素不能作为数组下标（如浮点、大整数、字符串）</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习题</h2>
+        <ol>
+            <li>把本章“输出前 m 大的数”三种解法各写一遍，用 <code>time</code> 命令测出 n = 10<sup>5</sup>、10<sup>6</sup> 时的真实耗时，记录在你的模板里。</li>
+            <li>给定 n ≤ 1000 和 n ≤ 10<sup>5</sup> 两组限制，分别说出你会选 O(n<sup>2</sup>) 还是 O(n log n)，并解释理由。</li>
+            <li>构造一组数据，让 <code>sort</code> 在 n = 10<sup>6</sup> 时明显变慢（提示：大量重复元素），并说明为什么。</li>
+            <li>找一个值域是 <code>10<sup>9</sup></code> 的计数类问题，说明为什么不能直接开数组，替代方案是什么（提示：离散化或 map）。</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="01-竞赛入门与训练方法.html">← 第 1 章 算法竞赛入门与训练方法</a>
+            <a href="03-STL与基本数据结构.html">第 3 章 STL 与基本数据结构 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

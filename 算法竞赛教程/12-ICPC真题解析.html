@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>第 12 章 ICPC 区域赛真题解析 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="11-计算几何.html">← 上一章</a>
+        <a href="附录-模板速查.html">下一章 →</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>第 12 章 ICPC 区域赛真题解析</h1>
+
+        <p class="intro">
+            前面十一章是“零件”，这一章是“装配”。以一场真实的 ICPC 亚洲区域赛（中国大陆赛区）为样本，
+            按难度从签到题到金牌题逐题拆解，重点是<strong>读题 → 定复杂度 → 选算法 → 编码</strong>这四步在真实比赛里怎么落地。
+        </p>
+
+        <h2>12.1 亚洲区域赛（中国大陆）的基本盘</h2>
+
+        <p>
+            每年中国大陆有 4~6 个赛区，每个赛区约 250 支队伍、100 多所高校参加。奖项比例为金牌 10%、银牌 20%、铜牌 30%，
+            合计 60% 的队伍能拿奖。这个比例意味着：<strong>铜牌靠“不写错”，银牌靠“会得多”，金牌靠“想得深”</strong>。
+        </p>
+
+        <table>
+            <thead><tr><th>奖项</th><th>编码</th><th>计算思维</th><th>逻辑推理</th><th>算法知识</th><th>团队合作</th><th>总分</th></tr></thead>
+            <tbody>
+                <tr><td>铜牌</td><td>★★</td><td>★★</td><td>★★</td><td>★★</td><td>★</td><td>9</td></tr>
+                <tr><td>银牌</td><td>★★★★</td><td>★★★</td><td>★★★</td><td>★★★</td><td>★★★</td><td>16</td></tr>
+                <tr><td>金牌</td><td>★★★★★</td><td>★★★★★</td><td>★★★★★</td><td>★★★★★</td><td>★★★★★</td><td>25</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            从铜到银“比较容易”，从银到金“很难”——因为银牌只需要三个人都能稳定做题、算法知识基本齐备；
+            金牌要求三个人都能深入思考、扛得住长代码和复杂逻辑。这个判断很实用：<strong>目标定银牌，训练重点是把每章模板写熟；
+            目标定金牌，训练重点是啃难题和团队分工</strong>。
+        </p>
+
+        <h2>12.2 从 AC 时间看题目分层</h2>
+
+        <p>
+            同一场比赛的 9 道题，不同水平队伍做出它们的时间（中位值，单位：分钟）差异极大：
+        </p>
+
+        <table>
+            <thead><tr><th>队伍水平</th><th>F</th><th>K</th><th>L</th><th>A</th><th>B</th><th>D</th><th>E</th><th>G</th><th>I</th></tr></thead>
+            <tbody>
+                <tr><td>金牌（≥6 题）</td><td>7</td><td>25</td><td>48</td><td>101</td><td>97</td><td>239</td><td>229</td><td>269</td><td>270</td></tr>
+                <tr><td>银牌（5~6 题）</td><td>8</td><td>40</td><td>64</td><td>140</td><td>146</td><td>255</td><td>184</td><td>188</td><td>—</td></tr>
+                <tr><td>铜牌（4~5 题）</td><td>10</td><td>40</td><td>98</td><td>218</td><td>213</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            观察三件事：第一，<strong>F 是签到题</strong>，谁不犯错谁先拿分；第二，<strong>K、L 是分水岭</strong>，
+            铜牌和金牌在这两题上差 5~6 倍时间；第三，<strong>D、E、G、I 是金牌区的题</strong>，铜牌队伍基本放弃。
+            比赛中最重要的决策就是：<em>先扫一遍题，把 F/K/L 这三道在自己能力范围内的题锁死，再谈后面的</em>。
+        </p>
+
+        <h2>12.2.1 F 题 Friendship of Frog（hdu 5578）</h2>
+
+        <p>
+            N 只青蛙站成一排，每只用一个国家的小写字母表示，相邻青蛙距离为 1。来自同一国家的青蛙是朋友，
+            问<strong>最近的一对朋友相距多远</strong>；没有朋友输出 −1。
+        </p>
+
+        <p><strong>约束：</strong>1 ≤ T ≤ 50；1 ≤ N ≤ 1000（100% 数据）。</p>
+
+        <p>
+            这题是标准的签到题。暴力做法是枚举每一对 (i, j)，O(N<sup>2</sup>)，对 N ≤ 1000 完全够。
+            但如果 N 放大到 10<sup>5</sup>，就要换个角度：<strong>只有 26 种字母</strong>，两个相同字母的最近距离不会超过 26，
+            所以每个位置只需要向左检查 26 个字符。
+        </p>
+
+        <pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+const int N = 100010;
+char s[N];
+
+void solve() {
+    scanf("%s", s);
+    int n = strlen(s);
+    int ans = -1;
+    for (int i = 0; i &lt; n; ++i) {               // i 是当前位置
+        for (int j = 1; j &lt;= 26 &amp;&amp; i - j &gt;= 0; ++j) {
+            if (s[i] == s[i - j]) {              // 从最近的字符开始检查
+                if (ans == -1 || j &lt; ans) ans = j;
+                break;                            // 更远的不可能更优
+            }
+        }
+    }
+    printf("%d\n", ans);
+}
+
+int main() {
+    int t;
+    scanf("%d", &amp;t);
+    for (int i = 1; i &lt;= t; ++i) {
+        printf("Case #%d: ", i);
+        solve();
+    }
+    return 0;
+}</code></pre>
+
+        <div class="callout callout-info">
+            <strong>签到题的价值。</strong>它的分不在于算法，而在于<strong>不写错、不超时、输出格式正确</strong>（<code>Case #x:</code> 这种前缀漏一个就是罚时）。
+            原书给出的现场数据是 First Blood 3 分钟、铜牌队 10 分钟 AC——差距全在稳定性。
+        </div>
+
+        <h2>12.2.2 K 题 Kingdom of Black and White（hdu 5583）</h2>
+
+        <p>
+            一串 0/1 表示青蛙的颜色。把序列切成“连续同色段”，合力 = 各段长度的平方和。允许<strong>最多改变一只青蛙的颜色</strong>，
+            问合力最大能到多少。
+        </p>
+
+        <p><strong>约束：</strong>1 ≤ T ≤ 50；1 ≤ N ≤ 1000（60%）；1 ≤ N ≤ 10<sup>5</sup>（100%）。</p>
+
+        <p>
+            N 到 10<sup>5</sup> 就不能枚举“改哪一只”再重算了。关键是把字符串压缩成<strong>段长度数组</strong>：
+            <code>"000011"</code> → <code>[4, 2]</code>，合力 = 4<sup>2</sup> + 2<sup>2</sup>。此时改变颜色只影响相邻的段：
+        </p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content"><strong>段长为 1：</strong>改这只青蛙，左右两段和它自己会合并成一段。
+                变化量 = (左+1+右)<sup>2</sup> − 左<sup>2</sup> − 1 − 右<sup>2</sup>。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content"><strong>段长 ≥ 2：</strong>只能改最左或最右的那只，相当于把它“送给”相邻段，
+                分别计算两种变化量。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content"><strong>段长 ≥ 3 改中间：</strong>只会把一段拆成两段，平方和必减小，不用考虑。</div>
+            </div>
+        </div>
+
+        <pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+const int N = 100010;
+#define square(x) (x) * (x)
+
+void solve() {
+    int i, j = 1, k = 1;
+    char s[N];
+    int n;
+    long long a[N] = {0};
+    long long maxsum, oldsum = 0;
+    scanf("%s", s + 1);
+    n = strlen(s + 1);
+    for (i = 2; i &lt;= n; i++) {                  // 压缩成段长数组，例如 "00001100" → 4,2,2
+        if (s[i] == s[i - 1])
+            j++;
+        else {
+            a[k] = j;
+            k++;
+            j = 1;
+        }
+    }
+    a[k] = j;
+    for (i = 1; i &lt;= k; i++)                    // 改变颜色前的合力
+        oldsum = oldsum + a[i] * a[i];
+    maxsum = oldsum;
+    for (i = 1; i &lt;= k; i++) {
+        if (a[i] == 1) {                        // 孤立的一只：改它可与左右合并
+            maxsum = max(maxsum, oldsum + square(a[i - 1] + a[i] + a[i + 1])
+                                          - square(a[i - 1]) - square(a[i]) - square(a[i + 1]));
+        }
+        if (a[i] &gt;= 2) {                        // 只考虑改最左或最右
+            maxsum = max(maxsum, oldsum + square(a[i - 1] + 1) + square(a[i] - 1)
+                                          - square(a[i - 1]) - square(a[i]));
+            maxsum = max(maxsum, oldsum + square(a[i + 1] + 1) + square(a[i] - 1)
+                                          - square(a[i + 1]) - square(a[i]));
+        }
+    }
+    printf("%lld\n", maxsum);
+}
+
+int main() {
+    int t;
+    scanf("%d", &amp;t);
+    for (int i = 1; i &lt;= t; ++i) {
+        printf("Case #%d: ", i);
+        solve();
+    }
+    return 0;
+}</code></pre>
+
+        <p>
+            顺带一个容易忽略的点：N = 10<sup>5</sup> 且全同色时合力是 N<sup>2</sup> = 10<sup>10</sup>，
+            超过 32 位整数，必须用 <code>long long</code>。
+        </p>
+
+        <h2>12.2.3 L 题 LCM Walk（hdu 5584）</h2>
+
+        <p>
+            青蛙在无限网格上跳：在 (x, y) 处取能被 x 和 y 都整除的最小正整数 z = lcm(x, y)，
+            下一步跳到 (x+z, y) 或 (x, y+z)。给出终点 (e<sub>x</sub>, e<sub>y</sub>)，
+            问<strong>有多少个可能的起点</strong>（允许 0 次跳跃）。
+        </p>
+
+        <p><strong>约束：</strong>1 ≤ T ≤ 1000；1 ≤ e<sub>x</sub>, e<sub>y</sub> ≤ 10<sup>9</sup>。坐标范围到 10<sup>9</sup>，显然不能枚举起点。</p>
+
+        <p>
+            正向是“发散”的，逆向才有唯一路径。设当前点为 (x, y)，<code>g = gcd(x, y)</code>。关键观察是
+            <strong>沿一条跳跃路径，gcd 始终不变</strong>——因为 z = lcm(x, y) 是 g 的倍数，加完之后 gcd 仍为 g。
+        </p>
+
+        <p>
+            利用这个不变量就能反解出上一步。假设上一步只改了 x（把 x 增加了 z），那么
+            <code>x = x' + x'y/g = x'(1 + y/g)</code>，于是
+        </p>
+
+        <div class="definition">
+            <h4>反解公式</h4>
+            <p><code>x' = x·g / (g + y)</code>，同理 <code>y' = y·g / (g + x)</code>。</p>
+            <p>要求：整除、结果为正、且 <code>gcd(x', y) = g</code>（不满足就说明这条反推路径不存在）。</p>
+        </div>
+
+        <pre><code class="language-cpp">long long gcd_ll(long long a, long long b) { return b ? gcd_ll(b, a % b) : a; }
+
+int main() {
+    int T;
+    scanf("%d", &amp;T);
+    for (int cas = 1; cas &lt;= T; cas++) {
+        long long x, y;
+        scanf("%lld %lld", &amp;x, &amp;y);
+        long long ans = 1;                       // 终点本身算一个起点
+        while (true) {
+            long long g = gcd_ll(x, y);
+            bool moved = false;
+            if (x * g % (g + y) == 0) {          // x 是后加的那一维
+                long long px = x * g / (g + y);
+                if (px &gt; 0 &amp;&amp; gcd_ll(px, y) == g) { x = px; ans++; moved = true; }
+            }
+            if (!moved &amp;&amp; y * g % (g + x) == 0) {
+                long long py = y * g / (g + x);
+                if (py &gt; 0 &amp;&amp; gcd_ll(x, py) == g) { y = py; ans++; moved = true; }
+            }
+            if (!moved) break;                   // 再也退不回去了
+        }
+        printf("Case #%d: %lld\n", cas, ans);
+    }
+    return 0;
+}</code></pre>
+
+        <p>
+            手算验证：终点 (2, 8) → (2, 4) → (2, 2)，再往上无解，答案 3；
+            终点 (6, 10) → 无解，答案 1。这与题面样例一致。
+            这类“正向发散、逆向唯一”的题，先证明不变量、再解一个整除方程，比搜索快得多。
+        </p>
+
+        <h2>12.2.4 A 题 An Easy Physics Problem（hdu 5572）</h2>
+
+        <p>
+            光滑桌面上有一个固定圆柱体（圆心 O、半径 r）和一个小球。小球从 A 点以初速度 (V<sub>x</sub>, V<sub>y</sub>) 出发，
+            撞到圆柱会完全弹性反射。问小球<strong>是否会经过 B 点</strong>。
+        </p>
+
+        <p><strong>约束：</strong>1 ≤ T ≤ 100；坐标绝对值 ≤ 1000；V<sub>x</sub> ≠ 0 或 V<sub>y</sub> ≠ 0；A、B 都在圆柱外且不重合。</p>
+
+        <p>
+            这是“中等题 + 长代码”的典型：算法不难，难在<strong>把所有情况分全</strong>。分类逻辑是：
+        </p>
+
+        <ul>
+            <li><strong>不相交：</strong>如果射线 AB 方向不撞圆，或者 B 就在射线前方的同一条直线上，直接判 Yes；</li>
+            <li><strong>相切：</strong>切点不是 B，判 No；</li>
+            <li><strong>相交：</strong>求射线与圆的两个交点，取沿速度方向的第一个交点作为碰撞点；
+                再求圆心关于“碰撞点—圆心”连线的对称方向，得到反射射线，判断 B 是否落在反射射线上。</li>
+        </ul>
+
+        <p>
+            原书把这段拆成 <code>Point_line_relation</code>、<code>Seg_circle_relation</code>、<code>Line_cross_circle</code>、
+            <code>Point_line_symmetry</code> 四个小函数，判定与计算严格分离（完整代码见 <a href="11-计算几何.html">第 11 章 11.2.1 节</a>）。
+            输出用 <code>%.2f</code> 而不是 <code>%lf</code>，这类格式细节在几何题里经常是罚时来源。
+        </p>
+
+        <h2>12.2.5 B 题 Binary Tree（hdu 5573）</h2>
+
+        <p>
+            一棵无限大的完全二叉树，根标签为 1，节点 u 的左儿子是 2u、右儿子是 2u+1。国王从根出发走 K 个节点，
+            每个节点可以选择<strong>加上或减去它的标签</strong>，问能否让结果恰好等于 n。
+            输出任意一组方案（每行给出走过的标签和符号）。
+        </p>
+
+        <p><strong>约束：</strong>1 ≤ T ≤ 100；1 ≤ n ≤ 10<sup>9</sup>；n ≤ 2<sup>K</sup> ≤ 2<sup>60</sup>。</p>
+
+        <p>
+            这题的关键不是算法，而是<strong>对二进制的直觉</strong>。先算极值：一直走最左边，标签是 1,2,4,…,2<sup>K−1</sup>，
+            全取正号得 2<sup>K</sup> − 1；如果最底层改走右儿子，最后一项变成 2<sup>K−1</sup>+1，总和恰好是 2<sup>K</sup>。
+            所以 n ≤ 2<sup>K</sup> 的前提下，答案一定存在。
+        </p>
+
+        <p>
+            构造的思路不是“凑 n”，而是<strong>从极值往下减</strong>。把最左路径的总和写成一个基准值 S，
+            再把某个节点的符号从 + 改成 −，总和就会减少 <code>2×标签</code>。于是问题变成：
+            “S − n 能否用若干个 2×2<sup>i</sup> 拼出来”——这就是二进制。
+        </p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content"><strong>n 是奇数：</strong>走全左路径，标签 1,2,…,2<sup>K−1</sup>，基准 S = 2<sup>K</sup> − 1（奇数）。
+                <code>d = (S − n)/2</code> 一定是整数，转成二进制，第 i 位为 1 就把标签 2<sup>i</sup> 取负。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content"><strong>n 是偶数：</strong>最底层改走右儿子，标签变成 2<sup>K−1</sup>+1，基准 S = 2<sup>K</sup>（偶数）。
+                同样 <code>d = (S − n)/2</code> 是整数，只是第 K−1 层固定取正。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">因为 d ≤ 2<sup>K−1</sup> − 1，它的二进制不会用到第 K−1 位，所以两步都自洽。</div>
+            </div>
+        </div>
+
+        <pre><code class="language-cpp">int main() {
+    int T, K;
+    long long n;
+    scanf("%d", &amp;T);
+    for (int cas = 1; cas &lt;= T; cas++) {
+        scanf("%lld %d", &amp;n, &amp;K);
+        printf("Case #%d:\n", cas);
+        if (K == 1) { printf("1 +\n"); continue; }      // 只有 n = 1 这一种情况
+        long long d;
+        if (n &amp; 1) {
+            d = ((1LL &lt;&lt; K) - 1 - n) / 2;                // 基准 2^K - 1
+            for (int i = 0; i &lt; K; i++) {
+                long long v = 1LL &lt;&lt; i;
+                printf("%lld %c\n", v, ((d &gt;&gt; i) &amp; 1) ? '-' : '+');
+            }
+        } else {
+            d = ((1LL &lt;&lt; K) - n) / 2;                    // 基准 2^K
+            for (int i = 0; i &lt; K - 1; i++) {
+                long long v = 1LL &lt;&lt; i;
+                printf("%lld %c\n", v, ((d &gt;&gt; i) &amp; 1) ? '-' : '+');
+            }
+            printf("%lld +\n", (1LL &lt;&lt; (K - 1)) + 1);    // 最底层走右儿子
+        }
+    }
+    return 0;
+}</code></pre>
+
+        <p>
+            验证：n=5、K=3 时走全左路径，d=(7−5)/2=1，第 0 位取负 → −1+2+4=5；
+            n=10、K=4 时 d=(16−10)/2=3，第 0、1 位取负 → −1−2+4+9=10。
+            <strong>这类题在赛场上的正确顺序是：先推极值，再想“覆盖区间”的构造，最后才写代码</strong>——
+            如果一上来就试 DP，会直接卡死在 2<sup>60</sup> 的状态上。
+        </p>
+
+        <h2>12.2.6 D 题 Discover Water Tank（hdu 5575）</h2>
+
+        <p>
+            水箱被 N−1 块隔板分成 N 段，每段宽 1、底部封闭，第 i 块隔板高度 h<sub>i</sub>，水会从隔板顶部漫过去。
+            给出 M 个测量 (x, y, z)：在第 x 段、高度 y+0.5 处是否有水（z = 0 无水，z = 1 有水）。
+            问<strong>最多有多少个测量是正确的</strong>。
+        </p>
+
+        <p><strong>约束：</strong>1 ≤ N ≤ 10<sup>5</sup>，1 ≤ M ≤ 2×10<sup>5</sup>，h<sub>i</sub> ≤ 10<sup>9</sup>（100% 数据）。</p>
+
+        <p>
+            思路是“从低到高加水”：先假设一滴水都没有，此时所有 z = 0 的测量都正确，作为初始答案；
+            然后按高度从低到高处理每个 z = 1 的测量，把它所在段“灌到”该高度，此时这一段会向左右漫延，
+            并与相邻的段合并。每合并一次，就用“新增的水记录数 − 被淹掉的无水记录数”更新答案。
+        </p>
+
+        <p>
+            N·M 会爆，所以必须用数据结构把“合并”做实：相邻水箱合并成一个大水箱，
+            内部维护一段连续的“'×'（无水点）集合”，用<strong>可并堆（左偏树）</strong>支持快速合并与取最小值，
+            再配合并查集维护连通关系。总复杂度 O(N log N + N log M)。
+        </p>
+
+        <div class="callout callout-warning">
+            <strong>这题的定位：</strong>原书把它归为“难题/综合”，FB 119 分钟、金牌队 240 分钟。
+            它同时考并查集、堆、离散化思维和“按高度排序”的扫描思想——
+            如果你能把这道题独立写出来，第 5 章和第 10 章才算真正过关。
+        </div>
+
+        <h2>12.2.7 E 题 Expectation of String（hdu 5576）</h2>
+
+        <p>
+            字符串由数字和乘号 <code>*</code> 组成（<code>*</code> 在首尾时结果视为 0，否则按正常乘法计算）。
+            每次操作随机交换两个字符的位置，交换 K 次，问所有可能结果的<strong>期望值乘以 (C(n,2))<sup>K</sup></strong>，
+            即所有交换方案的结果和，对 10<sup>9</sup>+7 取模。
+        </p>
+
+        <p><strong>约束：</strong>1 ≤ T ≤ 100；L ≤ 50，K ≤ 50（100% 数据）。</p>
+
+        <p>
+            方案总数是 (C(n,2))<sup>K</sup>，最大能到 (C(50,2))<sup>50</sup>，暴力枚举不可能。
+            但 L、K 都只有 50，说明预期是一个 <strong>O(K n<sup>3</sup>)</strong> 的 DP。
+        </p>
+
+        <p>
+            先看清楚“结果”是什么：字符串里只有一个乘号，若它在首或尾则结果为 0；
+            否则结果 = 乘号左边那串数字拼成的数 × 右边那串数字拼成的数。交换 K 次后，乘号可能停在任何位置，
+            两侧的数字集合也跟着变。
+        </p>
+
+        <p>
+            所以 DP 要记录的不是“字符串长什么样”，而是<strong>“乘号在哪、两侧各有哪些数字”这件事被多少种交换序列达成</strong>。
+            状态大致是“处理到第几次交换”加“乘号位置”加“若干关键数字的位置”，转移时枚举被交换的两个位置，
+            用滚动数组压掉第一维。L、K ≤ 50 说明状态规模只有 10<sup>5</sup> 量级，O(K n<sup>3</sup>) 的转移是可行的。
+        </p>
+
+        <div class="callout callout-tip">
+            <strong>怎么验证自己想对了：</strong>取 L ≤ 4、K ≤ 2 的小数据，枚举所有 (C(n,2))<sup>K</sup> 个交换序列直接算结果求和，
+            与 DP 结果对拍。这类“统计方案”的题，只要小数据能对上，转移基本就是对的；
+            反之如果一上来就写大 DP，错了也看不出错在哪。
+        </div>
+
+        <p>
+            这题的启发是：<strong>看到“所有方案之和”先问“每种结果被统计了多少次”</strong>。
+            本题就是后者——不要真的模拟交换，而是统计每种字符分布出现的方案数。
+            （完整转移涉及三维状态，属于金牌区题目的典型复杂度，赛场上更常见的做法是先写出小数据暴力作为对拍基准。）
+        </p>
+
+        <h2>12.2.8 G 题 Game of Arrays（hdu 5579）</h2>
+
+        <p>
+            三个长度 N 的数组 A、B、C，目标是让 A<sub>i</sub> + B<sub>i</sub> = C<sub>i</sub> 对每个 i 都成立。
+            部分位置可以修改，每步只能把某个可改数字<strong>减 1</strong>（不能减成负数）。
+            Tweek 先手，双方轮流操作；等式成立时 Tweek 胜，若无论怎么改都无法成立则 Craig 胜。
+            问谁赢。
+        </p>
+
+        <p><strong>约束：</strong>1 ≤ T ≤ 2000；1 ≤ N ≤ 100（100% 数据）；数值 ≤ 10<sup>9</sup>。</p>
+
+        <p>
+            N 只有 100，这暗示可以<strong>枚举先手的第一步</strong>。先定义每个位置的“差距”：
+        </p>
+
+        <pre><code class="language-cpp">d[i] = a[i] + b[i] - c[i];      // 需要减少的量（正数表示要减）
+add[i] = a[i]*ta[i] + b[i]*tb[i];   // 该位置理论上最多能减多少
+del[i] = c[i]*tc[i];</code></pre>
+
+        <p>
+            然后写一个 <code>check()</code>：先算 <code>tot = Σ|d[i]|</code>（总共要消耗的步数）；
+            若某个位置需要的改动量超过它能提供的改动量，说明 Craig 必胜；若剩余总量已经小于等于某个单点的差距，
+            说明后手只要一直拖那一点就能阻止等式成立。最后让先手枚举第一步的每一种合法操作（3 个数组、每个位置），
+            只要存在一步使 <code>check()</code> 判定为“后手无法阻止”，先手就赢。
+        </p>
+
+        <p>
+            这是一个典型的“<strong>把博弈问题转化为判定问题</strong>”的套路：胜负条件复杂时，
+            不要硬推公式，先构造一个可判定的局面评价函数，再枚举先手第一步。
+        </p>
+
+        <h2>12.2.9 I 题 Infinity Point Sets（hdu 5581）</h2>
+
+        <p>
+            给出平面上 n 个点，统计有多少个子集<strong>不是</strong>“无限点集”。无限点集的定义：把点两两连线，
+            把线段产生的交点也加入点集，重复这一操作，如果能无限进行下去，就是无限点集。
+        </p>
+
+        <p><strong>约束：</strong>坐标在 0~10<sup>9</sup>；样例中 4 个点（正方形）输出 15（全部子集都有限），
+        5 个点（正方形 + 中心附近一点）输出 30。</p>
+
+        <p>
+            结论是只有 4 类点集是有限的：
+        </p>
+
+        <ol>
+            <li>点数 ≤ 4 的任意点集；</li>
+            <li>3 点以上共线，且线的两侧各有一个点；</li>
+            <li>4 点以上共线 + 任意一个线外的点；</li>
+            <li>5 点及以上共线。</li>
+        </ol>
+
+        <p>
+            其余情况都会“不断产生新交点”，陷入无限。于是问题变成<strong>计数</strong>：统计总子集数减去这四类子集数，
+            计数时按“共线点集的极值点”去重，避免同一个子集被多次统计。
+        </p>
+
+        <div class="callout callout-tip">
+            <strong>金牌题的样子。</strong>I 题 FB 是 197 分钟、只有部分金牌队做出。它的难点是“先把无限的条件翻译成
+            4 条可枚举的有限条件”，这需要大量草稿和反例验证。赛场上这类题的策略是：<em>先写暴力对拍小数据</em>，
+            确认结论后再编码，不要一上来就写正解。
+        </div>
+
+        <h2>12.3 这场比赛的复盘</h2>
+
+        <table>
+            <thead><tr><th>题号</th><th>核心考点</th><th>对应章节</th></tr></thead>
+            <tbody>
+                <tr><td>F</td><td>暴力 + 剪枝、输出格式</td><td>第 2 章、第 6 章</td></tr>
+                <tr><td>K</td><td>分段统计、long long 溢出</td><td>第 2 章、第 6 章</td></tr>
+                <tr><td>L</td><td>gcd/lcm、逆向思维</td><td>第 8 章</td></tr>
+                <tr><td>A</td><td>计算几何、分类讨论</td><td>第 11 章</td></tr>
+                <tr><td>B</td><td>二进制构造</td><td>第 8 章</td></tr>
+                <tr><td>D</td><td>并查集 + 可并堆 + 扫描</td><td>第 5 章、第 10 章</td></tr>
+                <tr><td>E</td><td>期望、计数 DP</td><td>第 7 章、第 8 章</td></tr>
+                <tr><td>G</td><td>博弈、枚举 + 判定</td><td>第 8 章</td></tr>
+                <tr><td>I</td><td>几何计数、结论推导</td><td>第 11 章</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            把这 9 道题按“考点”而不是“难度”重排，会发现它们正好覆盖了全书：<strong>没有一道题需要你没学过的算法，
+            但每道题都需要你把某个算法用到“恰好对”的程度</strong>。这就是区域赛的真实难度来源。
+        </p>
+
+        <h2>自测清单</h2>
+        <table>
+            <thead><tr><th>问题</th><th>要点</th></tr></thead>
+            <tbody>
+                <tr><td>签到题最常丢分的原因是什么？</td><td>输出格式、下标越界、没用 long long</td></tr>
+                <tr><td>看到 N ≤ 100，应该先想什么？</td><td>能否枚举、能否 O(N<sup>3</sup>)</td></tr>
+                <tr><td>看到 N ≤ 10<sup>5</sup>，应该先想什么？</td><td>能否排序/扫描/并查集/堆，禁止 O(N<sup>2</sup>)</td></tr>
+                <tr><td>几何题的通用策略？</td><td>先分类讨论，再把每类写成独立小函数</td></tr>
+                <tr><td>博弈题没有思路时？</td><td>构造局面判定函数，枚举先手第一步</td></tr>
+            </tbody>
+        </table>
+
+        <h2>训练建议</h2>
+        <ol>
+            <li>按本章顺序把 F、K、L 独立写一遍，控制在 30 分钟内，再用原书数据对拍。</li>
+            <li>A、B 各写一遍，重点是“分类是否漏情况”“构造是否真的覆盖整个区间”。</li>
+            <li>D、E、G、I 先自己推 30 分钟，再看题解；看懂了合上题解重写。</li>
+            <li>找一场同级别的区域赛（ICPC 官网或 HDU 上的历年题），按 5 小时模拟，记录每题首次 AC 时间，与本章表格对照。</li>
+        </ol>
+
+        <div class="callout callout-info">
+            <strong>回到开头。</strong>这套教程从第 1 章的“怎么训练”讲到这里的“怎么打一场比赛”。
+            真正决定成绩的不是你会多少算法，而是<strong>在 5 小时里，把你会的算法用对、写对、不出错</strong>。
+            前者靠读书，后者只能靠一场一场地打。
+        </div>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="11-计算几何.html">← 第 11 章 计算几何</a>
+            <a href="附录-模板速查.html">附录：模板速查与提交清单 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

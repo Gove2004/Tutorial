@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>第 9 章 字符串 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="08-数学.html">← 上一章</a>
+        <a href="10-图论.html">下一章 →</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>第 9 章 字符串</h1>
+
+        <p class="intro">
+            字符串题的难点不在“处理字符”，而在“在长文本里快速找到某个模式”。哈希、字典树、KMP、AC 自动机、
+            后缀数组，这五个工具解决的是同一件事的不同层次：从“判断两个串是否相同”，到“一次扫描匹配多个模式”。
+        </p>
+
+        <div class="definition">
+            <h4>学完本章，你应该能做到</h4>
+            <ul>
+                <li>用字符串哈希在 O(1) 内判断两个子串是否相等，并知道单哈希会被卡的原因；</li>
+                <li>用数组实现字典树，统计前缀单词数量；</li>
+                <li>独立写出 KMP 的 <code>next</code> 数组，并解释它为什么能避免回溯；</li>
+                <li>说清 AC 自动机 = 字典树 + fail 指针，理解它相对多次 KMP 的优势；</li>
+                <li>用倍增法求后缀数组，知道 <code>height</code> 数组能解决什么。</li>
+            </ul>
+        </div>
+
+        <h2>9.1 字符串基本操作</h2>
+
+        <p>
+            C++ 里用 <code>std::string</code> 就够了：<code>size()</code>、<code>substr(pos, len)</code>、<code>find(s)</code>、
+            <code>+</code> 拼接、<code>reverse</code>、<code>==</code> 比较。竞赛里需要留意的只有几个点：
+        </p>
+
+        <ul>
+            <li><code>find</code> 返回的是 <code>size_t</code>，找不到时返回 <code>string::npos</code>，别和 <code>-1</code> 直接比较；</li>
+            <li><code>getline</code> 前如果读过 <code>cin &gt;&gt;</code>，要 <code>cin.ignore()</code> 吃掉残留的换行；</li>
+            <li>字符与数字互转用 <code>'0' + d</code> 与 <code>c - '0'</code>，不要用 <code>atoi</code> 这类带异常的接口。</li>
+        </ul>
+
+        <pre><code class="language-cpp">string s = "hello";
+cout &lt;&lt; s.size() &lt;&lt; endl;              // 5
+cout &lt;&lt; s.substr(1, 3) &lt;&lt; endl;         // ell
+if (s.find("ll") != string::npos) cout &lt;&lt; "found" &lt;&lt; endl;
+reverse(s.begin(), s.end());           // olleh</code></pre>
+
+        <p>
+            <strong>典型入门题：</strong>HDU 5007（子串查找）、HDU 1238（多个字符串的最大公共子串）、
+            HDU 2055（字符与数字转换）、HDU 5938（字符串与数字转换）。
+        </p>
+
+        <h2>9.2 字符串哈希</h2>
+
+        <p>
+            问题：要在一堆字符串里快速查找某个字符串（HDU 2648 就是这类）。用 <code>map</code> 可以，
+            但字符串比较是 O(长度)。哈希的思路是：把字符串映射成一个整数，之后只比整数。
+        </p>
+
+        <p>
+            理想情况是“完美哈希”：不同字符串映射到不同整数，绝不冲突。但这要求值域不小于字符串总数，
+            实际上做不到。所以做法是取模到 [0, N)，冲突用额外结构解决（链地址法或开放寻址）。
+        </p>
+
+        <pre><code class="language-cpp">// BKDRHash：最常用的字符串哈希
+unsigned int BKDRHash(char* str) {
+    unsigned int seed = 131, hash = 0;
+    while (*str) hash = hash * seed + (*str++);
+    return hash &amp; 0x7FFFFFFF;              // 去掉符号位
+}
+
+// 子串哈希（常用写法）：预处理前缀哈希与幂
+const int BASE = 131;
+unsigned long long h[MAXN], p[MAXN];
+
+void init(string s) {
+    int n = s.size();
+    p[0] = 1;
+    for (int i = 1; i &lt;= n; i++) {
+        h[i] = h[i - 1] * BASE + (s[i - 1] - 'a' + 1);
+        p[i] = p[i - 1] * BASE;
+    }
+}
+// 子串 [l, r]（1 下标）的哈希：
+// h[r] - h[l-1] * p[r-l+1]</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>单哈希会被卡。</strong>Codeforces 上存在专门针对 <code>BASE=131</code>、模 <code>2<sup>64</sup></code> 的构造数据。
+            稳妥做法是<strong>双哈希</strong>：用两组不同的底数和模数（如 1e9+7 与 1e9+9），两个值都相等才认为相等。
+            代价是多一倍常数。
+        </div>
+
+        <p>
+            常见哈希函数有 BKDRHash、APHash、DJPHash、JSHash。竞赛里 BKDRHash 用得最多，
+            选一个奇数底数（131、13331）就能让冲突概率足够低。
+        </p>
+
+        <h2>9.3 字典树（Trie）</h2>
+
+        <p>
+            字典树把字符串按字符逐层挂到树上，公共前缀共享同一条路径。查询一个前缀对应的单词数量，就是走到那个节点、
+            返回它的计数。插入与查询都是 O(长度)。
+        </p>
+
+        <pre><code class="language-cpp">int trie[MAXN][26];      // 下标是节点编号，第二维是字符
+int num[MAXN];           // 以该节点结尾的单词数量
+int pos = 1;             // 当前新分配的节点
+
+void Insert(char str[]) {
+    int p = 0;
+    for (int i = 0; str[i]; i++) {
+        int n = str[i] - 'a';
+        if (trie[p][n] == 0) trie[p][n] = pos++;    // 没有这条边就新建节点
+        p = trie[p][n];
+        num[p]++;                                   // 经过该节点的单词 +1
+    }
+}
+
+int Find(char str[]) {                              // 返回以该串为前缀的单词数
+    int p = 0;
+    for (int i = 0; str[i]; i++) {
+        int n = str[i] - 'a';
+        if (trie[p][n] == 0) return 0;               // 断了，说明没有这个前缀
+        p = trie[p][n];
+    }
+    return num[p];
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>空间是硬约束。</strong><code>trie[MAXN][26]</code> 是 int，节点数 × 26 × 4 字节。
+            10<sup>6</sup> 个节点就要 100MB 以上，会 MLE。节点多时改用 <code>map&lt;int,int&gt;</code> 存边或压缩成邻接表。
+        </div>
+
+        <h2>9.4 KMP：单模式匹配</h2>
+
+        <p>
+            在长度 n 的文本串中找一个长度 m 的模式串。朴素做法是逐位比较，最坏 O(nm)——例如文本是
+            <code>aaaa…a</code>、模式是 <code>aaa…ab</code>，每次都要比到最后一个字符才发现不对。
+        </p>
+
+        <p>
+            KMP 的核心是 <code>next</code> 数组（也叫前缀函数）：<code>next[i]</code> 表示“模式串前 i 个字符中，
+            最长的既是前缀又是后缀的长度”。失配时不用回退文本指针，而是把模式指针跳到 <code>next[j]</code>，
+            从而复用已经匹配的部分。总复杂度 O(n+m)。
+        </p>
+
+        <pre><code class="language-cpp">// 求 next 数组（模式串 pat，长度 m，下标从 0 开始）
+void getNext(char* pat, int m, int* nxt) {
+    nxt[0] = -1;
+    int j = 0, k = -1;
+    while (j &lt; m) {
+        if (k == -1 || pat[j] == pat[k]) {
+            j++; k++;
+            nxt[j] = k;
+        } else {
+            k = nxt[k];                  // 回退到更短的前后缀
+        }
+    }
+}
+
+int kmp(char* txt, char* pat) {          // 返回第一次出现的位置，找不到返回 -1
+    int n = strlen(txt), m = strlen(pat);
+    int nxt[MAXM];
+    getNext(pat, m, nxt);
+    int i = 0, j = 0, cnt = 0;
+    while (i &lt; n) {
+        if (j == -1 || txt[i] == pat[j]) { i++; j++; }
+        else j = nxt[j];                 // 失配：模式串右滑，文本指针不动
+        if (j == m) { cnt++; j = nxt[j]; }   // 找到一个匹配，继续找下一个
+    }
+    return cnt;
+}</code></pre>
+
+        <div class="callout callout-info">
+            <strong><code>next</code> 的直观含义：</strong>模式串 <code>ababaca</code> 的 next 是
+            <code>[-1,0,0,1,2,3,0,1]</code>。当在第 6 位失配时，说明前 5 位 <code>ababa</code> 已经匹配，
+            而它的最长公共前后缀是 <code>aba</code>，所以可以直接把模式串滑到第 3 位继续比，不必从头来。
+        </div>
+
+        <p>
+            KMP 的常见扩展：求所有出现位置（每次匹配成功后 <code>j = nxt[j]</code>）、
+            求最小循环节（<code>m − nxt[m]</code>）、HDU 2594 那种“原串每个后缀与模式串的最长公共前缀”的变形。
+        </p>
+
+        <h2>9.5 AC 自动机：多模式匹配</h2>
+
+        <p>
+            有 k 个模式串、一个长文本，要找出所有模式串出现的位置。对每个模式串跑一次 KMP 是 O((n+m)k)，
+            k 大时不可接受。AC 自动机（Aho–Corasick）的思路是：把所有模式串建成一棵字典树，
+            再在树上加“失配指针”，使得扫描文本时只走一遍。
+        </p>
+
+        <div class="definition">
+            <h4>结构</h4>
+            <p><strong>字典树</strong>负责存所有模式串；<strong>fail 指针</strong>负责在失配时跳到“最长的、仍是某个模式串前缀的后缀”。
+            fail 指针的求法本质是把 KMP 的 next 思想放到树上做 BFS。</p>
+        </div>
+
+        <pre><code class="language-cpp">int trie[MAXN][26], fail[MAXN], cnt[MAXN], tot;
+
+void insert(char* s) {                       // 建字典树
+    int p = 0;
+    for (int i = 0; s[i]; i++) {
+        int c = s[i] - 'a';
+        if (!trie[p][c]) trie[p][c] = ++tot;
+        p = trie[p][c];
+    }
+    cnt[p]++;                                // 该节点是一个模式串的结尾
+}
+
+void build() {                               // BFS 求 fail 指针
+    queue&lt;int&gt; q;
+    for (int c = 0; c &lt; 26; c++)
+        if (trie[0][c]) { fail[trie[0][c]] = 0; q.push(trie[0][c]); }
+    while (!q.empty()) {
+        int u = q.front(); q.pop();
+        for (int c = 0; c &lt; 26; c++) {
+            int v = trie[u][c];
+            if (v) {
+                fail[v] = trie[fail[u]][c];   // 沿着父亲的 fail 走一步
+                q.push(v);
+            } else {
+                trie[u][c] = trie[fail[u]][c]; // 路径压缩：直接连到 fail 的对应儿子
+            }
+        }
+    }
+}
+
+int query(char* s) {                         // 扫描文本，统计匹配的模式串数
+    int p = 0, ans = 0;
+    for (int i = 0; s[i]; i++) {
+        p = trie[p][s[i] - 'a'];
+        for (int t = p; t &amp;&amp; cnt[t] != -1; t = fail[t]) {
+            ans += cnt[t];
+            cnt[t] = -1;                     // 同一个模式串只统计一次
+        }
+    }
+    return ans;
+}</code></pre>
+
+        <p>
+            复杂度：建 trie O(km)，建 fail 指针 O(km)，匹配 O(nm)——乘 m 是因为统计时要沿着 fail 链回溯。
+            相比 k 次 KMP 的 O((n+m)k)，当 m ≪ k 时优势明显。模板题是 HDU 2222 “Keywords Search”。
+        </p>
+
+        <div class="callout callout-warning">
+            <strong>两个细节：</strong>
+            ① <code>trie[u][c] = trie[fail[u]][c]</code> 这一步会“改写”原本为空的边，让匹配时不用反复跳 fail，
+            但会破坏原始 trie 结构，插入必须在 build 之前全部完成；
+            ② 统计时把 <code>cnt[t]</code> 置为 <code>-1</code> 是为了去重，题目要求“重复关键词只统计一次”时必要。
+        </div>
+
+        <h2>9.6 后缀数组</h2>
+
+        <p>
+            后缀数组（Suffix Array）把字符串的所有后缀按字典序排序，记录排名。配合 <code>height</code> 数组（相邻后缀的 LCP），
+            能在 O(n log n) 预处理后回答大量子串问题。
+        </p>
+
+        <p>
+            构造用<strong>倍增法</strong>：先按长度为 1 的子串排序，再按长度 2、4、8… 合并排序，
+            每轮用上一轮的排名作为关键字。总复杂度 O(n log<sup>2</sup> n)（用 <code>sort</code>）或 O(n log n)（用基数排序）。
+        </p>
+
+        <pre><code class="language-cpp">int sa[MAXN], rk[MAXN], oldrk[MAXN], n;
+
+bool cmp(int i, int j, int w) {
+    if (oldrk[i] != oldrk[j]) return oldrk[i] &lt; oldrk[j];
+    return oldrk[i + w] &lt; oldrk[j + w];
+}
+
+void buildSA(string s) {
+    n = s.size();
+    for (int i = 0; i &lt; n; i++) { sa[i] = i; rk[i] = s[i]; }
+    for (int w = 1; w &lt; n; w &lt;&lt;= 1) {
+        for (int i = 0; i &lt; n; i++) oldrk[i] = rk[i];
+        sort(sa, sa + n, [w](int i, int j) { return cmp(i, j, w); });
+        int p = 0;
+        rk[sa[0]] = 0;
+        for (int i = 1; i &lt; n; i++)
+            rk[sa[i]] = cmp(sa[i], sa[i - 1], w) ? p : ++p;   // 相同则排名不变
+        if (p == n - 1) break;                                // 已经全部区分开
+    }
+}</code></pre>
+
+        <p>
+            <code>height[i] = LCP(sa[i-1], sa[i])</code> 可以用一个性质线性求出：
+            <code>height[rank[i]] ≥ height[rank[i-1]] − 1</code>。有了它，任意两个后缀的 LCP 就是区间最小值，
+            再配一个 RMQ（第 5 章的线段树或 ST 表）就能 O(1) 查询。
+        </p>
+
+        <p>
+            后缀数组的典型应用：最长重复子串、不同子串个数（<code>n(n+1)/2 − Σheight</code>）、
+            最长公共子串（把两个串拼起来中间加分隔符）。
+        </p>
+
+        <h2>自测清单</h2>
+        <table>
+            <thead><tr><th>问题</th><th>要点</th></tr></thead>
+            <tbody>
+                <tr><td>单哈希为什么会被卡？</td><td>存在针对固定底数与模数的构造数据，需双哈希</td></tr>
+                <tr><td>字典树的空间复杂度怎么估？</td><td>节点数 × 字符集大小 × 指针大小</td></tr>
+                <tr><td>KMP 失配时文本指针为什么不回退？</td><td>next 数组已保证前面的部分仍然匹配</td></tr>
+                <tr><td>AC 自动机的 fail 指针含义？</td><td>最长的不失配后缀，且该后缀是某模式的前缀</td></tr>
+                <tr><td>后缀数组的 height 数组有什么用？</td><td>相邻后缀的 LCP，配合 RMQ 求任意两后缀的 LCP</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习题</h2>
+        <ol>
+            <li>HDU 2648：用 <code>map</code> 与字符串哈希两种方式实现店铺排名，比较查询速度。</li>
+            <li>实现字典树，支持插入单词与查询前缀单词数，测 10<sup>5</sup> 个单词的内存占用。</li>
+            <li>HDU 2087 / HDU 1686：用 KMP 统计模式串出现次数（可重叠与不可重叠各写一版）。</li>
+            <li>HDU 2222：AC 自动机模板题，注意去重统计。</li>
+            <li>用倍增法求后缀数组，输出 <code>sa</code> 与 <code>height</code>，并用它计算一个串的不同子串个数。</li>
+            <li>构造一组让单哈希（BASE=131，模 2<sup>64</sup>）冲突的字符串，验证双哈希能区分它们。</li>
+        </ol>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="08-数学.html">← 第 8 章 数学</a>
+            <a href="10-图论.html">第 10 章 图论 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

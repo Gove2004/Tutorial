@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>算法竞赛：从入门到进阶 · 教程总目录</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <div class="page-toolbar">
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </div>
+
+    <main>
+        <h1>算法竞赛：从入门到进阶</h1>
+        <p class="intro">
+            这套教程整理自罗勇军、郭卫斌《算法竞赛入门到进阶》（清华大学出版社）的十二个章节，
+            按“能直接上机用”的标准重新组织：每一节都给出可提交的 C++ 代码、复杂度依据、常见错误，
+            以及可以立刻去 OJ 验证的练习题。它不是书的摘要，而是把书里的知识点重新排成一条可以照着走的训练路径。
+        </p>
+
+        <p class="intro">
+            视觉风格选了 <strong>tech</strong>（技术蓝 #007acc / 深色 #4da3e0）：这套内容的主体是可提交的代码和复杂度分析，
+            属于“实操优先”的技术材料，而不是纯数学推导，所以用重心在代码块与表格上的技术主题，而不是纸质感的教学主题。
+        </p>
+
+        <div class="version-info">
+            <strong>怎么用这套教程：</strong>
+            ①每章先看开头的能力清单，确认自己会不会；②照着代码块自己敲一遍，别复制；
+            ③做完“自测清单”再翻页；④所有代码按 C++17、<code>bits/stdc++.h</code> 编写，HDU / 洛谷 / Codeforces 都能直接提交。
+            页面顶部按钮切换深浅色，选择会跨页记住。
+        </div>
+
+        <h2>十二个台阶</h2>
+        <div class="chapter-list">
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">入门</span>
+                <h3><a href="01-竞赛入门与训练方法.html">第 1 章 算法竞赛入门与训练方法</a></h3>
+                <p>ICPC/CCPC 是什么、OJ 判题的真相、输入输出的坑、对拍与暴力验证、模板与编码速度、代码规范。
+                这一章解决的不是算法问题，而是“为什么我的代码在本地对、交上去却 WA”这一类真实问题。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">入门</span>
+                <h3><a href="02-复杂度与算法评估.html">第 2 章 复杂度与算法评估</a></h3>
+                <p>时间与空间资源、大 O 记号的实际用法、由数据范围倒推算法、常数因子与 I/O 开销。
+                同一个“输出前 m 大的数”，用冒泡、快排、哈希三种写法对比，理解为什么竞赛里选算法就是选复杂度。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">入门</span>
+                <h3><a href="03-STL与基本数据结构.html">第 3 章 STL 与基本数据结构</a></h3>
+                <p>vector、stack、queue、priority_queue、list、set、map 的正确姿势与迭代器失效；
+                <code>sort</code> 的自定义比较函数怎么写才不崩；<code>next_permutation</code> 枚举全排列。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="04-搜索技术.html">第 4 章 搜索技术</a></h3>
+                <p>递归与全排列、子集与组合、BFS 的队列实现、八数码与状态图搜索、A*、双向广搜、
+                DFS 回溯与剪枝、迭代加深、IDA*。搜索是暴力与智能的分界线。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">进阶</span>
+                <h3><a href="05-高级数据结构.html">第 5 章 高级数据结构</a></h3>
+                <p>并查集（路径压缩 + 按秩合并）、二叉搜索树、Treap、Splay、线段树（点修改/区间修改/离散化/懒标记）、树状数组。
+                这一章决定你能不能做出“区间查询 + 单点更新”这一类必考题。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge intermediate">进阶</span>
+                <h3><a href="06-基础算法思想.html">第 6 章 基础算法思想</a></h3>
+                <p>贪心的证明与反例、Huffman 编码、模拟退火、分治（归并排序求逆序对、快速排序的划分）、减治法。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">核心</span>
+                <h3><a href="07-动态规划.html">第 7 章 动态规划</a></h3>
+                <p>基础 DP（硬币、0/1 背包、LCS、LIS）、记忆化搜索、区间 DP、树形 DP、数位 DP、状态压缩 DP。
+                状态定义与转移顺序是这一章全部的难点。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">核心</span>
+                <h3><a href="08-数学.html">第 8 章 数学</a></h3>
+                <p>高精度、模运算与快速幂、GCD/LCM、扩展欧几里得与二元一次不定方程、逆元、素数筛、
+                组合计数（鸽巢、杨辉三角、容斥、Fibonacci、母函数）、概率与期望、公平组合游戏（巴什、尼姆、SG 函数、威佐夫）。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">核心</span>
+                <h3><a href="09-字符串.html">第 9 章 字符串</a></h3>
+                <p>字符串基本操作、字符串哈希、字典树、KMP、AC 自动机、后缀数组（倍增法）。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">核心</span>
+                <h3><a href="10-图论.html">第 10 章 图论</a></h3>
+                <p>存储与遍历、拓扑排序、欧拉路、割点与双连通分量、Kosaraju/Tarjan 强连通、2-SAT、
+                Floyd/Bellman-Ford/SPFA/Dijkstra、Prim/Kruskal、Ford-Fulkerson/EK/Dinic、最小割、最小费用最大流、二分图匹配。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">进阶</span>
+                <h3><a href="11-计算几何.html">第 11 章 计算几何</a></h3>
+                <p>点与向量、点积叉积、点与直线、多边形、凸包（Graham/Andrew）、最近点对、旋转卡壳、半平面交、
+                圆与最小圆覆盖、三维点积叉积与最小球覆盖。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge advanced">实战</span>
+                <h3><a href="12-ICPC真题解析.html">第 12 章 ICPC 区域赛真题解析</a></h3>
+                <p>以一场真实的 ICPC 亚洲区域赛（HDU 5572–5584 一组题）为样本：读题、建模、选算法、实现、卡常与调试的完整链条。</p>
+            </div>
+
+            <div class="chapter-item">
+                <span class="chapter-badge basic">速查</span>
+                <h3><a href="附录-模板速查.html">附录：模板速查与提交清单</a></h3>
+                <p>把全书 40 多个模板压成一张表（用途 / 复杂度 / 章节），加上数据规模倒推表、
+                提交前 18 项检查、WA 的六种归因和对拍流程。比赛前扫一遍这一页，比再读一章有用。</p>
+            </div>
+
+        </div>
+
+        <h2>建议的走法</h2>
+        <table>
+            <thead>
+                <tr><th>阶段</th><th>章节</th><th>目标</th><th>大致投入</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>第一阶段：能上机</td><td>1 → 2 → 3</td><td>能在 OJ 上稳定 AC 简单题与模拟题，会估算复杂度</td><td>4–6 周，每天 1–2 题</td></tr>
+                <tr><td>第二阶段：能建模</td><td>4 → 6 → 7</td><td>看到题能想到搜索/贪心/DP 的模型，写出可对拍的正解</td><td>8–12 周</td></tr>
+                <tr><td>第三阶段：能上强度</td><td>5 → 8 → 9 → 10</td><td>掌握必考数据结构与图论/数学模板，能独立完成区域赛中档题</td><td>3–6 个月</td></tr>
+                <tr><td>第四阶段：能打比赛</td><td>11 → 12 → 附录</td><td>补齐几何短板，按真题训练读题速度与团队分工，赛前用附录过一遍清单</td><td>持续</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout callout-tip">
+            <strong>关于深度。</strong>这套教程按“系统掌握”的深度整理：概念讲清来由，代码给出完整模板，每章末尾有自测清单和练习题。
+            如果你只想速成，可以先跳过每节里的“深入”折页；但那些折页里的边界情况，恰好是比赛里 WA 的来源。
+        </div>
+
+        <h2>资料来源与约定</h2>
+        <ul>
+            <li>知识框架取自《算法竞赛入门到进阶》的章节顺序（罗勇军、郭卫斌著，清华大学出版社，2019）。</li>
+            <li>代码统一使用 C++17，头文件用 <code>&lt;bits/stdc++.h&gt;</code>；行内注释解释了每一步为什么这样写。</li>
+            <li>题目编号沿用原书引用的 HDU / 洛谷 / bzoj / POJ 题号，方便你去对应 OJ 验证。</li>
+            <li>复杂度一律给出最坏情况；平均值会单独标注，两者不混用。</li>
+        </ul>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>

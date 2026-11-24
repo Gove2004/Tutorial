@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>第 7 章 动态规划 - 算法竞赛：从入门到进阶</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/theme-tech.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('tutorial-theme');
+                var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="chapter-nav">
+        <a href="index.html">目录</a>
+        <a href="06-基础算法思想.html">← 上一章</a>
+        <a href="08-数学.html">下一章 →</a>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+    </nav>
+
+    <main>
+        <h1>第 7 章 动态规划</h1>
+
+        <p class="intro">
+            DP 不是某个具体算法，而是一种解题策略：把大问题拆成有重叠的子问题，记录子问题的答案，避免重复计算。
+            所有现场赛都有 DP，而且常常是中等题和难题的分界线。这一章的难点从来不是代码，而是“状态怎么定义”。
+        </p>
+
+        <div class="definition">
+            <h4>学完本章，你应该能做到</h4>
+            <ul>
+                <li>看到一个问题能判断它是否具有“最优子结构 + 重叠子问题”；</li>
+                <li>独立定义状态、写转移方程、确定遍历顺序与边界；</li>
+                <li>区分 0/1 背包、完全背包、多重背包的循环方向；</li>
+                <li>用记忆化搜索把指数级递归降到多项式；</li>
+                <li>写出区间 DP、树形 DP、数位 DP、状压 DP 各一个完整模板。</li>
+            </ul>
+        </div>
+
+        <h2>7.1 DP 的两种写法</h2>
+
+        <table>
+            <thead><tr><th></th><th>递推（填表）</th><th>记忆化搜索（递归）</th></tr></thead>
+            <tbody>
+                <tr><td>方向</td><td>从小到大，先算子问题</td><td>从大到小，遇到未算的才递归</td></tr>
+                <tr><td>优点</td><td>无递归开销、便于滚动数组优化</td><td>逻辑直观、只算真正用到的状态</td></tr>
+                <tr><td>缺点</td><td>要处理所有状态，可能算无用状态</td><td>递归有栈开销，深度大时可能爆栈</td></tr>
+                <tr><td>适合</td><td>状态空间规整（背包、区间）</td><td>状态空间稀疏（数位、树上路径）</td></tr>
+            </tbody>
+        </table>
+
+        <p>
+            两者本质等价。<strong>建议的顺序是：先用记忆化搜出来，确认正确，再改写成递推去优化。</strong>
+            直接想递推很容易在“遍历顺序”上卡住。
+        </p>
+
+        <h2>7.2 基础 DP</h2>
+
+        <h3>7.2.1 硬币问题：从贪心到递推</h3>
+
+        <p>
+            第 6 章用贪心解决“最少硬币”，但那只在特殊面值下成立。任意面值时，正确做法是 DP。
+            定义 <code>Min[i]</code> 为“凑出金额 i 所需的最少硬币数”，则：
+        </p>
+
+        <div class="definition">
+            <h4>转移方程</h4>
+            <p><code>Min[i] = min{ Min[i − v<sub>j</sub>] + 1 }</code>，对所有满足 <code>v<sub>j</sub> ≤ i</code> 的面值。</p>
+            <p>边界：<code>Min[0] = 0</code>，其余初始化为无穷大。</p>
+        </div>
+
+        <p>
+            以面值 1、5、10、25、50 为例。<code>Min[0] = 0</code>；加一枚 1 分硬币得到 <code>Min[1] = Min[0] + 1 = 1</code>；
+            <code>Min[5]</code> 可以由 <code>Min[4] + 1</code>（再来一枚 1 分）或 <code>Min[0] + 1</code>（一枚 5 分）得到，
+            取较小者。表填到最后，<code>Min[s]</code> 就是答案。
+        </p>
+
+        <pre><code class="language-cpp">// 最少硬币
+const int INF = 0x3f3f3f3f;
+int Min[MONEY];
+int type[] = {1, 5, 10, 25, 50};
+
+void solve() {
+    fill(Min, Min + MONEY, INF);
+    Min[0] = 0;
+    for (int i = 1; i &lt; MONEY; i++)
+        for (int j = 0; j &lt; 5; j++)
+            if (i &gt;= type[j]) Min[i] = min(Min[i], Min[i - type[j]] + 1);
+}</code></pre>
+
+        <p>
+            如果问的是“有多少种组合方案”，状态就要多一维，记录“只用前几种面值”。
+            HDU 2069 就是这类：≤100 枚硬币、金额 ≤250，用 <code>dp[金额][硬币数]</code> 做二维转移。
+        </p>
+
+        <pre><code class="language-cpp">// hdu 2069：组合方案数（限定最多 100 枚）
+const int COIN = 101, MONEY = 251;
+int dp[MONEY][COIN];
+int type[5] = {1, 5, 10, 25, 50};
+
+void solve() {
+    dp[0][0] = 1;
+    for (int i = 0; i &lt; 5; i++)                 // 枚举面值（保证组合不重复计数）
+        for (int j = 1; j &lt; COIN; j++)          // 枚举硬币枚数
+            for (int k = type[i]; k &lt; MONEY; k++)   // 枚举金额
+                dp[k][j] += dp[k - type[i]][j - 1];
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>为什么面值要放在最外层？</strong>如果金额在外层、面值在内层，同一组硬币会按不同顺序被重复计数。
+            “先枚举物品、再枚举容量”是组合计数类 DP 的通用规则。
+        </div>
+
+        <h3>7.2.2 0/1 背包</h3>
+
+        <p>
+            n 件物品，第 i 件重 w<sub>i</sub>、价值 v<sub>i</sub>，背包容量 C。每件物品只有“装”和“不装”两种选择，求最大总价值。
+        </p>
+
+        <p>
+            二维写法：<code>dp[i][j]</code> 表示“考虑前 i 件物品、容量为 j 时的最大价值”。
+        </p>
+
+        <pre><code class="language-cpp">for (int i = 1; i &lt;= n; i++)
+    for (int j = 0; j &lt;= C; j++) {
+        dp[i][j] = dp[i - 1][j];                        // 不装第 i 件
+        if (j &gt;= w[i])
+            dp[i][j] = max(dp[i][j], dp[i - 1][j - w[i]] + v[i]);   // 装
+    }</code></pre>
+
+        <p>
+            因为 <code>dp[i][*]</code> 只依赖 <code>dp[i−1][*]</code>，可以压成一维。但容量必须<strong>倒序</strong>枚举：
+        </p>
+
+        <pre><code class="language-cpp">// 0/1 背包：一维滚动数组
+for (int i = 1; i &lt;= n; i++)
+    for (int j = C; j &gt;= w[i]; j--)                     // 倒序！保证每件只用一次
+        dp[j] = max(dp[j], dp[j - w[i]] + v[i]);</code></pre>
+
+        <div class="callout callout-danger">
+            <strong>正序会变成完全背包。</strong>正序时 <code>dp[j − w[i]]</code> 已经是“本件物品已经装过”的状态，
+            等价于允许重复装同一件。这是一个必须理解透的细节，面试和笔试都爱考。
+        </div>
+
+        <table>
+            <thead><tr><th>背包类型</th><th>循环方向</th><th>含义</th></tr></thead>
+            <tbody>
+                <tr><td>0/1 背包</td><td>容量倒序</td><td>每件最多选一次</td></tr>
+                <tr><td>完全背包</td><td>容量正序</td><td>每件可选无限次</td></tr>
+                <tr><td>多重背包</td><td>按数量二进制拆分后转 0/1</td><td>每件有固定上限</td></tr>
+                <tr><td>分组背包</td><td>每组内部倒序、组间顺序</td><td>每组最多选一件</td></tr>
+            </tbody>
+        </table>
+
+        <h3>7.2.3 最长公共子序列（LCS）与最长递增子序列（LIS）</h3>
+
+        <pre><code class="language-cpp">// LCS：dp[i][j] = 前 i 个字符与前 j 个字符的 LCS 长度
+for (int i = 1; i &lt;= n; i++)
+    for (int j = 1; j &lt;= m; j++) {
+        if (a[i] == b[j]) dp[i][j] = dp[i - 1][j - 1] + 1;
+        else dp[i][j] = max(dp[i - 1][j], dp[i][j - 1]);
+    }
+
+// LIS：O(n^2) 朴素版
+for (int i = 1; i &lt;= n; i++) {
+    dp[i] = 1;
+    for (int j = 1; j &lt; i; j++)
+        if (a[j] &lt; a[i]) dp[i] = max(dp[i], dp[j] + 1);
+}
+
+// LIS：O(n log n) 贪心 + 二分（维护“长度为 k 的最小结尾”）
+int len = 0;
+for (int i = 1; i &lt;= n; i++) {
+    int pos = lower_bound(f + 1, f + len + 1, a[i]) - f;
+    f[pos] = a[i];
+    if (pos &gt; len) len = pos;
+}</code></pre>
+
+        <p>
+            LIS 的 O(n log n) 版本值得单独理解：数组 <code>f[k]</code> 存“长度为 k 的上升子序列的最小结尾值”。
+            这个数组天然单调，所以可以用二分找位置。它不是 DP 的“状态”，而是 DP 的一个压缩表示。
+        </p>
+
+        <h2>7.3 记忆化搜索：把指数变多项式</h2>
+
+        <p>
+            数塔问题：从顶走到底，每步只能走向左下或右下，求路径上数字之和的最大值。暴力是 2<sup>n</sup> 条路径。
+            但你会发现<strong>大量路径会经过同一个点</strong>，从那个点往下的答案是完全一样的。
+        </p>
+
+        <pre><code class="language-cpp">// dp[][] 初始化为 -1
+int dfs(int i, int j) {
+    if (i == n) return a[i][j];
+    if (dp[i][j] &gt;= 0) return dp[i][j];          // 记忆：算过就直接返回
+    return dp[i][j] = max(dfs(i + 1, j), dfs(i + 1, j + 1)) + a[i][j];
+}</code></pre>
+
+        <p>
+            加上 <code>if (dp[i][j] &gt;= 0)</code> 这一行，运行次数从 2<sup>n</sup> 降到 O(n<sup>2</sup>)——因为每个点只算一次。
+            <strong>这就是记忆化搜索的全部秘密：用空间换掉重复计算。</strong>
+        </p>
+
+        <div class="callout callout-tip">
+            <strong>什么时候优先用记忆化？</strong>状态转移只在少数状态下有意义时（比如数位 DP、树上路径），
+            记忆化比“把所有状态都填一遍”更省。而且它写起来就是暴力递归加一行缓存，不容易错。
+        </div>
+
+        <h2>7.4 区间 DP</h2>
+
+        <p>
+            区间 DP 的思想是：先在小区间上求出最优解，再用小区间的最优解合并出大区间的最优解。
+            经典例子是“合并石子”：n 堆石子排成一排，每次合并相邻两堆，代价为两堆之和，求合并成一堆的最小总代价。
+        </p>
+
+        <p>
+            状态 <code>dp[i][j]</code>：把区间 [i, j] 合并成一堆的最小代价。转移时枚举分割点 k：
+        </p>
+
+        <div class="definition">
+            <h4>转移方程</h4>
+            <p><code>dp[i][j] = min{ dp[i][k] + dp[k+1][j] } + sum(i, j)</code>，其中 <code>i ≤ k &lt; j</code>。</p>
+        </div>
+
+        <p>
+            关键在于<strong>遍历顺序</strong>：必须按区间长度从小到大枚举。因为计算长度 len 的区间时，要用到长度更小的区间。
+        </p>
+
+        <pre><code class="language-cpp">for (int i = 1; i &lt;= n; i++) dp[i][i] = 0;               // 长度为 1
+for (int len = 2; len &lt;= n; len++)                       // 枚举区间长度
+    for (int i = 1; i + len - 1 &lt;= n; i++) {             // 枚举左端点
+        int j = i + len - 1;
+        dp[i][j] = INF;
+        for (int k = i; k &lt; j; k++)                      // 枚举分割点
+            dp[i][j] = min(dp[i][j], dp[i][k] + dp[k + 1][j]);
+        dp[i][j] += sum[j] - sum[i - 1];                 // 本次合并的代价
+    }</code></pre>
+
+        <p>
+            复杂度 O(n<sup>3</sup>)，n ≤ 300 左右可过。如果 n 到 1000，需要用四边形不等式优化到 O(n<sup>2</sup>)，
+            那是更高阶的内容。
+        </p>
+
+        <h2>7.5 树形 DP</h2>
+
+        <p>
+            树形 DP 建立在树上，有两种方向：<strong>根 → 叶</strong>（父亲把信息传给儿子，最后在叶子上得解）
+            和 <strong>叶 → 根</strong>（儿子把信息汇总给父亲，根得到全局最优）。
+        </p>
+
+        <p>
+            经典题：给一棵有边权的树，求每个点到“离它最远的点”的距离。这需要两次 DFS：
+        </p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content"><strong>第一次 DFS（自底向上）。</strong>对每个节点 u，算出它向下的最长距离 <code>dp[u][0]</code>
+                和次长距离 <code>dp[u][1]</code>，以及最长路走的是哪个儿子。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content"><strong>第二次 DFS（自顶向下）。</strong>对每个儿子 v，它向上走的最远距离
+                <code>dp[v][2]</code> 来自“父亲向上的最远”或“父亲经过其它儿子的最远”，两者取大再加边权。</div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content"><strong>答案。</strong>每个点的最远距离 = <code>max(dp[u][0], dp[u][2])</code>。</div>
+            </div>
+        </div>
+
+        <pre><code class="language-cpp">void dfs1(int u, int fa) {                 // 自底向上：求向下的最长/次长
+    dp[u][0] = dp[u][1] = 0;
+    for (auto e : g[u]) {
+        int v = e.to, w = e.w;
+        if (v == fa) continue;
+        dfs1(v, u);
+        int len = dp[v][0] + w;
+        if (len &gt; dp[u][0]) {
+            dp[u][1] = dp[u][0];           // 原最长变次长
+            dp[u][0] = len;
+            son[u] = v;                    // 记录最长路经过的儿子
+        } else if (len &gt; dp[u][1]) {
+            dp[u][1] = len;
+        }
+    }
+}
+
+void dfs2(int u, int fa) {                 // 自顶向下：求每个点向上的最远
+    for (auto e : g[u]) {
+        int v = e.to, w = e.w;
+        if (v == fa) continue;
+        if (son[u] == v)                   // v 在父亲的最长路上，只能走次长
+            dp[v][2] = max(dp[u][1], dp[u][2]) + w;
+        else                               // v 不在最长路上，可以走最长
+            dp[v][2] = max(dp[u][0], dp[u][2]) + w;
+        dfs2(v, u);
+    }
+}</code></pre>
+
+        <div class="callout callout-warning">
+            <strong>“换根”最容易错的地方：</strong>判断儿子是否在父亲的最长路上。
+            如果不记录 <code>son[u]</code>，直接拿 <code>dp[u][0]</code> 去更新，最长路会“绕回自己”，答案偏大。
+        </div>
+
+        <p>
+            树形 DP 的另一大类是“树上选点/选边”问题，例如没有上司的舞会、树的最小支配集、树的最大独立集。
+            状态通常是 <code>dp[u][0/1]</code> 表示“u 选/不选”的最优值，转移在父子之间做取舍。
+        </p>
+
+        <h2>7.6 数位 DP</h2>
+
+        <p>
+            数位 DP 处理“在 [L, R] 范围内有多少个满足某性质的数”。这类题的 R 常常到 10<sup>18</sup>，
+            逐个枚举不可能，只能按位统计。
+        </p>
+
+        <p>
+            <strong>HDU 2089 “不要 62”。</strong>一个数如果含有 4，或者含有连续的 62，就是不吉利的。
+            给定 m、n（0 &lt; m ≤ n &lt; 10<sup>6</sup>），统计 [m, n] 内吉利数的个数。
+        </p>
+
+        <p>
+            做法：把 n 的每一位拆出来，从高位往低位递归，状态里记录“当前位是否受上界限制（ismax）”和“上一位是不是 6”。
+        </p>
+
+        <pre><code class="language-cpp">int digit[20], dp[20][2];
+
+// len：还剩几位要填；ismax：是否贴着上界；pre6：上一位是否为 6
+int dfs(int len, bool ismax, bool pre6) {
+    if (!len) return 1;                                  // 填完了，形成一个合法数
+    if (!ismax &amp;&amp; dp[len][pre6] != -1) return dp[len][pre6];
+
+    int maxx = ismax ? digit[len] : 9;                   // 不贴上限时可以填 0..9
+    int ans = 0;
+    for (int i = 0; i &lt;= maxx; i++) {
+        if (i == 4) continue;                            // 排除 4
+        if (pre6 &amp;&amp; i == 2) continue;                    // 排除连续的 62
+        ans += dfs(len - 1, ismax &amp;&amp; i == maxx, i == 6);
+    }
+    if (!ismax) dp[len][pre6] = ans;                     // 只有不受限时才能记忆
+    return ans;
+}
+
+int solve(int n) {
+    int len = 0;
+    while (n) { digit[++len] = n % 10; n /= 10; }        // 从低位往高位存
+    memset(dp, -1, sizeof(dp));
+    return dfs(len, true, false);
+}
+// 答案 = solve(r) - solve(l - 1)</code></pre>
+
+        <div class="callout callout-info">
+            <strong>为什么只有 <code>!ismax</code> 才能记忆？</strong>因为“贴着上界”的状态依赖于具体的上界数字，
+            不同的上界对应不同的答案，不能共用缓存。这是数位 DP 的核心细节。
+        </div>
+
+        <p>
+            这一章的习题里还有更难的两类：HDU 3652（含 13 且能被 13 整除）、HDU 4507（与 7 无关的数的平方和），
+            它们的共同点是“状态要多记一个模数或和”。
+        </p>
+
+        <h2>7.7 状态压缩 DP</h2>
+
+        <p>
+            当一维状态是“一个集合”，而集合大小不超过 20 时，可以用一个整数的二进制位表示这个集合——
+            这就是状压。状态数 2<sup>n</sup>，转移通常再枚举一个子集或一个元素。
+        </p>
+
+        <p>
+            <strong>POJ 3254 “Corn Fields”。</strong>M×N 的方格，有些格子不能种玉米；相邻格子不能同时种。
+            求有多少种种法（全部不种也算一种）。
+        </p>
+
+        <p>
+            按行 DP：<code>dp[i][S]</code> 表示“第 i 行的种植状态为 S”的方案数。S 的二进制第 j 位表示该行第 j 列是否种。
+            合法性检查有三层：
+        </p>
+
+        <ul>
+            <li><strong>行内：</strong>S 不能有相邻的 1，即 <code>(S &amp; (S &lt;&lt; 1)) == 0</code>；</li>
+            <li><strong>行间：</strong>相邻两行不能在同一列都种，即 <code>(S &amp; preS) == 0</code>；</li>
+            <li><strong>地形：</strong>S 不能种在贫瘠格子上，即 <code>(S &amp; bad[i]) == 0</code>。</li>
+        </ul>
+
+        <pre><code class="language-cpp">const int MOD = 1000000000;
+int bad[15];        // bad[i] 的二进制位表示第 i 行哪些格子不能种
+int dp[15][1 &lt;&lt; 12];
+
+int main() {
+    int M, N;
+    cin &gt;&gt; M &gt;&gt; N;
+    for (int i = 1; i &lt;= M; i++)
+        for (int j = 0; j &lt; N; j++) {
+            int x; cin &gt;&gt; x;
+            if (!x) bad[i] |= (1 &lt;&lt; j);       // 0 表示不能种
+        }
+
+    dp[0][0] = 1;
+    for (int i = 1; i &lt;= M; i++)
+        for (int S = 0; S &lt; (1 &lt;&lt; N); S++) {
+            if (S &amp; (S &lt;&lt; 1)) continue;      // 行内有相邻
+            if (S &amp; bad[i]) continue;         // 种在贫瘠格子
+            for (int preS = 0; preS &lt; (1 &lt;&lt; N); preS++) {
+                if (S &amp; preS) continue;       // 上下相邻
+                dp[i][S] = (dp[i][S] + dp[i - 1][preS]) % MOD;
+            }
+        }
+
+    int ans = 0;
+    for (int S = 0; S &lt; (1 &lt;&lt; N); S++) ans = (ans + dp[M][S]) % MOD;
+    cout &lt;&lt; ans &lt;&lt; endl;
+    return 0;
+}</code></pre>
+
+        <div class="callout callout-tip">
+            <strong>状压的常见优化：</strong>先把所有“行内合法”的状态预处理成一个列表，之后只在这个列表里枚举，
+            状态数会从 2<sup>N</sup> 降到接近斐波那契量级。
+        </div>
+
+        <h2>自测清单</h2>
+        <table>
+            <thead><tr><th>问题</th><th>要点</th></tr></thead>
+            <tbody>
+                <tr><td>0/1 背包的一维写法为什么要倒序枚举容量？</td><td>正序会让同一件物品被重复使用</td></tr>
+                <tr><td>组合计数时为什么把“物品”放在外层循环？</td><td>避免同一组合按不同顺序被重复计数</td></tr>
+                <tr><td>记忆化搜索为什么能把 2<sup>n</sup> 降到多项式？</td><td>每个状态只算一次，重复状态直接返回缓存</td></tr>
+                <tr><td>区间 DP 为什么按长度递增枚举？</td><td>大区间的转移依赖长度更小的区间</td></tr>
+                <tr><td>树形 DP 换根时为什么要记“最长路经过哪个儿子”？</td><td>否则儿子会沿自己的最长路绕回，答案偏大</td></tr>
+                <tr><td>数位 DP 为什么只在 <code>!ismax</code> 时记忆？</td><td>贴上界的答案依赖具体上界，不能复用</td></tr>
+                <tr><td>状压 DP 的状态数上限大约是多少？</td><td>2<sup>20</sup> 左右，再大就存不下</td></tr>
+            </tbody>
+        </table>
+
+        <h2>练习题</h2>
+        <ol>
+            <li>用 DP 重做第 6 章的硬币问题：面值任意，求最少硬币数与方案数，并与贪心结果对比。</li>
+            <li>HDU 2069：用二维 DP 求组合方案数，验证 n = 5 时答案与手算一致。</li>
+            <li>写 0/1 背包、完全背包、多重背包三个版本，用同一组数据对拍，确认差异只来自循环方向。</li>
+            <li>LIS 的 O(n log n) 解法：手工模拟 <code>f</code> 数组在 3 1 4 1 5 9 2 6 上的变化过程。</li>
+            <li>区间 DP：完成“合并石子”，再扩展到“环形石子合并”（提示：把序列复制一倍）。</li>
+            <li>数位 DP：完成 HDU 2089 与 HDU 3652，比较两者状态设计的差异。</li>
+            <li>状压 DP：完成 POJ 3254，然后加上“预处理合法状态列表”的优化，比较运行时间。</li>
+        </ol>
+
+        <details>
+            <summary>进阶：DP 的三条判断标准</summary>
+            <div class="details-content">
+                <p>
+                    拿到题先问三句：①<strong>最优子结构</strong>——大问题的最优解是否由子问题的最优解组成？
+                    ②<strong>无后效性</strong>——当前状态确定后，之后的决策是否与怎么到达这个状态无关？
+                    ③<strong>重叠子问题</strong>——不同的路径是否会反复用到同一个子问题？
+                </p>
+                <p>
+                    三条都满足，就可以 DP。缺哪一条，就该换思路：缺①考虑贪心或搜索，缺②考虑加一维状态记录更多信息，
+                    缺③说明是分治而不是 DP。
+                </p>
+            </div>
+        </details>
+    </main>
+
+    <footer class="chapter-footer">
+        <nav class="chapter-nav bottom">
+            <a href="06-基础算法思想.html">← 第 6 章 基础算法思想</a>
+            <a href="08-数学.html">第 8 章 数学 →</a>
+        </nav>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="assets/script.js"></script>
+</body>
+</html>
